@@ -1066,3 +1066,19 @@ region 态存活)满足后才批 P0/P1 实现。十个未解决证明洞诚实�
 至此"压缩基建 + RA 代价模型"方向丈量完毕,与 SRA 双审计一致:剩余 move/
 transport 税不存在 selector 级或基建槽级利润池,收益须来自表示层(值从
 第一行起在家的 SRA 形态)或 codegen 密度本身。
+
+## 2026-08-14 osslsha 活口审计收官:二道双归零,NO-GO 封存
+
+纯审计(w67,存证 docs/w67-osslsha-tie-audit.md,指挥官独立复放 digit-exact
+全过)。SHA 热块 0x8ba580(RE=0,host_static=723)的 43 SetHostFPR +
+24 实发 GetHostFPR 逐 IR id 闭合:43=14 全 V128 producer+24 U64 partial
+lane(12 对 INS)+3 入口/家间 transfer+2 terminal 发布,其中 41 条精确
+落到 15 个紧随 LoadMemory fault 点前的 fixed-home commit(另 2 条
+terminal 前);24=12 low+12 high lane。裁决:两道可消下界均=0——38 个
+unit-local producer 在现有 fault 恢复载体(v17-v27 fixed home 经
+BuildSaveStaticUniform 回写 State)下必须先提交,删除发布即 fault 存旧家;
+24 个 Get 全为 U64 跨 register class UMOV(12 条还带 offset=8),进不了
+fixed FPR alias 候选门(register_alloc_pass.cpp:1782-1799),spill_static=0
+排除压力回退。重开条件两条均落回已封存路线:per-fault FPR recipe(=已封
+FAULT_CONTEXT_RECIPE 家族)或跨 register-class SHA lane-fusion lowering
+(新基建)。**osslsha 定因活口就此清零**;67 条毛池证为形态池非可删池。
