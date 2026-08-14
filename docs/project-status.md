@@ -1093,3 +1093,16 @@ disableavx 对齐 guest 路径。8 语料匹配 99.15%+:coremark 2.31× / smallp
 差距,余量在 flags/发布模型/块边界——全在已封存方向的重开前置上。
 FEX 测量基建:orb /usr/local/fex-measure(f2e35f3+vixl+直插 FEX_BLOCKSTATS
 探针,旁路被 server 路由吞掉的 LogMan);基准参照 /usr/bin 未动。
+
+## 2026-08-14 机制级差距分解定稿:三支柱归因到具体机制
+
+存证 docs/codegen-mechanism-gap-2026-08.md(双侧确定性静态计数,SVM 桶
+exclusive 精确闭合 host_static)。2.25×(ex-stream)拆为:① alu+vector 发射
+经济性 +1.2~+2.5 h/g(差距的 60~85%,内含窄 flags 打包算术、fallback
+mov+alu 对、width bridge;FEX 同内容仅 0.4~0.7)② 状态访问模型 +0.5~+1.1
+(publish+state_read 占 SVM host 指令 25~30%,FEX SRA 恒为 0,已证不可局部
+消)③ 块边界固定税 AdvancePC 8.6~9.5% + SetLocation 4~6.3% + PushRSB
+4.2~8.6%(FEX 超块 171~2604 guest inst/块摊薄,SVM 16-block region 每块
+重付;FEX 无软件 RSB)。SVM 反优项:guest_memory −0.06~−0.21、flags 专项
+近持平、stream 0.925×。三支柱同根(SRA+超块),重开路径=封存清单前置:
+per-fault recovery recipe、长 region 成形、SRA 形态。
