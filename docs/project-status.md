@@ -1082,3 +1082,14 @@ fixed FPR alias 候选门(register_alloc_pass.cpp:1782-1799),spill_static=0
 排除压力回退。重开条件两条均落回已封存路线:per-fault FPR recipe(=已封
 FAULT_CONTEXT_RECIPE 家族)或跨 register-class SHA lane-fusion lowering
 (新基建)。**osslsha 定因活口就此清零**;67 条毛池证为形态池非可删池。
+
+## 2026-08-14 SVM/FEX 生成代码质量对比定稿:blow-up 几何均值 2.01×
+
+不依赖安静窗的口径(存证 docs/codegen-quality-vs-fex-2026-08.md,方法学
+双侧可复算):同 guest PC 比 host/guest 指令比,SVM entries 加权,FEX 用
+disableavx 对齐 guest 路径。8 语料匹配 99.15%+:coremark 2.31× / smallpt
+2.22× / sqlite 2.31× / cray 2.42× / zip7 2.78× / osslsha 3.03× / osslaes
+1.21× / **stream 0.925×(SVM 胜)**。结构性结论:move 归零也只收回一半
+差距,余量在 flags/发布模型/块边界——全在已封存方向的重开前置上。
+FEX 测量基建:orb /usr/local/fex-measure(f2e35f3+vixl+直插 FEX_BLOCKSTATS
+探针,旁路被 server 路由吞掉的 LogMan);基准参照 /usr/bin 未动。
