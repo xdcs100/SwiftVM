@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include <span>
 #include "runtime/ir/hir_builder.h"
 
 namespace swift::runtime::ir {
