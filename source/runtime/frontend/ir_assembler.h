@@ -21,9 +21,9 @@ public:
             return hir_builder->AppendInst<RetType>(op, std::forward<const Args&>(args)...);
         } else if (ir_block) {
             return ir_block->AppendInst<RetType>(op, std::forward<const Args&>(args)...);
-        } else {
-            PANIC();
         }
+        PANIC();
+        return nullptr;
     }
 
 #define INST(name, ret, ...)                                                                       \

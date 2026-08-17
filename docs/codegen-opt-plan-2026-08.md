@@ -111,6 +111,9 @@ flags 专项桶只有 0.03——**真实 flags 成本藏在 Sub/And/Or/BitExtrac
   3. sqlite 五态 + 指纹必须零回归(tie 类历史雷区)。
 - 过门再谈翻默认。预估上限就是这两项之和(coremark ~0.52 h/g),
   **达不到 parity**,只是把 P0 里还能不用改 flags 契约的部分收掉。
+- **2026-08-18 orb 复测(phasec 二进制,现成开关,不写新 pass)**:coremark
+  RE=0 `host_static` −0.131%(5 个冷块 −5/−6),RE=1 与 stream 为 0。
+  **不翻默认**。
 
 **P0-B flags 打包算术(W-β 重开,先设计后代码)**
 
@@ -136,6 +139,12 @@ flags 专项桶只有 0.03——**真实 flags 成本藏在 Sub/And/Or/BitExtrac
 - smallpt/cray 同 unit 重复 `movz+movk+mov`。ADRP/literal 已否,
   只许寄存器缓存或 loop invariant。
 - 目标:顶 unit 5–11% host。风险低。默认 OFF,密度过门再议翻盘。
+- **2026-08-18 旧算法 orb 复测**:`SVM_CONST_ADDR_CACHE=1` smallpt −0.034%、
+  cray −0.016%、coremark 0;715 个 smallpt 组只 cached=33。根因:空闲窗口把
+  第一条物化自己的 GPR 算占用,永远再要第三个空闲寄存器。
+- **已修**(master):窗口检查跳过被重映射的 def,并优先复用第一条的 GPR。
+  `CheckInstr` 硬门不变。默认仍 OFF(`=0` 回退);翻盘等 Linux 新二进制
+  密度复测 + 指纹。
 
 **间接 exit / RSB 瘦身**(旧 W-ζ)
 

@@ -91,21 +91,53 @@ void CacheConstantAddressesForBlock(
                     bool last_saw_verify_failure = false;
                     const u32 range_begin = group.candidates[first].inst->Id();
                     const u32 range_end = group.candidates[last].use_id;
-                    for (u32 target = 0; target < 32 && !cached; ++target) {
-                        if (reg_alloc->GetGprs().Get(target)) {
-                            continue;
+                    // The first materialization already owns a GPR. That slot
+                    // is dirty at the def, so a naive [first, last] scan can
+                    // never pick it and the pass used to demand a third idle
+                    // register. Skip the remapped defs themselves; gaps still
+                    // reject a target that another value reused.
+                    Vector<u32> remapped_defs{};
+                    remapped_defs.reserve(last - first + 1);
+                    for (std::size_t i = first; i <= last; ++i) {
+                        remapped_defs.push_back(group.candidates[i].inst->Id());
+                    }
+                    auto is_remapped_def = [&](u32 id) {
+                        for (u32 def_id : remapped_defs) {
+                            if (def_id == id) {
+                                return true;
+                            }
                         }
-                        bool free = true;
+                        return false;
+                    };
+                    u32 preferred = 32;
+                    if (reg_alloc->ValueType(Value{group.candidates[first].inst}) ==
+                        backend::RegAlloc::GPR) {
+                        preferred = reg_alloc->ValueGPR(
+                                            Value{group.candidates[first].inst})
+                                            .id;
+                    }
+                    auto consider_target = [&](u32 target) {
+                        if (target >= 32 || reg_alloc->GetGprs().Get(target)) {
+                            return false;
+                        }
                         for (auto& scan : list) {
-                            if (scan.Id() < range_begin || scan.Id() > range_end) {
+                            if (scan.Id() < range_begin || scan.Id() > range_end ||
+                                is_remapped_def(scan.Id())) {
                                 continue;
                             }
                             if (reg_alloc->DirtyGPR(scan.Id()).Get(target)) {
-                                free = false;
-                                break;
+                                return false;
                             }
                         }
-                        if (!free) {
+                        return true;
+                    };
+                    for (u32 step = 0; step < 33 && !cached; ++step) {
+                        const u32 target =
+                                step == 0 ? preferred : static_cast<u32>(step - 1);
+                        if (step > 0 && target == preferred) {
+                            continue;
+                        }
+                        if (!consider_target(target)) {
                             continue;
                         }
                         last_saw_free = true;
