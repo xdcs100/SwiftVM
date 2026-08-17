@@ -1106,3 +1106,16 @@ mov+alu 对、width bridge;FEX 同内容仅 0.4~0.7)② 状态访问模型 +0.5~
 重付;FEX 无软件 RSB)。SVM 反优项:guest_memory −0.06~−0.21、flags 专项
 近持平、stream 0.925×。三支柱同根(SRA+超块),重开路径=封存清单前置:
 per-fault recovery recipe、长 region 成形、SRA 形态。
+
+## 2026-08-18 Linux identity 代码质量优化方案定稿
+
+存证 docs/codegen-opt-plan-2026-08.md,取代
+docs/fex-codegen-gap-plan-2026-08.md 为现行战役。orb Linux identity +
+RE=0 重测(svm-phasec @ 91952f2 ≡ HEAD 发码):stream 0.72×、sqlite 2.18×、
+coremark 2.24×、smallpt 2.29×、cray 2.50×、zip7 2.70×、osslsha 2.94×;
+7 格几何均值 ≈2.07×(去 stream ≈2.46×)。osslaes 热 PC 离开 0x634960,沿用
+8/14 同 PC 1.21×。施工序:P0-A 现成 `SVM_RA_WIDTH_CHAIN` Linux 双态 A/B
+(不写新 pass)→ P0-B flags 打包 ALU 三分账过纸门才重开 W-β → 其后才允许
+P2 摊薄 AdvancePC;P1 状态零发射 / P3 SHA / P4 XMM 维持封存或条件开,重开
+条件写在方案 §3–§5。明确拒绝再立删 SetHost、单独 XMM 静态、selector 级
+SRA、泛化 coalescing。
