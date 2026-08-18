@@ -259,6 +259,14 @@ public:
     }
 
     void AllocateRegisters() {
+        if (FlagsRegsEnabled()) {
+            if (spill_slots.size() < 2) {
+                GrowSpillStack(2 - spill_slots.size());
+            }
+            spill_slots[0] = true;
+            spill_slots[1] = true;
+            max_spill_slot = std::max<u32>(max_spill_slot, 1);
+        }
         // Step 1: Collect live intervals
         PerfScope2 perf_collect_live{GetPerfStats2().collect_live};
         if (function) {

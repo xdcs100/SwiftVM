@@ -6,6 +6,7 @@
 #include "runtime/backend/context.h"
 #include "runtime/backend/arm64/fpcr_mode.h"
 #include "runtime/common/backedge_control.h"
+#include "runtime/common/svm_config.h"
 #include "runtime/externals/vixl/svm-vixl-prof.h"
 #include "trampolines.h"
 #include "defines.h"
@@ -16,6 +17,31 @@
 
 #define __ assembler.
 namespace swift::runtime::backend::arm64 {
+
+namespace {
+void EmitFlagsPark(MacroAssembler& assembler) {
+    if (!FlagsRegsEnabled()) {
+        return;
+    }
+    // Do not use x16/ip: halt_reg/loc_index aliases and AAPCS veneers.
+    __ Mrs(ip1, NZCV);
+    __ Orr(ip1, ip1, 1u << kFlagsNzcvParkValidBit);
+    __ Str(ip1, MemOperand(state, state_offset_flags_nzcv_park));
+    __ Str(x12, MemOperand(state, state_offset_flags_result_park));
+}
+
+void EmitFlagsUnpark(MacroAssembler& assembler, Label* skip) {
+    if (!FlagsRegsEnabled()) {
+        return;
+    }
+    __ Ldr(ip1, MemOperand(state, state_offset_flags_nzcv_park));
+    __ Tbz(ip1, kFlagsNzcvParkValidBit, skip);
+    __ Ldr(x12, MemOperand(state, state_offset_flags_result_park));
+    __ And(ip1, ip1, 0xF0000000ull);
+    __ Msr(NZCV, ip1);
+    __ Bind(skip);
+}
+}  // namespace
 
 TrampolinesArm64::TrampolinesArm64(const Config& config,
                                    const FeatureSet& features)
@@ -274,6 +300,8 @@ void TrampolinesArm64::BuildRuntimeEntry(MacroAssembler& assembler) {
         __ Ldr(pt, MemOperand(state, state_offset_pt));
     }
     __ Ldr(flags, MemOperand(state, state_offset_host_flags));
+    Label unpark_entry;
+    EmitFlagsUnpark(assembler, &unpark_entry);
     // load local
     if (config.has_local_operation) {
         __ Ldr(local, MemOperand(state, state_offset_local_buffer));
@@ -374,6 +402,7 @@ void TrampolinesArm64::BuildRuntimeEntry(MacroAssembler& assembler) {
     __ Ldr(halt_reg, MemOperand(state, state_offset_halt_reason));
     __ Cbz(halt_reg, &code_dispatcher);
     __ Bind(&label_return_host);
+    EmitFlagsPark(assembler);
     // clear execption
     __ Str(wzr, MemOperand(state, state_offset_halt_reason));
     // write back rsb
@@ -403,6 +432,7 @@ void TrampolinesArm64::BuildRuntimeEntry(MacroAssembler& assembler) {
     __ B(&label_return_host);
 
     __ Bind(&label_call_host);
+    EmitFlagsPark(assembler);
     __ Mov(ipw, static_cast<u32>(HaltReason::CallHost));
     __ Str(ipw, MemOperand(state, state_offset_halt_reason));
     __ Str(rsb_ptr, MemOperand(state, state_offset_rsb_pointer));
@@ -428,6 +458,8 @@ void TrampolinesArm64::BuildRuntimeEntry(MacroAssembler& assembler) {
     }
     __ Ldr(rsb_ptr, MemOperand(state, state_offset_rsb_pointer));
     __ Ldr(flags, MemOperand(state, state_offset_host_flags));
+    Label unpark_host;
+    EmitFlagsUnpark(assembler, &unpark_host);
     BuildRestoreStaticUniform(assembler);
 }
 

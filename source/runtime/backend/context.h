@@ -169,9 +169,11 @@ static_assert(sizeof(State::l1_code_cache) == sizeof(State::exit_request));
 constexpr u32 state_offset_spill_area = offsetof(State, spill_area);
 // FLAGS_REGS park: PSTATE and x12 last_result. Occupies spill_area[0..1]
 // so uniform offsets do not move. RA must not allocate these slots when
-// FlagsRegsEnabled().
+// FlagsRegsEnabled(). nzcv_park bit 0 is the parked-valid flag; NZCV lives
+// in bits 31:28. Unpark must Tbz-skip when the slot is still zero.
 constexpr u32 kFlagsNzcvParkSlot = 0;
 constexpr u32 kFlagsResultParkSlot = 1;
+constexpr u32 kFlagsNzcvParkValidBit = 0;
 constexpr u32 state_offset_flags_nzcv_park = state_offset_spill_area;
 constexpr u32 state_offset_flags_result_park = state_offset_spill_area + 8;
 constexpr u32 state_offset_local_buffer = offsetof(State, local_buffer);

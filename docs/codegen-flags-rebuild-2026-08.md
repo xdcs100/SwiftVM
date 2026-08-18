@@ -192,13 +192,13 @@ internal:                     # GetInternalLabel / 区内 ForwardLocal / fallthr
 - 文档锁死 fallthrough 第一字节 = internal。
 - 不过不写 trampoline。
 
-**刀 1 — 停泊槽 + trampoline park/unpark**
-- 选 §1.2 放法，只在 `=1` 读写。
-- `return_host` / `CallHost` 前：`mrs`+`stp x12, nzcv`。
-- `JitRun` 恢复 x26 之后：`ldp`+`msr`（`ip`）。
-- **先不改 translator 热路径**。`=1` 仍急切 PF/AF，只验证 park 往返后
-  func_tests 双 RE 校验和不变、coremark CRC 不变。
-- 密度允许持平。这刀只买 ABI。
+**刀 1 — 停泊槽 + trampoline park/unpark**(已落,`72ef3bb`+本刀)
+- 停泊在 `spill_area[0..1]`。`nzcv_park` bit0 = valid；第一次
+  `JitRun` 见 0 则跳过 unpark。
+- scratch 用 **x17/`ip1`**。x16/`ip` 在 `return_host` 上会毁掉
+  PIN_EXT=2 的 halt/loc 别名，func_tests 会 rc=0 秒退。
+- `=1` 热路径仍急切 PF/AF。func_tests 双 RE 校验和已过。
+- 密度允许持平(RE=1 仍是旧 FLAGS +6%，不是停泊引入的)。
 
 **刀 2 — 热 ALU 去 pack**
 - 生产者跳过 PF/AF；`AdvancePC` 不 Merge。

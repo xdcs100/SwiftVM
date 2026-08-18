@@ -115,8 +115,9 @@ void JitTranslator::ParkFlagsHot() {
     if (!FlagsRegsEnabled()) {
         return;
     }
-    __ Mrs(ip, NZCV);
-    __ Str(ip, MemOperand(state, state_offset_flags_nzcv_park));
+    __ Mrs(ip1, NZCV);
+    __ Orr(ip1, ip1, 1u << kFlagsNzcvParkValidBit);
+    __ Str(ip1, MemOperand(state, state_offset_flags_nzcv_park));
     __ Str(atomic_scratch, MemOperand(state, state_offset_flags_result_park));
 }
 
@@ -124,9 +125,13 @@ void JitTranslator::UnparkFlagsHot() {
     if (!FlagsRegsEnabled()) {
         return;
     }
+    Label skip;
+    __ Ldr(ip1, MemOperand(state, state_offset_flags_nzcv_park));
+    __ Tbz(ip1, kFlagsNzcvParkValidBit, &skip);
     __ Ldr(atomic_scratch, MemOperand(state, state_offset_flags_result_park));
-    __ Ldr(ip, MemOperand(state, state_offset_flags_nzcv_park));
-    __ Msr(NZCV, ip);
+    __ And(ip1, ip1, static_cast<u64>(HostFlags::NZCV));
+    __ Msr(NZCV, ip1);
+    __ Bind(&skip);
 }
 
 void JitTranslator::EmitSplitFlagsPublish() {
