@@ -4360,6 +4360,7 @@ TEST_CASE("guest GPR coalescing keeps publication and snapshot proofs local") {
             ExpandedProducer{OpCode::AndNot, "AndNot"},
             ExpandedProducer{OpCode::Not, "Not"},
             ExpandedProducer{OpCode::Neg, "Neg"},
+            ExpandedProducer{OpCode::GetOperand, "GetOperand"},
             ExpandedProducer{OpCode::LslImm, "LslImm"},
             ExpandedProducer{OpCode::LslValue, "LslValue"},
             ExpandedProducer{OpCode::LsrImm, "LsrImm"},
@@ -4413,6 +4414,8 @@ TEST_CASE("guest GPR coalescing keeps publication and snapshot proofs local") {
                 });
             case OpCode::Neg:
                 return block->Neg(load_scalar(0x123456789abcdef0ull)).SetType(type);
+            case OpCode::GetOperand:
+                return block->GetOperand(Operand{load_scalar(0x1000)}).SetType(type);
             case OpCode::LslImm:
                 return block->LslImm(load_scalar(0x123456789abcdef0ull), Imm{5u})
                         .SetType(type);

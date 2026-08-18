@@ -42,6 +42,7 @@ bool IsHostCoalesceProducer(ir::OpCode op, bool width_chain) {
         case O::Div:
         case O::Not:
         case O::Neg:
+        case O::GetOperand:
         case O::LslImm:
         case O::LslValue:
         case O::LsrImm:
