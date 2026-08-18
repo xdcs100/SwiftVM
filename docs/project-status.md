@@ -1119,3 +1119,8 @@ coremark 2.24×、smallpt 2.29×、cray 2.50×、zip7 2.70×、osslsha 2.94×;
 P2 摊薄 AdvancePC;P1 状态零发射 / P3 SHA / P4 XMM 维持封存或条件开,重开
 条件写在方案 §3–§5。明确拒绝再立删 SetHost、单独 XMM 静态、selector 级
 SRA、泛化 coalescing。
+
+**2026-08-18 P0 纸面推进**:`WIDTH_CHAIN` 与修后 `CONST_ADDR_CACHE` Linux 密度均不翻默认。
+纸门 1 过(coremark pack 89.82%/zip7 75.07%)。纸门 2–4 设计见
+docs/codegen-p0b-flags-repr-2026-08.md:RE=0 上换 live-out 是空操作,必须改
+发布 ABI 为 last_result token;下一刀只读选家,不写发射路径。

@@ -69,7 +69,7 @@ identity 已把访存税从 mac 账里抠掉一截(stream 最明显)。剩下的
 
 | 级 | 机制 | 代表 Δh/g(SVM−FEX) | 状态 | 第一刀 |
 | --- | --- | --- | --- | --- |
-| **P0** | 发射经济性:flags 打包 ALU + 宽度桥 | coremark alu+xport 1.93 vs FEX 0.88(**+1.05**) | 半开:宽度可测;打包算术封在 flags 表示 | 先拆账,再决定翻 `SVM_RA_WIDTH_CHAIN` / 重开 W-β |
+| **P0** | 发射经济性:flags 打包 ALU + 宽度桥 | coremark alu+xport 1.93 vs FEX 0.88(**+1.05**) | 半开:宽度不翻;纸门 1 过,2–4 设计见 docs/codegen-p0b-flags-repr-2026-08.md | 下一刀=只读选 last_result 家,再写 OFF spike |
 | **P1** | 状态访问(publish+read) | +0.55~1.10,FEX=0 | **封存** | 禁止删 commit;重开 = fault recipe |
 | **P2** | 块边界税(AdvancePC/SetLocation/PushRSB) | AdvPC 0.22~0.47 | 条件开 | 必须 flags 先行,否则边内部化净账≈0 |
 | **P3** | osslsha SHA 形态 | 2.94× 整格;热块 4.14 vs 1.21 | **封存** | lane-fusion 新基建或 P1 recipe |
@@ -131,6 +131,29 @@ flags 专项桶只有 0.03——**真实 flags 成本藏在 Sub/And/Or/BitExtrac
      障碍清单逐条有载体;
   4. 开关 `SVM_FLAGS_REGS=0` 现场回退,默认 OFF 交付。
 - 未过纸门 = 维持封存。禁止「先合入再看数」。
+- **2026-08-18 纸门 1 过**(orb Linux identity,RE=0,`SVM_DENSITY_PROF`+`SVM_RA_HOT_COALESCE_ALL`,新二进制)。
+  `svm-gap-op` 追加 `alu_role`/`pack_b`/`alu_b`/`addr_b`(仅探针行,零发码):
+  无非伪 use 且带 flags → 整段 pack;值 use 全是 EA → addr;其余带 flags
+  的算 4B 真 ALU、余下 pack。entries 加权 host 指令:
+
+  | | Sub+And+Or | pack | alu | addr | pack% |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | coremark | 7.543B | 6.775B | 0.768B | 164 | **89.82%** |
+  | zip7 | 67.695B | 50.821B | 16.375B | 0.499B | **75.07%** |
+
+  两格均 ≥60%。coremark 三 opcode 占程序 host 17.12%,其中 pack 15.38%
+  (相对 FEX 的 +1.05 alu+xport 大头坐实是打包算术,不是真 SUB/AND/OR)。
+  zip7 And 单独只有 45% pack,但三项合计仍过门。地址桶可忽略。
+  **纸门 2–4 设计已落**(docs/codegen-p0b-flags-repr-2026-08.md),仍不写发射路径:
+  - 门 2:必须改发布 ABI。热路径只留 1 条置 NZCV ALU + last_result;PF/AF/Merge 不挂在
+    `Sub`/`And`/`Or` 上,也禁止搬到 `AdvancePC` 充数。
+  - 否掉 W-β.1(用 `ComputeFunctionLiveIn` 换 `needed=All`):`RE=0` 且
+    `SVM_FUNC_LAZY=1` 时每单元 1 块,后继 unknown → 仍是 All,战役分子上空操作。
+  - 门 3:W81 latch + per-block fault map 可复用;缺的是 token→x26 配方,
+    不是再做 latch。`FLAGS_REGS=1` 隐含 latch,不翻 P1 `BACKEDGE_FLAGS`。
+  - 门 4:新 `SVM_FLAGS_REGS` 默认 OFF,`=0` 回今天的 x26 急切打包。
+  - **挡发射**:last_result 的 GPR 家未选(推荐可分配池再钉 1 枚;禁 x25/x27/
+    pin 家)。下一刀=只读池扫描。
 
 ### 2.3 独立小项(不挡 P0-A)
 
@@ -143,8 +166,12 @@ flags 专项桶只有 0.03——**真实 flags 成本藏在 Sub/And/Or/BitExtrac
   cray −0.016%、coremark 0;715 个 smallpt 组只 cached=33。根因:空闲窗口把
   第一条物化自己的 GPR 算占用,永远再要第三个空闲寄存器。
 - **已修**(master):窗口检查跳过被重映射的 def,并优先复用第一条的 GPR。
-  `CheckInstr` 硬门不变。默认仍 OFF(`=0` 回退);翻盘等 Linux 新二进制
-  密度复测 + 指纹。
+  `CheckInstr` 硬门不变。默认仍 OFF(`=0` 回退)。
+- **2026-08-18 Linux 新二进制复测**(修后算法,RE=0,identity):
+  smallpt host_dynamic −0.078%(44/44 potential cached,776 occ,no_free=0);
+  cray −0.017%(50/50,1076 occ);coremark ≈0(25/25,432 occ)。
+  窗口 bug 已收尽可缓存池,但池本身仍是个位数万分比,**不翻默认**。
+  指纹门未跑(OFF 路径零变化;ON 翻盘才需要)。
 
 **间接 exit / RSB 瘦身**(旧 W-ζ)
 
