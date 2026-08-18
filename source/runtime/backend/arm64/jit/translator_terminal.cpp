@@ -47,13 +47,11 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
                 EmitRegionEdge(term.next);
                 return;
             }
-            if (!(FlagsRegsEnabled() && IsSelfEdge(term.next))) {
-                MergeNZCV(flags_audit_block_edge ==
-                                          FlagsRegsAuditEdgeKind::Dispatcher
-                                  ? FlagsRegsAuditMergeCause::TerminalDispatcher
-                                  : FlagsRegsAuditMergeCause::TerminalInternal,
-                          flags_audit_block_edge);
-            }
+            MergeNZCV(flags_audit_block_edge ==
+                                      FlagsRegsAuditEdgeKind::Dispatcher
+                              ? FlagsRegsAuditMergeCause::TerminalDispatcher
+                              : FlagsRegsAuditMergeCause::TerminalInternal,
+                      flags_audit_block_edge);
             context.RecordExecCounter(exec_offset_exit_direct);
             auto* exit = IsSelfEdge(term.next) && backedge_exit_label
                     ? backedge_exit_label.get()
@@ -73,13 +71,11 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
                 EmitRegionEdge(term.next);
                 return;
             }
-            if (!(FlagsRegsEnabled() && IsSelfEdge(term.next))) {
-                MergeNZCV(flags_audit_block_edge ==
-                                          FlagsRegsAuditEdgeKind::Dispatcher
-                                  ? FlagsRegsAuditMergeCause::TerminalDispatcher
-                                  : FlagsRegsAuditMergeCause::TerminalInternal,
-                          flags_audit_block_edge);
-            }
+            MergeNZCV(flags_audit_block_edge ==
+                                      FlagsRegsAuditEdgeKind::Dispatcher
+                              ? FlagsRegsAuditMergeCause::TerminalDispatcher
+                              : FlagsRegsAuditMergeCause::TerminalInternal,
+                      flags_audit_block_edge);
             context.RecordExecCounter(exec_offset_exit_direct);
             auto* exit = IsSelfEdge(term.next) && backedge_exit_label
                     ? backedge_exit_label.get()
@@ -117,6 +113,15 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
                              direct_link_kind == LinkSiteKind::Unconditional)) {
                 return;
             }
+            // One commit for both arms. MergeNZCV does not clobber host NZCV,
+            // so a local b.cond can still read the cmp. Publishing per arm
+            // doubled the AdvancePC merge we just removed.
+            MergeNZCV(FlagsRegsAuditMergeCause::TerminalDispatcher,
+                      flags_audit_block_edge);
+            nzcv_dirty = false;
+            nzcv_requested = {};
+            flags_token_valid = false;
+            flags_token_af = false;
             Label else_label;
             if (auto local = LocalConditionFor(term.cond)) {
                 __ B(&else_label,
@@ -133,11 +138,18 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
                         direct_link_kind == LinkSiteKind::Unconditional)) {
                 return;
             }
-            Label else_label;
-            auto host_cond = MapCond(term.cond);
-            if (!(save_in_nzcv && nzcv_dirty)) {
+            if (save_in_nzcv && nzcv_dirty) {
+                MergeNZCV(FlagsRegsAuditMergeCause::TerminalDispatcher,
+                          flags_audit_block_edge);
+            } else {
                 LoadNZCVFromFlags();
             }
+            nzcv_dirty = false;
+            nzcv_requested = {};
+            flags_token_valid = false;
+            flags_token_af = false;
+            Label else_label;
+            auto host_cond = MapCond(term.cond);
             __ B(&else_label, static_cast<Condition>(static_cast<u8>(host_cond) ^ 1));
             EmitTerminal(term.then_, LinkSiteKind::ConditionalThen);
             __ Bind(&else_label);

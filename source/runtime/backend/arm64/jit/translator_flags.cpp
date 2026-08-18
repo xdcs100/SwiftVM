@@ -800,13 +800,14 @@ void JitTranslator::EmitTestFlags(ir::Inst* inst) {
     auto nzcv_mask = static_cast<u32>(GuestNZCVToHost(test));
     bool first{true};
     const auto scratch = context.GetSharedTmpX();
+    // JA/JBE are And(TestFlags(CF), CondSet(NE)). Tst clobbers host NZCV.
+    // Commit first so the following CondSet reloads the cmp from x26.
+    // FLAGS_REGS leaves nzcv_dirty across AdvancePC; skipping this Merge
+    // makes CondSet read the Tst result as guest ZF.
+    MergeNZCV(FlagsRegsAuditMergeCause::ClearOrPartialWrite,
+              flags_audit_block_edge);
     if (nzcv_mask) {
-        if (save_in_nzcv && nzcv_dirty) {
-            __ Mrs(scratch, NZCV);
-            __ Tst(scratch, nzcv_mask);
-        } else {
-            __ Tst(flags, nzcv_mask);
-        }
+        __ Tst(flags, nzcv_mask);
         __ Cset(result, ne);
         first = false;
     }
@@ -838,13 +839,9 @@ void JitTranslator::EmitTestNotFlags(ir::Inst* inst) {
     auto nzcv_mask = static_cast<u32>(GuestNZCVToHost(test));
     if (nzcv_mask && !True(test & (ir::Flags::Parity | ir::Flags::AuxiliaryCarry))) {
         auto result = context.W(ir::Value{inst});
-        if (save_in_nzcv && nzcv_dirty) {
-            const auto scratch = context.GetSharedTmpX();
-            __ Mrs(scratch, NZCV);
-            __ Tst(scratch, nzcv_mask);
-        } else {
-            __ Tst(flags, nzcv_mask);
-        }
+        MergeNZCV(FlagsRegsAuditMergeCause::ClearOrPartialWrite,
+                  flags_audit_block_edge);
+        __ Tst(flags, nzcv_mask);
         __ Cset(result, eq);
     } else {
         EmitTestFlags(inst);

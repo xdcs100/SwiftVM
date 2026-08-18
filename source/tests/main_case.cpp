@@ -555,10 +555,10 @@ TEST_CASE("SVM_FLAGS_REGS is A-class, default OFF, and pins x12 out of XPOOL") {
         RegAlloc on{1, empty_gprs, empty_fprs, FeatureSet{}};
         REQUIRE(on.GetGprs().Get(12));
     }
-    // Token ABI implies latch so Signal/SMC can observe last_result. P1 loses.
+    // Token ABI publishes on unit exits; it does not imply latch. P1 loses.
     UnsetSvmConfigEnvForTest("SVM_BACKEDGE_LATCH");
     UnsetSvmConfigEnvForTest("SVM_BACKEDGE_FLAGS");
-    REQUIRE(BackedgeLatchEnabled());
+    REQUIRE_FALSE(BackedgeLatchEnabled());
     REQUIRE_FALSE(BackedgeFlagsEnabled());
     SetSvmConfigEnvForTest("SVM_BACKEDGE_LATCH", "1", 1);
     SetSvmConfigEnvForTest("SVM_BACKEDGE_FLAGS", "1", 1);

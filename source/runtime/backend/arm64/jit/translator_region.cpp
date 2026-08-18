@@ -213,7 +213,9 @@ void JitTranslator::EmitRegionEdge(ir::Location target,
     if (fallthrough && IsSelfEdge(target) && loop_hoist_body_entry) {
         fallthrough = false;
     }
-    if (commit_flags && !FlagsRegsEnabled()) {
+    if (commit_flags) {
+        // Dual-entry blocks can be reached from L2. Do not leave last_result
+        // lazy across a region edge; AdvancePC stays lazy inside the block.
         MergeNZCV(FlagsRegsAuditMergeCause::TerminalInternal,
                   FlagsRegsAuditEdgeKind::RegionInternal);
     }
@@ -268,11 +270,8 @@ bool JitTranslator::EmitRegionIf(const ir::terminal::If& terminal,
 
     const auto local = LocalConditionFor(terminal.cond);
     // MergeNZCV 只使用 MRS/AND/ORR，不改 host NZCV；因此可在条件判定前提交一次。
-    // FLAGS_REGS keeps NZCV live for the local b.cond; same-unit edges do not pack.
-    if (!FlagsRegsEnabled()) {
-        MergeNZCV(FlagsRegsAuditMergeCause::PStateClobber,
-                  FlagsRegsAuditEdgeKind::RegionInternal);
-    }
+    MergeNZCV(FlagsRegsAuditMergeCause::PStateClobber,
+              FlagsRegsAuditEdgeKind::RegionInternal);
     auto branch = [&](Label* label, bool on_true) {
         if (local) {
             const auto cond = on_true
@@ -336,9 +335,7 @@ bool JitTranslator::EmitRegionCondition(
 
     const auto host_cond = MapCond(terminal.cond);
     // 与 EmitRegionIf 相同，提交 flags 的指令保持当前 NZCV，条件可直接复用。
-    if (FlagsRegsEnabled() && save_in_nzcv && nzcv_dirty) {
-        // Keep host NZCV live across the local b.cond.
-    } else if (save_in_nzcv && nzcv_dirty) {
+    if (save_in_nzcv && nzcv_dirty) {
         MergeNZCV(FlagsRegsAuditMergeCause::PStateClobber,
                   FlagsRegsAuditEdgeKind::RegionInternal);
     } else {

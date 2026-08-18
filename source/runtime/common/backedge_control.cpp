@@ -5,10 +5,10 @@
 namespace swift::runtime {
 
 bool BackedgeLatchEnabled() {
-    // FLAGS_REGS token ABI needs the W81 P0 veneer so Signal/SMC can
-    // observe last_result. Do not flip the latch env default; this is
-    // implied only while the token switch is on.
-    return GetSvmConfig().backedge_latch || FlagsRegsEnabled();
+    // FLAGS_REGS publishes the token on every unit exit, including self
+    // edges, so x26 is current at Signal/SMC. Do not imply latch: the P0
+    // poll is a separate tax and failed the CoreMark flip gate on its own.
+    return GetSvmConfig().backedge_latch;
 }
 
 bool BackedgeFlagsEnabled() {

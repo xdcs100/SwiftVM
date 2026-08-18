@@ -1212,10 +1212,14 @@ void JitTranslator::Translate(ir::Block* block) {
     ASSERT(vec_nan_cold_sites.empty());
     if (!translating_function) {
         placement_unit_pc = block->GetStartLocation().Value();
-        flags_token_valid = false;
-        flags_token_af = false;
-        flags_token_keep = false;
     }
+    // Each block is a dual-entry identity. Do not inherit a compile-time
+    // token/dirty from a sibling that is not a runtime predecessor.
+    flags_token_valid = false;
+    flags_token_af = false;
+    flags_token_keep = false;
+    nzcv_dirty = false;
+    nzcv_requested = {};
     // Keep entry padding outside the block density/hot accounting window.  It
     // is reached only on the first fallthrough; every self edge targets the
     // label bound after it.
