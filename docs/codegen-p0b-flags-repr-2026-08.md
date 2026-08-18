@@ -20,8 +20,9 @@ pack 在密度账上消失、意外出口的载体是什么、开关怎么回退
 **禁止当成主刀**:W-β.1「只用 `ComputeFunctionLiveIn` 换掉 `needed=All`」。
 在战役分子 `SVM_REGION_EDGES=0` 上那是空操作,见 §2。
 
-未选定 last_result 的 GPR 家之前,不写发射路径。候选见 §5,推荐从可分配池
-再钉 1 枚,禁止动 x25/x27 与已封 pin 家。
+纸面首选 last_result = **x12**(`atomic_scratch`):原子路径本就是观察点,必须先
+publish,与 token 存活区间不重叠;`FLAGS_REGS=1` 时把它从 XPOOL 可分配集拿掉。
+禁止动 x25/x27 与已封 pin 家。Linux 池扫描只为证 spill 不回涨,不另找家。
 
 ## 1. 今天为什么 pack 坐在 ALU 上
 
@@ -164,7 +165,8 @@ RFLAGS,必须能在回边进 veneer。spike 允许 `FLAGS_REGS=1` 隐含
 
 | 候选 | 利 | 弊 |
 | --- | --- | --- |
-| **从可分配池钉 1 枚 GPR(推荐)** | dispatcher/RSB/direct-link 零额外 ld/st;与 FEX sticky 家同构 | 池 −1,须用 coremark/zip7 证明 spill 不回涨 |
+| **x12 `atomic_scratch`(推荐)** | 已是 scratch 类,非 pin 家;原子 RMW 前必须 publish,与 token 区间不交;`XPOOL=0` 时本就不在 value pool | `FLAGS_REGS=1` 要从 XPOOL 集拿掉 x12,等价池 −1,须证 spill 不回涨 |
+| 另从可分配池钉 1 枚 | 同上 sticky 家 | 没有比 x12 更干净的空号;禁 x25/x27 |
 | 块尾把 last_result 写进 State 新槽 | 不缩池 | RE=0 每块一次 st,吃回纸门 2 的利润 |
 | 借用 x26 存 last_result | 零新 pin | 与已发布 flags 字别名,GetFlags/解释器/故障恢复全要改语义,否 |
 
