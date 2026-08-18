@@ -213,4 +213,5 @@ AF bit 若走 §3.3.A,优先塞进 last_result 家的高位或 x26 里今天 AF 
 1. ~~只读选家~~:已裁定 x12。A 类 `SVM_FLAGS_REGS` 默认 OFF 已接线。
 2. ~~Linux identity 池扫描~~:coremark/zip7 spill 不回涨,`max_live_gpr` 9/11 vs 池 13。
 3. ~~默认 OFF token + publish + latch 隐含~~:热路径 `Sub`/`And`/`Or`/`Xor`/`Add` 不再 `SaveParity`/`SaveAuxiliaryCarry`;观察点 `MergeNZCV` 顺带把 last_result/AF 打回 x26;AdvancePC 与同 unit 自环/region 边保持 lazy;`FLAGS_REGS=1` 隐含 latch。默认仍 OFF。
-4. §6 密度/指纹/定向门。失败整开关拔掉,不留半开 ABI。
+4. §6 密度/指纹/定向门。orb 上 `FLAGS_REGS=1` 已能跑 coremark(CRC `0x4983`)
+   与 func_tests 的 flags 子项;switch 跳表仍与 OFF 校验和不一致,未翻默认。
