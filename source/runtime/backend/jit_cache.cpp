@@ -81,8 +81,8 @@ JitDiskCache::JitDiskCache(AddressSpace& space)
         // Recovery veneers are block-local code offsets. SerialBlock does
         // not yet serialize that relocation/eligibility contract, so refuse
         // disk reuse rather than reviving a unit with an imprecise recipe.
-        // FLAGS_REGS additionally pins last_result in x12; that home is not
-        // in SerialBlock yet.
+        // FLAGS_REGS pins last_result in x12 and implies latch; SerialBlock
+        // cannot record the token home yet.
         LOG_WARNING("SVM_JIT_CACHE: lazy flags ABI is incompatible; cache disabled");
         return;
     }

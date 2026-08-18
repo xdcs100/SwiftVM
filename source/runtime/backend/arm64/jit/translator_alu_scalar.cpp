@@ -6,6 +6,7 @@
 
 #include "runtime/backend/arm64/defines.h"
 #include "runtime/backend/context.h"
+#include "runtime/common/svm_config.h"
 
 namespace swift::runtime::backend::arm64 {
 
@@ -72,7 +73,7 @@ void JitTranslator::EmitAdd(ir::Inst* inst) {
                 aligned_right = Operand{saved.W(), LSL, shift};
             }
             if (!pseudo_flags.branch_only) {
-                MergeNZCV();
+                BeginFlagsTokenProducer(pseudo_flags);
             }
             __ Adds(result.W(), result.W(), aligned_right);
             __ Lsr(result.W(), result.W(), shift);
@@ -88,11 +89,12 @@ void JitTranslator::EmitAdd(ir::Inst* inst) {
                 True(pseudo_flags.set & ir::Flags::AuxiliaryCarry)) {
                 SaveAuxiliaryCarry(af_left, right_operand, result);
             }
+            FinishFlagsTokenProducer(result, inst->ReturnType(), pseudo_flags);
             return;
         }
         if (needs_nzcv) {
             if (!pseudo_flags.branch_only) {
-                MergeNZCV();
+                BeginFlagsTokenProducer(pseudo_flags);
             }
             __ Adds(result, left_register, right_operand);
             auto guest_nzcv = pseudo_flags.set & ir::Flags::NZCV;
@@ -111,6 +113,7 @@ void JitTranslator::EmitAdd(ir::Inst* inst) {
             True(pseudo_flags.set & ir::Flags::AuxiliaryCarry)) {
             SaveAuxiliaryCarry(left_register, right_operand, result);
         }
+        FinishFlagsTokenProducer(result, inst->ReturnType(), pseudo_flags);
     } else {
         __ Add(result, left_register, right_operand);
     }
@@ -170,7 +173,11 @@ void JitTranslator::EmitSub(ir::Inst* inst) {
             }
             const bool region_branch_pfaf = RegionBranchPFAFActive(inst);
             if (!pseudo_flags.branch_only || region_branch_pfaf) {
-                MergeNZCV();
+                if (region_branch_pfaf) {
+                    MergeNZCV();
+                } else {
+                    BeginFlagsTokenProducer(pseudo_flags);
+                }
             }
             __ Subs(result.W(), result.W(), aligned_right);
             __ Lsr(result.W(), result.W(), shift);
@@ -189,11 +196,12 @@ void JitTranslator::EmitSub(ir::Inst* inst) {
                 True(pseudo_flags.set & ir::Flags::AuxiliaryCarry)) {
                 SaveAuxiliaryCarry(af_left, right_operand, result);
             }
+            FinishFlagsTokenProducer(result, inst->ReturnType(), pseudo_flags);
             return;
         }
         if (needs_nzcv) {
             if (!pseudo_flags.branch_only) {
-                MergeNZCV();
+                BeginFlagsTokenProducer(pseudo_flags);
             }
             __ Subs(result, left_register, right_operand);
             auto guest_nzcv = pseudo_flags.set & ir::Flags::NZCV;
@@ -211,6 +219,7 @@ void JitTranslator::EmitSub(ir::Inst* inst) {
             True(pseudo_flags.set & ir::Flags::AuxiliaryCarry)) {
             SaveAuxiliaryCarry(left_register, right_operand, result);
         }
+        FinishFlagsTokenProducer(result, inst->ReturnType(), pseudo_flags);
     } else {
         __ Sub(result, left_register, right_operand);
     }
@@ -239,7 +248,11 @@ void JitTranslator::EmitNeg(ir::Inst* inst) {
         __ Lsl(result.W(), source_reg.W(), shift);
         const bool region_branch_pfaf = RegionBranchPFAFActive(inst);
         if (!pseudo_flags.branch_only || region_branch_pfaf) {
-            MergeNZCV();
+            if (region_branch_pfaf) {
+                MergeNZCV();
+            } else {
+                BeginFlagsTokenProducer(pseudo_flags);
+            }
         }
         __ Subs(result.W(), wzr, result.W());
         __ Lsr(result.W(), result.W(), shift);
@@ -252,7 +265,7 @@ void JitTranslator::EmitNeg(ir::Inst* inst) {
         }
     } else if (needs_nzcv) {
         if (!pseudo_flags.branch_only) {
-            MergeNZCV();
+            BeginFlagsTokenProducer(pseudo_flags);
         }
         __ Subs(result, zero, source_reg);
         if (!pseudo_flags.branch_only) {
@@ -270,6 +283,7 @@ void JitTranslator::EmitNeg(ir::Inst* inst) {
     if (save_af) {
         SaveAuxiliaryCarry(zero, Operand{af_source}, result);
     }
+    FinishFlagsTokenProducer(result, inst->ReturnType(), pseudo_flags);
 }
 
 void JitTranslator::EmitAdc(ir::Inst* inst) {
@@ -289,6 +303,10 @@ void JitTranslator::EmitAdc(ir::Inst* inst) {
     if (!pseudo_flags.Null()) {
         const bool needs_nzcv = True(pseudo_flags.set & ir::Flags::NZCV);
         if (needs_nzcv) {
+            // OFF must not insert MergeNZCV: Adcs consumes live host C.
+            if (FlagsRegsEnabled() && !pseudo_flags.branch_only) {
+                BeginFlagsTokenProducer(pseudo_flags);
+            }
             __ Adcs(result, left_register, right_operand);
             auto guest_nzcv = pseudo_flags.set & ir::Flags::NZCV;
             if (!pseudo_flags.branch_only) {
@@ -305,6 +323,7 @@ void JitTranslator::EmitAdc(ir::Inst* inst) {
             True(pseudo_flags.set & ir::Flags::AuxiliaryCarry)) {
             SaveAuxiliaryCarry(left_register, right_operand, result);
         }
+        FinishFlagsTokenProducer(result, inst->ReturnType(), pseudo_flags);
     } else {
         __ Adc(result, left_register, right_operand);
     }
@@ -327,6 +346,9 @@ void JitTranslator::EmitSbb(ir::Inst* inst) {
     if (!pseudo_flags.Null()) {
         const bool needs_nzcv = True(pseudo_flags.set & ir::Flags::NZCV);
         if (needs_nzcv) {
+            if (FlagsRegsEnabled() && !pseudo_flags.branch_only) {
+                BeginFlagsTokenProducer(pseudo_flags);
+            }
             __ Sbcs(result, left_register, right_operand);
             auto guest_nzcv = pseudo_flags.set & ir::Flags::NZCV;
             if (!pseudo_flags.branch_only) {
@@ -343,6 +365,7 @@ void JitTranslator::EmitSbb(ir::Inst* inst) {
             True(pseudo_flags.set & ir::Flags::AuxiliaryCarry)) {
             SaveAuxiliaryCarry(left_register, right_operand, result);
         }
+        FinishFlagsTokenProducer(result, inst->ReturnType(), pseudo_flags);
     } else {
         __ Sbc(result, left_register, right_operand);
     }
@@ -381,17 +404,23 @@ void JitTranslator::EmitAnd(ir::Inst* inst) {
 
     if (!pseudo_flags.Null()) {
         if (!pseudo_flags.branch_only) {
-            MergeNZCV();
+            BeginFlagsTokenProducer(pseudo_flags);
         }
         // x86 logical ops: N/Z from the result, C/V cleared.
         __ Ands(result, left_register, right_operand);
         if (!pseudo_flags.branch_only) {
-            MergeLogicalFlagsNZ(pseudo_flags.set);
+            if (FlagsRegsEnabled()) {
+                nzcv_requested |= GuestNZCVToHost(pseudo_flags.set & ir::Flags::NZ);
+                nzcv_dirty = true;
+            } else {
+                MergeLogicalFlagsNZ(pseudo_flags.set);
+            }
         }
         if (!pseudo_flags.branch_only &&
             True(pseudo_flags.set & ir::Flags::Parity)) {
             SaveParity(result);
         }
+        FinishFlagsTokenProducer(result, inst->ReturnType(), pseudo_flags);
     } else {
         __ And(result, left_register, right_operand);
     }
@@ -410,16 +439,22 @@ void JitTranslator::EmitAndNot(ir::Inst* inst) {
 
     if (!pseudo_flags.Null()) {
         if (!pseudo_flags.branch_only) {
-            MergeNZCV();
+            BeginFlagsTokenProducer(pseudo_flags);
         }
         __ Bics(result, left_register, right_operand);
         if (!pseudo_flags.branch_only) {
-            MergeLogicalFlagsNZ(pseudo_flags.set);
+            if (FlagsRegsEnabled()) {
+                nzcv_requested |= GuestNZCVToHost(pseudo_flags.set & ir::Flags::NZ);
+                nzcv_dirty = true;
+            } else {
+                MergeLogicalFlagsNZ(pseudo_flags.set);
+            }
         }
         if (!pseudo_flags.branch_only &&
             True(pseudo_flags.set & ir::Flags::Parity)) {
             SaveParity(result);
         }
+        FinishFlagsTokenProducer(result, inst->ReturnType(), pseudo_flags);
     } else {
         __ Bic(result, left_register, right_operand);
     }
@@ -443,7 +478,7 @@ void JitTranslator::EmitOr(ir::Inst* inst) {
     auto pseudo_flags = GetPseudoFlags(inst);
 
     if (!pseudo_flags.Null() && !pseudo_flags.branch_only) {
-        MergeNZCV();
+        BeginFlagsTokenProducer(pseudo_flags);
     }
     __ Orr(result, left_register, right_operand);
     if (!pseudo_flags.Null()) {
@@ -483,7 +518,7 @@ void JitTranslator::EmitXor(ir::Inst* inst) {
     auto pseudo_flags = GetPseudoFlags(inst);
 
     if (!pseudo_flags.Null() && !pseudo_flags.branch_only) {
-        MergeNZCV();
+        BeginFlagsTokenProducer(pseudo_flags);
     }
     __ Eor(result, left_register, right_operand);
     if (!pseudo_flags.Null()) {

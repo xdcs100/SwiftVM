@@ -11,6 +11,7 @@
 #include "runtime/backend/context.h"
 #include "runtime/backend/arm64/defines.h"
 #include "runtime/common/backedge_control.h"
+#include "runtime/common/svm_config.h"
 #include "translator/x86/cpu.h"
 
 namespace swift::runtime::backend::arm64 {
@@ -212,7 +213,7 @@ void JitTranslator::EmitRegionEdge(ir::Location target,
     if (fallthrough && IsSelfEdge(target) && loop_hoist_body_entry) {
         fallthrough = false;
     }
-    if (commit_flags) {
+    if (commit_flags && !FlagsRegsEnabled()) {
         MergeNZCV(FlagsRegsAuditMergeCause::TerminalInternal,
                   FlagsRegsAuditEdgeKind::RegionInternal);
     }
@@ -267,8 +268,11 @@ bool JitTranslator::EmitRegionIf(const ir::terminal::If& terminal,
 
     const auto local = LocalConditionFor(terminal.cond);
     // MergeNZCV 只使用 MRS/AND/ORR，不改 host NZCV；因此可在条件判定前提交一次。
-    MergeNZCV(FlagsRegsAuditMergeCause::PStateClobber,
-              FlagsRegsAuditEdgeKind::RegionInternal);
+    // FLAGS_REGS keeps NZCV live for the local b.cond; same-unit edges do not pack.
+    if (!FlagsRegsEnabled()) {
+        MergeNZCV(FlagsRegsAuditMergeCause::PStateClobber,
+                  FlagsRegsAuditEdgeKind::RegionInternal);
+    }
     auto branch = [&](Label* label, bool on_true) {
         if (local) {
             const auto cond = on_true
@@ -332,7 +336,9 @@ bool JitTranslator::EmitRegionCondition(
 
     const auto host_cond = MapCond(terminal.cond);
     // 与 EmitRegionIf 相同，提交 flags 的指令保持当前 NZCV，条件可直接复用。
-    if (save_in_nzcv && nzcv_dirty) {
+    if (FlagsRegsEnabled() && save_in_nzcv && nzcv_dirty) {
+        // Keep host NZCV live across the local b.cond.
+    } else if (save_in_nzcv && nzcv_dirty) {
         MergeNZCV(FlagsRegsAuditMergeCause::PStateClobber,
                   FlagsRegsAuditEdgeKind::RegionInternal);
     } else {
@@ -1011,6 +1017,8 @@ void JitTranslator::EmitBackedgeExitStub() {
     __ Bind(backedge_exit_label.get());
     if (backedge_flags_plan && backedge_flags_plan->optimized) {
         EmitBackedgeMaterialize(*backedge_flags_plan);
+    } else if (FlagsRegsEnabled()) {
+        EmitSplitFlagsPublish();
     }
     __ Mov(ip1, cur_block->GetStartLocation().Value());
     __ Str(ip1, MemOperand(state, state_offset_current_loc));

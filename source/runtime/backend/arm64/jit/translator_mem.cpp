@@ -9,6 +9,7 @@
 #include "runtime/backend/context.h"
 #include "runtime/backend/arm64/defines.h"
 #include "runtime/backend/arm64/fpcr_mode.h"
+#include "runtime/common/svm_config.h"
 
 namespace swift::runtime::backend::arm64 {
 
@@ -769,6 +770,10 @@ bool HostBaseFoldEligible(bool enabled,
 }
 
 void JitTranslator::AcquireUnalignedAtomicLock(const Register& scratch) {
+    // x12 is last_result when FLAGS_REGS is on. The lock sequence clobbers it.
+    if (FlagsRegsEnabled()) {
+        EmitSplitFlagsPublish();
+    }
     Label retry;
     __ Mov(atomic_scratch,
            reinterpret_cast<uintptr_t>(&runtime::backend::unaligned_atomic_lock));

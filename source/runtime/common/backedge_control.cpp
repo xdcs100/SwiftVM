@@ -5,7 +5,10 @@
 namespace swift::runtime {
 
 bool BackedgeLatchEnabled() {
-    return GetSvmConfig().backedge_latch;
+    // FLAGS_REGS token ABI needs the W81 P0 veneer so Signal/SMC can
+    // observe last_result. Do not flip the latch env default; this is
+    // implied only while the token switch is on.
+    return GetSvmConfig().backedge_latch || FlagsRegsEnabled();
 }
 
 bool BackedgeFlagsEnabled() {

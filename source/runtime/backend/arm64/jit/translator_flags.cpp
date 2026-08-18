@@ -2,6 +2,7 @@
 
 #include "runtime/backend/context.h"
 #include "runtime/backend/arm64/defines.h"
+#include "runtime/common/svm_config.h"
 
 namespace swift::runtime::backend::arm64 {
 
@@ -47,6 +48,73 @@ void JitTranslator::RecordPFAFDensity(PFAFDensityKind kind, u32 begin) {
     // 翻译期的 site 数，不增大 JitTranslator，也不改发码。
     pfaf_density_bytes[static_cast<size_t>(kind)] +=
             (1u << 16) | bytes;
+}
+
+void JitTranslator::BeginFlagsTokenProducer(const PseudoFlags& pseudo) {
+    if (pseudo.branch_only) {
+        return;
+    }
+    if (FlagsRegsEnabled()) {
+        // The next CaptureFlagsToken replaces last_result. Do not pack the
+        // previous token into x26 — the new ALU overwrites NZCV.
+        flags_token_valid = false;
+        flags_token_af = false;
+        return;
+    }
+    MergeNZCV();
+}
+
+void JitTranslator::CaptureFlagsToken(const Register& result,
+                                      ir::ValueType type,
+                                      bool capture_af,
+                                      const Register* af_left,
+                                      const Operand* af_right) {
+    if (!FlagsRegsEnabled()) {
+        return;
+    }
+    const bool wide = ir::GetValueSizeByte(type) > 4;
+    if (result.GetCode() != atomic_scratch.GetCode()) {
+        if (wide) {
+            __ Mov(atomic_scratch, result.X());
+        } else {
+            __ Mov(atomic_scratch.W(), result.W());
+        }
+    }
+    flags_token_valid = true;
+    flags_token_af = false;
+    if (!capture_af || !af_left || !af_right) {
+        return;
+    }
+    auto tmp = context.GetTmpX();
+    __ Eor(tmp, af_left->X(), result.X());
+    if (af_right->IsImmediate()) {
+        if ((af_right->GetImmediate() >> 4) & 1) {
+            __ Eor(tmp, tmp, 1u << 4);
+        }
+    } else {
+        auto reg = af_right->GetRegister().X();
+        auto shift = af_right->IsShiftedRegister() ? af_right->GetShift() : LSL;
+        auto amount =
+                af_right->IsShiftedRegister() ? af_right->GetShiftAmount() : 0;
+        __ Eor(tmp, tmp, Operand{reg, shift, amount});
+    }
+    __ Ubfx(tmp, tmp, 4, 1);
+    __ Bfi(atomic_scratch, tmp, 63, 1);
+    flags_token_af = true;
+}
+
+void JitTranslator::FinishFlagsTokenProducer(const Register& result,
+                                             ir::ValueType type,
+                                             const PseudoFlags& pseudo) {
+    if (!FlagsRegsEnabled() || pseudo.branch_only || flags_token_valid) {
+        return;
+    }
+    CaptureFlagsToken(result, type);
+}
+
+void JitTranslator::EmitSplitFlagsPublish() {
+    MergeNZCV(FlagsRegsAuditMergeCause::ClearOrPartialWrite,
+              flags_audit_block_edge);
 }
 
 void JitTranslator::MergeNZCV() {
@@ -112,6 +180,16 @@ void JitTranslator::MergeNZCV(FlagsRegsAuditMergeCause cause,
                                          2);
         }
     }
+    if (flags_token_valid) {
+        __ Bfi(flags, atomic_scratch, HostFlagsBit::ParityByte, 8);
+        if (flags_token_af) {
+            const auto scratch = context.GetSharedTmpX();
+            __ Ubfx(scratch, atomic_scratch, 63, 1);
+            __ Bfi(flags, scratch, HostFlagsBit::AuxiliaryCarry, 1);
+        }
+        flags_token_valid = false;
+        flags_token_af = false;
+    }
 }
 
 void JitTranslator::LoadNZCVFromFlags() {
@@ -172,6 +250,12 @@ void JitTranslator::SaveLogicalResultFlags(Register& result,
     // backend does not reserve from the register allocator). Tst is the
     // register form of ANDS and yields the identical NZCV with no scratch.
     __ Tst(scratch, scratch);
+    if (FlagsRegsEnabled() && !pseudo.branch_only) {
+        nzcv_requested |= GuestNZCVToHost(pseudo.set & ir::Flags::NZ);
+        nzcv_dirty = true;
+        CaptureFlagsToken(result, type);
+        return;
+    }
     if (!pseudo.branch_only) {
         MergeLogicalFlagsNZ(pseudo.set);
     }
@@ -219,10 +303,16 @@ void JitTranslator::ClearFlags(ir::Flags guest) {
         // SaveFlags and DCE can then delete that producer, while a sibling
         // ClearFlags(C/V) remains live (x86 logical ops followed by ADC/SBB).
         //
-        // Commit a pending lazy producer before clearing the stored bits. This
-        // also prevents a later MergeNZCV from resurrecting a bit cleared here.
-        MergeNZCV(FlagsRegsAuditMergeCause::ClearOrPartialWrite,
-                  flags_audit_block_edge);
+        // Eager path: commit a pending lazy producer before clearing the
+        // stored bits so a later MergeNZCV cannot resurrect them.
+        // FLAGS_REGS must not publish here — FlushFlags runs from AdvancePC,
+        // and packing the token onto that IR is the relocating-pack fail.
+        // Clear only the committed x26 bits; live PSTATE (Ands already left
+        // C=V=0) stays in NZCV until a real observe point.
+        if (!FlagsRegsEnabled()) {
+            MergeNZCV(FlagsRegsAuditMergeCause::ClearOrPartialWrite,
+                      flags_audit_block_edge);
+        }
         u64 mask{UINT64_MAX};
         if (True(guest & ir::Flags::Negate)) {
             mask &= ~(u64(1) << HostFlagsBit::N);
@@ -243,18 +333,26 @@ void JitTranslator::ClearFlags(ir::Flags guest) {
         // Clear Parity: an odd-parity byte makes TestParityFlag read PF = 0.
         const auto scratch = context.GetSharedTmpX();
         __ Mov(scratch, 1);
+        if (FlagsRegsEnabled() && flags_token_valid) {
+            __ Bfi(atomic_scratch, scratch, HostFlagsBit::ParityByte, 8);
+        }
         __ Bfi(flags, scratch, HostFlagsBit::ParityByte, 8);
         RecordPFAFDensity(PFAFDensityKind::PFWrite, begin);
     }
     if (True(guest & ir::Flags::AuxiliaryCarry)) {
         const u32 begin = context.CurrentBufferSize();
         // AF is a single bit (carry into bit 4).
+        flags_token_af = false;
         __ Bfc(flags, HostFlagsBit::AuxiliaryCarry, 1);
         RecordPFAFDensity(PFAFDensityKind::AFWrite, begin);
     }
 }
 
 void JitTranslator::SaveParity(Register& value) {
+    if (FlagsRegsEnabled()) {
+        CaptureFlagsToken(value, ir::ValueType::U64);
+        return;
+    }
     const u32 begin = context.CurrentBufferSize();
     __ Bfi(flags, value, HostFlagsBit::ParityByte, 8);
     RecordPFAFDensity(PFAFDensityKind::PFWrite, begin);
@@ -350,6 +448,10 @@ void JitTranslator::SaveOF(Register& value, ir::ValueType type) {
 }
 
 void JitTranslator::SaveAuxiliaryCarry(Register &left, const Operand &right, Register &result) {
+    if (FlagsRegsEnabled()) {
+        CaptureFlagsToken(result, ir::ValueType::U64, true, &left, &right);
+        return;
+    }
     const u32 begin = context.CurrentBufferSize();
     // AF = carry into bit 4 = bit4(left) ^ bit4(right) ^ bit4(result). This holds
     // for add/adc/sub/sbb alike (result already reflects any carry-in). Only the
@@ -374,7 +476,11 @@ void JitTranslator::SaveAuxiliaryCarry(Register &left, const Operand &right, Reg
 }
 
 void JitTranslator::GetParityFlag(const Register& result) {
-    __ Ubfx(result.W(), flags, HostFlagsBit::ParityByte, 8);
+    if (FlagsRegsEnabled() && flags_token_valid) {
+        __ Ubfx(result.W(), atomic_scratch, HostFlagsBit::ParityByte, 8);
+    } else {
+        __ Ubfx(result.W(), flags, HostFlagsBit::ParityByte, 8);
+    }
     __ Eor(result.W(), result.W(), Operand{result.W(), LSR, 4});
     __ Eor(result.W(), result.W(), Operand{result.W(), LSR, 2});
     __ Eor(result.W(), result.W(), Operand{result.W(), LSR, 1});
@@ -392,7 +498,11 @@ void JitTranslator::TestParityFlag(const Register& result) {
 void JitTranslator::TestAuxiliaryCarry(const Register& result) {
     const u32 begin = context.CurrentBufferSize();
     // AF is stored as a single bit (the carry into bit 4) at AuxiliaryCarry.
-    __ Ubfx(result, flags, HostFlagsBit::AuxiliaryCarry, 1);
+    if (FlagsRegsEnabled() && flags_token_valid && flags_token_af) {
+        __ Ubfx(result, atomic_scratch, 63, 1);
+    } else {
+        __ Ubfx(result, flags, HostFlagsBit::AuxiliaryCarry, 1);
+    }
     RecordPFAFDensity(PFAFDensityKind::AFRead, begin);
 }
 
@@ -601,6 +711,8 @@ void JitTranslator::EmitPublishFCmpFlags(ir::Inst* inst) {
         //   N=V=0                                           (x86 SF/OF)
         // Keep those four bits lazy in host NZCV, update the two non-NZCV
         // fields in x26, and leave the representation otherwise unchanged.
+        flags_token_valid = false;
+        flags_token_af = false;
         auto ordered = context.R(packed);
         u32 begin = context.CurrentBufferSize();
         __ Bfi(flags, ordered, HostFlagsBit::ParityByte, 8);

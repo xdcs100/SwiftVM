@@ -438,6 +438,20 @@ private:
 
     void FlushFlags();
 
+    // FLAGS_REGS token: last_result lives in x12, AF in x12[63], NZCV in
+    // PSTATE. Observe points call EmitSplitFlagsPublish(); AdvancePC and
+    // same-unit backedges leave the token lazy.
+    void BeginFlagsTokenProducer(const PseudoFlags& pseudo);
+    void CaptureFlagsToken(const Register& result,
+                           ir::ValueType type,
+                           bool capture_af = false,
+                           const Register* af_left = nullptr,
+                           const Operand* af_right = nullptr);
+    void FinishFlagsTokenProducer(const Register& result,
+                                  ir::ValueType type,
+                                  const PseudoFlags& pseudo);
+    void EmitSplitFlagsPublish();
+
     JitContext &context;
     MacroAssembler &masm;
     ir::Block *cur_block{};
@@ -455,6 +469,8 @@ private:
     ir::Flags flags_clear{};
     bool save_in_nzcv{true};
     bool nzcv_dirty{false};
+    bool flags_token_valid{false};
+    bool flags_token_af{false};
     // Which host NZCV bits were actually requested by SaveFlags since the
     // last MergeNZCV. Only these bits are merged; the rest keep their
     // existing value in the flags register (so a ClearFlags(CF) between

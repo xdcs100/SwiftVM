@@ -2,7 +2,8 @@
 
 日期:2026-08-18
 承接:docs/codegen-opt-plan-2026-08.md §2.2
-范围:设计已落。施工第一刀只预留 x12,默认 OFF,不改 flags 发射,不隐含 latch。
+范围:设计已落。x12 预留 + Linux spill 扫描已过。施工第三刀默认 OFF 落地 token +
+`EmitSplitFlagsPublish` + 隐含 latch。
 
 纸门 1 已过:coremark / zip7 的 `Sub`/`And`/`Or` 里 flags 打包分别占
 **89.82% / 75.07%**(entries 加权 host)。本文回答另外三扇门:怎样让这笔
@@ -209,7 +210,7 @@ AF bit 若走 §3.3.A,优先塞进 last_result 家的高位或 x26 里今天 AF 
 
 ## 8. 下一步(施工序)
 
-1. ~~只读选家~~:已裁定 x12。A 类 `SVM_FLAGS_REGS` 默认 OFF 已接线:从 XPOOL 拿掉 x12、禁 disk cache、与 `BACKEDGE_FLAGS` 互斥。本刀不隐含 latch,以免污染 spill 扫描。
-2. Linux identity 池扫描证 spill 不回涨(`SVM_RA_HOT_COALESCE`)。
-3. 默认 OFF 实现 token + publish + latch 隐含。
+1. ~~只读选家~~:已裁定 x12。A 类 `SVM_FLAGS_REGS` 默认 OFF 已接线。
+2. ~~Linux identity 池扫描~~:coremark/zip7 spill 不回涨,`max_live_gpr` 9/11 vs 池 13。
+3. ~~默认 OFF token + publish + latch 隐含~~:热路径 `Sub`/`And`/`Or`/`Xor`/`Add` 不再 `SaveParity`/`SaveAuxiliaryCarry`;观察点 `MergeNZCV` 顺带把 last_result/AF 打回 x26;AdvancePC 与同 unit 自环/region 边保持 lazy;`FLAGS_REGS=1` 隐含 latch。默认仍 OFF。
 4. §6 密度/指纹/定向门。失败整开关拔掉,不留半开 ABI。

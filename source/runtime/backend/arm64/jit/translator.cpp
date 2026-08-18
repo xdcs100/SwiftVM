@@ -1194,6 +1194,8 @@ void JitTranslator::Translate(ir::Block* block) {
     ASSERT(vec_nan_cold_sites.empty());
     if (!translating_function) {
         placement_unit_pc = block->GetStartLocation().Value();
+        flags_token_valid = false;
+        flags_token_af = false;
     }
     // Keep entry padding outside the block density/hot accounting window.  It
     // is reached only on the first fallthrough; every self edge targets the
@@ -1286,6 +1288,8 @@ void JitTranslator::Translate(ir::HIRFunction* function) {
         emitted_blocks.push_back(block);
     }
     translating_function = true;
+    flags_token_valid = false;
+    flags_token_af = false;
     for (size_t i = 0; i < emitted_blocks.size(); ++i) {
         // Undecoded successor left behind by lazy region compilation (and by
         // the pre-existing 128-block cap): no instructions and no terminal.

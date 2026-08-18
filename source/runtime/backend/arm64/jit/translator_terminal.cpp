@@ -1,6 +1,7 @@
 #include "translator.h"
 #include "runtime/backend/context.h"
 #include "runtime/backend/arm64/defines.h"
+#include "runtime/common/svm_config.h"
 
 #include <functional>
 #include <iterator>
@@ -46,11 +47,13 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
                 EmitRegionEdge(term.next);
                 return;
             }
-            MergeNZCV(flags_audit_block_edge ==
-                                      FlagsRegsAuditEdgeKind::Dispatcher
-                              ? FlagsRegsAuditMergeCause::TerminalDispatcher
-                              : FlagsRegsAuditMergeCause::TerminalInternal,
-                      flags_audit_block_edge);
+            if (!(FlagsRegsEnabled() && IsSelfEdge(term.next))) {
+                MergeNZCV(flags_audit_block_edge ==
+                                          FlagsRegsAuditEdgeKind::Dispatcher
+                                  ? FlagsRegsAuditMergeCause::TerminalDispatcher
+                                  : FlagsRegsAuditMergeCause::TerminalInternal,
+                          flags_audit_block_edge);
+            }
             context.RecordExecCounter(exec_offset_exit_direct);
             auto* exit = IsSelfEdge(term.next) && backedge_exit_label
                     ? backedge_exit_label.get()
@@ -70,11 +73,13 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
                 EmitRegionEdge(term.next);
                 return;
             }
-            MergeNZCV(flags_audit_block_edge ==
-                                      FlagsRegsAuditEdgeKind::Dispatcher
-                              ? FlagsRegsAuditMergeCause::TerminalDispatcher
-                              : FlagsRegsAuditMergeCause::TerminalInternal,
-                      flags_audit_block_edge);
+            if (!(FlagsRegsEnabled() && IsSelfEdge(term.next))) {
+                MergeNZCV(flags_audit_block_edge ==
+                                          FlagsRegsAuditEdgeKind::Dispatcher
+                                  ? FlagsRegsAuditMergeCause::TerminalDispatcher
+                                  : FlagsRegsAuditMergeCause::TerminalInternal,
+                          flags_audit_block_edge);
+            }
             context.RecordExecCounter(exec_offset_exit_direct);
             auto* exit = IsSelfEdge(term.next) && backedge_exit_label
                     ? backedge_exit_label.get()

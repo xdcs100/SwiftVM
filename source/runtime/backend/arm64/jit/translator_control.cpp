@@ -4,6 +4,7 @@
 #include "runtime/backend/arm64/defines.h"
 #include "runtime/backend/arm64/fpcr_mode.h"
 #include "runtime/common/helper_abi.h"
+#include "runtime/common/svm_config.h"
 #include "runtime/frontend/x86/x87.h"
 #include "translator/x86/cpu.h"
 
@@ -59,8 +60,10 @@ void JitTranslator::EmitAdvancePC(ir::Inst* inst) {
         flags_clear = ir::Flags::None;
         return;
     }
-    MergeNZCV(FlagsRegsAuditMergeCause::AdvancePC,
-              flags_audit_block_edge);
+    if (!FlagsRegsEnabled()) {
+        MergeNZCV(FlagsRegsAuditMergeCause::AdvancePC,
+                  flags_audit_block_edge);
+    }
     FlushFlags();
 }
 

@@ -69,7 +69,7 @@ identity 已把访存税从 mac 账里抠掉一截(stream 最明显)。剩下的
 
 | 级 | 机制 | 代表 Δh/g(SVM−FEX) | 状态 | 第一刀 |
 | --- | --- | --- | --- | --- |
-| **P0** | 发射经济性:flags 打包 ALU + 宽度桥 | coremark alu+xport 1.93 vs FEX 0.88(**+1.05**) | 半开:宽度不翻;纸门 1 过,2–4 设计见 docs/codegen-p0b-flags-repr-2026-08.md | 下一刀=只读选 last_result 家,再写 OFF spike |
+| **P0** | 发射经济性:flags 打包 ALU + 宽度桥 | coremark alu+xport 1.93 vs FEX 0.88(**+1.05**) | 半开:宽度不翻;纸门 1 过;token 默认 OFF 已接线 | 下一刀=§6 密度/指纹/定向门 |
 | **P1** | 状态访问(publish+read) | +0.55~1.10,FEX=0 | **封存** | 禁止删 commit;重开 = fault recipe |
 | **P2** | 块边界税(AdvancePC/SetLocation/PushRSB) | AdvPC 0.22~0.47 | 条件开 | 必须 flags 先行,否则边内部化净账≈0 |
 | **P3** | osslsha SHA 形态 | 2.94× 整格;热块 4.14 vs 1.21 | **封存** | lane-fusion 新基建或 P1 recipe |
@@ -152,9 +152,9 @@ flags 专项桶只有 0.03——**真实 flags 成本藏在 Sub/And/Or/BitExtrac
   - 门 3:W81 latch + per-block fault map 可复用;缺的是 token→x26 配方,
     不是再做 latch。`FLAGS_REGS=1` 隐含 latch,不翻 P1 `BACKEDGE_FLAGS`。
   - 门 4:新 `SVM_FLAGS_REGS` 默认 OFF,`=0` 回今天的 x26 急切打包。
-  - **挡发射**:last_result 家已定为 x12。`SVM_FLAGS_REGS` 默认 OFF 只预留该
-    寄存器(池 −1),不改 pack 发射、不隐含 latch。下一刀=Linux identity
-    spill 扫描;过门才写 `EmitSplitFlagsPublish`。
+  - last_result 家 = x12。Linux spill 扫描已过。默认 OFF token +
+    `EmitSplitFlagsPublish` + 隐含 latch 已接线;`=0` 仍是今天的 x26 急切。
+    下一刀=§6 密度/指纹/定向门。
 
 ### 2.3 独立小项(不挡 P0-A)
 
