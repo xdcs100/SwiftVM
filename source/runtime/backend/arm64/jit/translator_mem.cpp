@@ -43,6 +43,7 @@ bool IsHostCoalesceProducer(ir::OpCode op, bool width_chain) {
         case O::Not:
         case O::Neg:
         case O::GetOperand:
+        case O::ZeroExtend32:
         case O::LslImm:
         case O::LslValue:
         case O::LsrImm:
@@ -123,7 +124,6 @@ bool IsHostFPRCoalesceProducer(ir::OpCode op, bool scalar_tie) {
 bool IsHostCoalesceObserver(ir::OpCode op) {
     using O = ir::OpCode;
     switch (op) {
-        case O::SaveFlags:
         case O::LoadMemory:
         case O::StoreMemory:
         case O::LoadMemoryTSO:
@@ -337,8 +337,7 @@ bool JitTranslator::ReproveCoalescedHostWrite(ir::Inst* inst) const {
         if (&scan == inst) {
             break;
         }
-        const bool flags_only =
-                live_publish && scan.GetOp() == ir::OpCode::SaveFlags;
+        const bool flags_only = scan.GetOp() == ir::OpCode::SaveFlags;
         if ((!flags_only && IsHostCoalesceObserver(scan.GetOp())) ||
             (scan.GetOp() == ir::OpCode::GetHostGPR &&
              scan.GetArg<ir::Imm>(0).Get() == target) ||

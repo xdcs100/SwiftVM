@@ -4620,7 +4620,7 @@ TEST_CASE("guest GPR coalescing keeps publication and snapshot proofs local") {
         auto* flags_publish = flag_block->AppendInst(
                 OpCode::SetHostGPR, flagged, HostRegIndex(22), Imm{0u});
         auto flags_on = allocate(flag_block.get(), true);
-        REQUIRE_FALSE(flags_on->IsHostWriteCoalesced(flags_publish->Id()));
+        REQUIRE(flags_on->IsHostWriteCoalesced(flags_publish->Id()));
 
         IntrusivePtr<Block> fault{new Block(0, Location{0x86f0})};
         auto value = fault->LoadImm(Imm{swift::u64{9}}).SetType(ValueType::U64);

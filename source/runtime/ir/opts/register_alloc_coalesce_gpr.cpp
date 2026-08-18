@@ -43,6 +43,7 @@ bool IsPinnedCoalesceProducer(OpCode op) {
         case OpCode::Not:
         case OpCode::Neg:
         case OpCode::GetOperand:
+        case OpCode::ZeroExtend32:
         case OpCode::LslImm:
         case OpCode::LslValue:
         case OpCode::LsrImm:
@@ -86,7 +87,6 @@ bool IsWidthChainRootProducer(const Inst* producer) {
 
 bool IsPinnedCoalesceObserver(OpCode op) {
     switch (op) {
-        case OpCode::SaveFlags:
         case OpCode::LoadMemory:
         case OpCode::StoreMemory:
         case OpCode::LoadMemoryTSO:
@@ -1044,8 +1044,7 @@ void CoalesceGuestGPRWrites(
             if (&scan == &store) {
                 break;
             }
-            const bool flags_only =
-                    live_publish && scan.GetOp() == OpCode::SaveFlags;
+            const bool flags_only = scan.GetOp() == OpCode::SaveFlags;
             if ((!flags_only && IsPinnedCoalesceObserver(scan.GetOp())) ||
                 (scan.GetOp() == OpCode::GetHostGPR &&
                  scan.GetArg<Imm>(0).Get() == target) ||
