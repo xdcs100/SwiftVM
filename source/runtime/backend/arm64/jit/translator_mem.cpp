@@ -335,7 +335,9 @@ bool JitTranslator::ReproveCoalescedHostWrite(ir::Inst* inst) const {
         if (&scan == inst) {
             break;
         }
-        if (IsHostCoalesceObserver(scan.GetOp()) ||
+        const bool flags_only =
+                live_publish && scan.GetOp() == ir::OpCode::SaveFlags;
+        if ((!flags_only && IsHostCoalesceObserver(scan.GetOp())) ||
             (scan.GetOp() == ir::OpCode::GetHostGPR &&
              scan.GetArg<ir::Imm>(0).Get() == target) ||
             (scan.GetOp() == ir::OpCode::SetHostGPR &&

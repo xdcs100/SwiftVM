@@ -4551,6 +4551,21 @@ TEST_CASE("guest GPR coalescing keeps publication and snapshot proofs local") {
                 rewrite.get(), rewrite_alloc.get(), true);
         REQUIRE(rewrite_alloc->ValueGPR(live).id != 22);
         REQUIRE_FALSE(rewrite_alloc->IsHostWriteCoalesced(first->Id()));
+
+        IntrusivePtr<Block> flagged{new Block(0, Location{0x86d6})};
+        auto added = flagged->LoadImm(Imm{swift::u64{11}}).SetType(ValueType::U64);
+        flagged->SaveFlags(added, Flags::All);
+        auto* flagged_pub = flagged->AppendInst(
+                OpCode::SetHostGPR, added, HostRegIndex(22), Imm{0u});
+        flagged->StoreUniform(Uniform{32, ValueType::U64}, added);
+        flagged->SetTerminal(terminal::ReturnToDispatch{});
+        flagged->ReIdInstr();
+        auto flagged_alloc = std::make_unique<RegAlloc>(
+                flagged->MaxInstrId(), pinned_gprs(), fprs, FeatureSet{});
+        RegisterAllocPass::RunForCoalesceLiveTest(
+                flagged.get(), flagged_alloc.get(), true);
+        REQUIRE(flagged_alloc->ValueGPR(added).id == 22);
+        REQUIRE(flagged_alloc->IsHostWriteCoalesced(flagged_pub->Id()));
     }
 
     SECTION("a pre-tied value born inside the publication window rejects coalescing") {

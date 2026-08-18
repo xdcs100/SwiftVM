@@ -1041,7 +1041,9 @@ void CoalesceGuestGPRWrites(
             if (&scan == &store) {
                 break;
             }
-            if (IsPinnedCoalesceObserver(scan.GetOp()) ||
+            const bool flags_only =
+                    live_publish && scan.GetOp() == OpCode::SaveFlags;
+            if ((!flags_only && IsPinnedCoalesceObserver(scan.GetOp())) ||
                 (scan.GetOp() == OpCode::GetHostGPR &&
                  scan.GetArg<Imm>(0).Get() == target) ||
                 (scan.GetOp() == OpCode::SetHostGPR &&
