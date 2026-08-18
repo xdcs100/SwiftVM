@@ -106,9 +106,10 @@ void JitTranslator::CaptureFlagsToken(const Register& result,
 void JitTranslator::FinishFlagsTokenProducer(const Register& result,
                                              ir::ValueType type,
                                              const PseudoFlags& pseudo) {
-    (void)result;
-    (void)type;
-    (void)pseudo;
+    if (!FlagsRegsEnabled() || pseudo.branch_only || flags_token_valid) {
+        return;
+    }
+    CaptureFlagsToken(result, type);
 }
 
 void JitTranslator::ParkFlagsHot() {
@@ -374,6 +375,9 @@ void JitTranslator::ClearFlags(ir::Flags guest) {
 }
 
 void JitTranslator::SaveParity(Register& value) {
+    if (FlagsRegsEnabled()) {
+        return;
+    }
     const u32 begin = context.CurrentBufferSize();
     __ Bfi(flags, value, HostFlagsBit::ParityByte, 8);
     RecordPFAFDensity(PFAFDensityKind::PFWrite, begin);
@@ -469,6 +473,9 @@ void JitTranslator::SaveOF(Register& value, ir::ValueType type) {
 }
 
 void JitTranslator::SaveAuxiliaryCarry(Register &left, const Operand &right, Register &result) {
+    if (FlagsRegsEnabled()) {
+        return;
+    }
     const u32 begin = context.CurrentBufferSize();
     // AF = carry into bit 4 = bit4(left) ^ bit4(right) ^ bit4(result). This holds
     // for add/adc/sub/sbb alike (result already reflects any carry-in). Only the
