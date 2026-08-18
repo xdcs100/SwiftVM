@@ -19,6 +19,7 @@
 #include "runtime/backend/context.h"
 #include "runtime/backend/arm64/defines.h"
 #include "runtime/common/backedge_control.h"
+#include "runtime/common/svm_config.h"
 #include "translator/x86/cpu.h"
 
 namespace swift::runtime::backend::arm64 {
@@ -201,6 +202,20 @@ AluSplitAudit ClassifyAluSplit(ir::Block* block,
         }
     }
 
+    if (FlagsRegsEnabled()) {
+        // Token ABI: PF/AF/Merge no longer sit on this IR. Leftover bytes
+        // are last_result capture, not x26 pack. Counting them as pack_b
+        // would hide the gate and treat token transport as the old ABI tax.
+        if (saw_addr && !saw_value && out.value_uses > 0 &&
+            out.value_uses == found) {
+            out.role = "addr";
+            out.addr_b = emitted;
+        } else {
+            out.role = has_flags && out.value_uses > 0 ? "mixed" : "alu";
+            out.alu_b = emitted;
+        }
+        return out;
+    }
     if (has_flags && out.value_uses == 0) {
         out.role = "pack";
         out.pack_b = emitted;
@@ -1047,13 +1062,12 @@ void JitTranslator::EmitBlockTerminalAndColdPaths(
         bool density,
         std::span<u32> density_bytes) {
     context.BeginTerminalScratch();
-    if (context.GetFeatures().indirect_l1 && dynamic_next_loc) {
+    if (dynamic_next_loc) {
         // SetLocation has consumed this SSA value, so linear scan may consider
-        // its register dead at the terminal. Level 3 puts x11-x17 in the value
-        // pool; keep the cached target live across FlushFlags and the two L1
-        // lookup scratch leases. Otherwise either window can alias the target
-        // before ForwardIndirectL1 hashes and branches through it.
-        context.ReserveLevel3IndirectTarget(*dynamic_next_loc);
+        // its register dead at the terminal. FLAGS_REGS (and any other late
+        // MergeNZCV) takes GetSharedTmpX here; keep the target live so the
+        // scratch lease cannot alias it before the indirect branch.
+        context.ReserveTmpX(context.X(*dynamic_next_loc));
     }
     const u32 flags_before = density ? context.CurrentBufferSize() : 0;
     FlushFlags();
@@ -1063,6 +1077,7 @@ void JitTranslator::EmitBlockTerminalAndColdPaths(
     }
     const u32 terminal_before = density ? context.CurrentBufferSize() : 0;
     boundary_terminal_open = density;
+    flags_token_keep = true;
     if (!EmitBackedgeFlagsTerminal(block->GetTerminal())) {
         EmitTerminal(block->GetTerminal());
     }
@@ -1089,6 +1104,9 @@ void JitTranslator::EmitBlockTerminalAndColdPaths(
     flags_audit_cold = context.FlagsRegsAuditEnabled();
     EmitBackedgeExitStub();
     EmitDirectCycleExitStubs();
+    flags_token_keep = false;
+    flags_token_valid = false;
+    flags_token_af = false;
     EmitBackedgeColdPaths();
     if (density) {
         RecordBoundaryRange(BoundarySubsequence::ColdTail, boundary_cold_before,
@@ -1196,6 +1214,7 @@ void JitTranslator::Translate(ir::Block* block) {
         placement_unit_pc = block->GetStartLocation().Value();
         flags_token_valid = false;
         flags_token_af = false;
+        flags_token_keep = false;
     }
     // Keep entry padding outside the block density/hot accounting window.  It
     // is reached only on the first fallthrough; every self edge targets the
@@ -1290,6 +1309,7 @@ void JitTranslator::Translate(ir::HIRFunction* function) {
     translating_function = true;
     flags_token_valid = false;
     flags_token_af = false;
+    flags_token_keep = false;
     for (size_t i = 0; i < emitted_blocks.size(); ++i) {
         // Undecoded successor left behind by lazy region compilation (and by
         // the pre-existing 128-block cap): no instructions and no terminal.

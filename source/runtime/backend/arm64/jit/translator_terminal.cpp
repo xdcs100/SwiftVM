@@ -146,6 +146,10 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
             // Linear compare chain; each arm ends with its own terminal.
             MergeNZCV(FlagsRegsAuditMergeCause::PStateClobber,
                       flags_audit_block_edge);
+            // Cmp below clobbers host NZCV. Commit is done; do not let
+            // terminal keep re-merge the switch key into x26.
+            nzcv_dirty = false;
+            nzcv_requested = {};
             auto value = context.R(term.value);
             for (auto& case_ : term.cases) {
                 Label next_case;

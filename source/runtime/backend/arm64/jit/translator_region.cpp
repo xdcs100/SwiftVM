@@ -1043,6 +1043,9 @@ void JitTranslator::EmitDirectCycleExitStubs() {
         // The poll runs after MergeNZCV and FlushSpillWrites. Publish the edge
         // target so resuming after the guest signal continues at the committed
         // terminal boundary rather than repeating the source block.
+        if (FlagsRegsEnabled()) {
+            EmitSplitFlagsPublish();
+        }
         __ Mov(ip1, target);
         __ Str(ip1, MemOperand(state, state_offset_current_loc));
         __ Tbnz(ip0, 63, &signal);

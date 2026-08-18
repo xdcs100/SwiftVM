@@ -471,6 +471,9 @@ private:
     bool nzcv_dirty{false};
     bool flags_token_valid{false};
     bool flags_token_af{false};
+    // Terminals may emit several successors. Keep the compile-time token
+    // live so every arm packs; mid-block Merge still consumes it.
+    bool flags_token_keep{false};
     // Which host NZCV bits were actually requested by SaveFlags since the
     // last MergeNZCV. Only these bits are merged; the rest keep their
     // existing value in the flags register (so a ClearFlags(CF) between

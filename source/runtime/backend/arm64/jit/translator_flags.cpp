@@ -137,8 +137,10 @@ void JitTranslator::MergeNZCV(FlagsRegsAuditMergeCause cause,
         __ And(flags, flags, ForceCast<s64>(keep));
         __ And(scratch, scratch, static_cast<u32>(req));
         __ Orr(flags, flags, scratch);
-        nzcv_dirty = false;
-        nzcv_requested = {};
+        if (!flags_token_keep) {
+            nzcv_dirty = false;
+            nzcv_requested = {};
+        }
         const u32 instructions =
                 (context.CurrentBufferSize() - begin) / sizeof(u32);
         if (flags_audit_cold) {
@@ -187,8 +189,10 @@ void JitTranslator::MergeNZCV(FlagsRegsAuditMergeCause cause,
             __ Ubfx(scratch, atomic_scratch, 63, 1);
             __ Bfi(flags, scratch, HostFlagsBit::AuxiliaryCarry, 1);
         }
-        flags_token_valid = false;
-        flags_token_af = false;
+        if (!flags_token_keep) {
+            flags_token_valid = false;
+            flags_token_af = false;
+        }
     }
 }
 
