@@ -200,7 +200,7 @@ internal:                     # GetInternalLabel / 区内 ForwardLocal / fallthr
 - `=1` 热路径仍急切 PF/AF。func_tests 双 RE 校验和已过。
 - 密度允许持平(RE=1 仍是旧 FLAGS +6%，不是停泊引入的)。
 
-**刀 2 — 热 ALU 去 pack**
+**刀 2 — 热 ALU 去 pack**(生产者 PF/AF 已关;`=1` RE=0 host −2.9%;RE=1 仍正,不翻)
 - 生产者跳过 PF/AF；`AdvancePC` 不 Merge。
 - 观察点 `EmitSplitFlagsPublish`（PSTATE+x12→x26）。
 - 出口：park **且** publish（信号仍读 x26）。
