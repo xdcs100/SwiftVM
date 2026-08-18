@@ -106,10 +106,11 @@ void JitTranslator::CaptureFlagsToken(const Register& result,
 void JitTranslator::FinishFlagsTokenProducer(const Register& result,
                                              ir::ValueType type,
                                              const PseudoFlags& pseudo) {
-    if (!FlagsRegsEnabled() || pseudo.branch_only || flags_token_valid) {
-        return;
-    }
-    CaptureFlagsToken(result, type);
+    // PF/AF write x26 on the producer. last_result capture here would add a
+    // mov and force Merge to unpack PF again — that was the +3/exit tax.
+    (void)result;
+    (void)type;
+    (void)pseudo;
 }
 
 void JitTranslator::EmitSplitFlagsPublish() {
@@ -254,17 +255,16 @@ void JitTranslator::SaveLogicalResultFlags(Register& result,
     // backend does not reserve from the register allocator). Tst is the
     // register form of ANDS and yields the identical NZCV with no scratch.
     __ Tst(scratch, scratch);
-    if (FlagsRegsEnabled() && !pseudo.branch_only) {
-        nzcv_requested |= GuestNZCVToHost(pseudo.set & ir::Flags::NZ);
-        nzcv_dirty = true;
-        CaptureFlagsToken(result, type);
-        return;
-    }
     if (!pseudo.branch_only) {
-        MergeLogicalFlagsNZ(pseudo.set);
-    }
-    if (!pseudo.branch_only && True(pseudo.set & ir::Flags::Parity)) {
-        SaveParity(result);
+        if (FlagsRegsEnabled()) {
+            nzcv_requested |= GuestNZCVToHost(pseudo.set & ir::Flags::NZ);
+            nzcv_dirty = true;
+        } else {
+            MergeLogicalFlagsNZ(pseudo.set);
+        }
+        if (True(pseudo.set & ir::Flags::Parity)) {
+            SaveParity(result);
+        }
     }
 }
 
@@ -353,10 +353,6 @@ void JitTranslator::ClearFlags(ir::Flags guest) {
 }
 
 void JitTranslator::SaveParity(Register& value) {
-    if (FlagsRegsEnabled()) {
-        CaptureFlagsToken(value, ir::ValueType::U64);
-        return;
-    }
     const u32 begin = context.CurrentBufferSize();
     __ Bfi(flags, value, HostFlagsBit::ParityByte, 8);
     RecordPFAFDensity(PFAFDensityKind::PFWrite, begin);
@@ -452,10 +448,6 @@ void JitTranslator::SaveOF(Register& value, ir::ValueType type) {
 }
 
 void JitTranslator::SaveAuxiliaryCarry(Register &left, const Operand &right, Register &result) {
-    if (FlagsRegsEnabled()) {
-        CaptureFlagsToken(result, ir::ValueType::U64, true, &left, &right);
-        return;
-    }
     const u32 begin = context.CurrentBufferSize();
     // AF = carry into bit 4 = bit4(left) ^ bit4(right) ^ bit4(result). This holds
     // for add/adc/sub/sbb alike (result already reflects any carry-in). Only the
@@ -801,14 +793,18 @@ void JitTranslator::EmitTestFlags(ir::Inst* inst) {
     bool first{true};
     const auto scratch = context.GetSharedTmpX();
     // JA/JBE are And(TestFlags(CF), CondSet(NE)). Tst clobbers host NZCV.
-    // Commit first so the following CondSet reloads the cmp from x26.
-    // FLAGS_REGS leaves nzcv_dirty across AdvancePC; skipping this Merge
-    // makes CondSet read the Tst result as guest ZF.
-    MergeNZCV(FlagsRegsAuditMergeCause::ClearOrPartialWrite,
-              flags_audit_block_edge);
+    // Restore PSTATE when it still holds the cmp so CondSet sees guest ZF.
+    // Do not Merge here: that was moving a 4-insn pack onto every unfused JA.
     if (nzcv_mask) {
-        __ Tst(flags, nzcv_mask);
-        __ Cset(result, ne);
+        if (save_in_nzcv && nzcv_dirty) {
+            __ Mrs(scratch, NZCV);
+            __ Tst(scratch, nzcv_mask);
+            __ Cset(result, ne);
+            __ Msr(NZCV, scratch);
+        } else {
+            __ Tst(flags, nzcv_mask);
+            __ Cset(result, ne);
+        }
         first = false;
     }
     if (True(test & ir::Flags::Parity)) {
@@ -839,10 +835,16 @@ void JitTranslator::EmitTestNotFlags(ir::Inst* inst) {
     auto nzcv_mask = static_cast<u32>(GuestNZCVToHost(test));
     if (nzcv_mask && !True(test & (ir::Flags::Parity | ir::Flags::AuxiliaryCarry))) {
         auto result = context.W(ir::Value{inst});
-        MergeNZCV(FlagsRegsAuditMergeCause::ClearOrPartialWrite,
-                  flags_audit_block_edge);
-        __ Tst(flags, nzcv_mask);
-        __ Cset(result, eq);
+        if (save_in_nzcv && nzcv_dirty) {
+            const auto scratch = context.GetSharedTmpX();
+            __ Mrs(scratch, NZCV);
+            __ Tst(scratch, nzcv_mask);
+            __ Cset(result, eq);
+            __ Msr(NZCV, scratch);
+        } else {
+            __ Tst(flags, nzcv_mask);
+            __ Cset(result, eq);
+        }
     } else {
         EmitTestFlags(inst);
         auto result = context.W(ir::Value{inst});
