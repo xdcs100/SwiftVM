@@ -1,5 +1,12 @@
 #include "register_alloc_internal.h"
 
+#include <atomic>
+#include <cstdio>
+#include <cstdlib>
+#include <mutex>
+
+#include "runtime/common/svm_config.h"
+
 namespace swift::runtime::ir {
 
 static void MapGuestFixedGPR(backend::RegAlloc* reg_alloc,
@@ -1102,5 +1109,404 @@ void CoalesceGuestGPRWrites(
     }
 }
 
+namespace {
+
+enum class SetHostResidual : u32 {
+    Coalesced = 0,
+    AlreadyHome,
+    Partial,
+    Narrow,
+    CalleeHome,
+    OtherHome,
+    NoProducer,
+    NotProducer,
+    LiveOk,
+    LiveRewrite,
+    LiveHelper,
+    Conflict,
+    Observer,
+    Other,
+    Count,
+};
+
+enum class GetHostResidual : u32 {
+    Coalesced = 0,
+    CalleeHome,
+    OtherHome,
+    Partial,
+    Narrow,
+    NoStore,
+    Observer,
+    Other,
+    Count,
+};
+
+std::atomic<u64> g_sethost[static_cast<u32>(SetHostResidual::Count)]{};
+std::atomic<u64> g_gethost[static_cast<u32>(GetHostResidual::Count)]{};
+std::atomic<u64> g_notprod[256]{};
+std::once_flag g_residual_dump{};
+
+bool IsCallerSavedPin(u32 reg) {
+    return reg <= 9;
+}
+
+bool IsHelperClobber(OpCode op) {
+    switch (op) {
+        case OpCode::CallLambda:
+        case OpCode::CallLocation:
+        case OpCode::CallDynamic:
+        case OpCode::X87Op:
+        case OpCode::Sse42Str:
+            return true;
+        default:
+            return false;
+    }
+}
+
+void DumpPinnedHostResidual() {
+    auto get = [](auto& arr, auto key) {
+        return arr[static_cast<u32>(key)].load(std::memory_order_relaxed);
+    };
+    const u64 stores = get(g_sethost, SetHostResidual::Coalesced) +
+                       get(g_sethost, SetHostResidual::AlreadyHome) +
+                       get(g_sethost, SetHostResidual::Partial) +
+                       get(g_sethost, SetHostResidual::Narrow) +
+                       get(g_sethost, SetHostResidual::CalleeHome) +
+                       get(g_sethost, SetHostResidual::OtherHome) +
+                       get(g_sethost, SetHostResidual::NoProducer) +
+                       get(g_sethost, SetHostResidual::NotProducer) +
+                       get(g_sethost, SetHostResidual::LiveOk) +
+                       get(g_sethost, SetHostResidual::LiveRewrite) +
+                       get(g_sethost, SetHostResidual::LiveHelper) +
+                       get(g_sethost, SetHostResidual::Conflict) +
+                       get(g_sethost, SetHostResidual::Observer) +
+                       get(g_sethost, SetHostResidual::Other);
+    const u64 reads = get(g_gethost, GetHostResidual::Coalesced) +
+                      get(g_gethost, GetHostResidual::CalleeHome) +
+                      get(g_gethost, GetHostResidual::OtherHome) +
+                      get(g_gethost, GetHostResidual::Partial) +
+                      get(g_gethost, GetHostResidual::Narrow) +
+                      get(g_gethost, GetHostResidual::NoStore) +
+                      get(g_gethost, GetHostResidual::Observer) +
+                      get(g_gethost, GetHostResidual::Other);
+    std::fprintf(stderr,
+                 "[svm-sethost-residual] stores=%llu coalesced=%llu already_home=%llu "
+                 "partial=%llu narrow=%llu callee_home=%llu other_home=%llu "
+                 "no_producer=%llu not_producer=%llu live_ok=%llu live_rewrite=%llu "
+                 "live_helper=%llu conflict=%llu observer=%llu other=%llu\n",
+                 static_cast<unsigned long long>(stores),
+                 static_cast<unsigned long long>(get(g_sethost, SetHostResidual::Coalesced)),
+                 static_cast<unsigned long long>(get(g_sethost, SetHostResidual::AlreadyHome)),
+                 static_cast<unsigned long long>(get(g_sethost, SetHostResidual::Partial)),
+                 static_cast<unsigned long long>(get(g_sethost, SetHostResidual::Narrow)),
+                 static_cast<unsigned long long>(get(g_sethost, SetHostResidual::CalleeHome)),
+                 static_cast<unsigned long long>(get(g_sethost, SetHostResidual::OtherHome)),
+                 static_cast<unsigned long long>(get(g_sethost, SetHostResidual::NoProducer)),
+                 static_cast<unsigned long long>(get(g_sethost, SetHostResidual::NotProducer)),
+                 static_cast<unsigned long long>(get(g_sethost, SetHostResidual::LiveOk)),
+                 static_cast<unsigned long long>(get(g_sethost, SetHostResidual::LiveRewrite)),
+                 static_cast<unsigned long long>(get(g_sethost, SetHostResidual::LiveHelper)),
+                 static_cast<unsigned long long>(get(g_sethost, SetHostResidual::Conflict)),
+                 static_cast<unsigned long long>(get(g_sethost, SetHostResidual::Observer)),
+                 static_cast<unsigned long long>(get(g_sethost, SetHostResidual::Other)));
+    std::fprintf(stderr,
+                 "[svm-gethost-residual] reads=%llu coalesced=%llu callee_home=%llu "
+                 "other_home=%llu partial=%llu narrow=%llu no_store=%llu observer=%llu "
+                 "other=%llu\n",
+                 static_cast<unsigned long long>(reads),
+                 static_cast<unsigned long long>(get(g_gethost, GetHostResidual::Coalesced)),
+                 static_cast<unsigned long long>(get(g_gethost, GetHostResidual::CalleeHome)),
+                 static_cast<unsigned long long>(get(g_gethost, GetHostResidual::OtherHome)),
+                 static_cast<unsigned long long>(get(g_gethost, GetHostResidual::Partial)),
+                 static_cast<unsigned long long>(get(g_gethost, GetHostResidual::Narrow)),
+                 static_cast<unsigned long long>(get(g_gethost, GetHostResidual::NoStore)),
+                 static_cast<unsigned long long>(get(g_gethost, GetHostResidual::Observer)),
+                 static_cast<unsigned long long>(get(g_gethost, GetHostResidual::Other)));
+    std::fputs("[svm-sethost-notprod]", stderr);
+    for (u32 op = 0; op < 256; ++op) {
+        const u64 n = g_notprod[op].load(std::memory_order_relaxed);
+        if (n == 0) {
+            continue;
+        }
+        std::fprintf(stderr, " op%u=%llu", op, static_cast<unsigned long long>(n));
+    }
+    std::fputc('\n', stderr);
+}
+
+void Count(SetHostResidual reason) {
+    g_sethost[static_cast<u32>(reason)].fetch_add(1, std::memory_order_relaxed);
+}
+
+void Count(GetHostResidual reason) {
+    g_gethost[static_cast<u32>(reason)].fetch_add(1, std::memory_order_relaxed);
+}
+
+}  // namespace
+
+void CensusPinnedHostResidual(
+        Block* lir_block,
+        backend::RegAlloc* reg_alloc,
+        const Vector<u32>& use_end) {
+    if (!GetSvmConfig().density_prof) {
+        return;
+    }
+    std::call_once(g_residual_dump, [] { std::atexit(DumpPinnedHostResidual); });
+
+    auto& list = lir_block->GetInstList();
+    u64 set_local[static_cast<u32>(SetHostResidual::Count)]{};
+    u64 get_local[static_cast<u32>(GetHostResidual::Count)]{};
+    auto count_set = [&](SetHostResidual reason) {
+        Count(reason);
+        ++set_local[static_cast<u32>(reason)];
+    };
+    auto count_get = [&](GetHostResidual reason) {
+        Count(reason);
+        ++get_local[static_cast<u32>(reason)];
+    };
+    for (auto& store : list) {
+        if (store.GetOp() != OpCode::SetHostGPR) {
+            continue;
+        }
+        if (reg_alloc->IsHostWriteCoalesced(store.Id())) {
+            count_set(SetHostResidual::Coalesced);
+            continue;
+        }
+        const u32 offset = store.GetArg<Imm>(2).Get();
+        const u32 target = store.GetArg<Imm>(1).Get();
+        Value stored = ResolveBitCastSource(store.GetArg<Value>(0));
+        auto* wrapper = stored.Def();
+        const u32 store_width = stored.Defined()
+                ? GetValueSizeByte(stored.Type())
+                : 0;
+        if (offset != 0) {
+            count_set(SetHostResidual::Partial);
+            continue;
+        }
+        if (store_width != 0 && store_width < sizeof(u32)) {
+            count_set(SetHostResidual::Narrow);
+            continue;
+        }
+        if (!IsPinnedCoalesceTarget(target)) {
+            count_set(target == 19 || target == 20 || target == 21
+                              ? SetHostResidual::CalleeHome
+                              : SetHostResidual::OtherHome);
+            continue;
+        }
+        if (!wrapper) {
+            count_set(SetHostResidual::NoProducer);
+            continue;
+        }
+
+        Value produced = stored;
+        Inst* producer = wrapper;
+        Inst* zext = nullptr;
+        if (wrapper->GetOp() == OpCode::ZeroExtend32To64) {
+            produced = ResolveBitCastSource(wrapper->GetArg<Value>(0));
+            producer = produced.Def();
+            zext = wrapper;
+        }
+        if (!producer) {
+            count_set(SetHostResidual::NoProducer);
+            continue;
+        }
+        if (GuestGPRMappedTo(produced, target, reg_alloc) &&
+            (!zext || GuestGPRMappedTo(stored, target, reg_alloc))) {
+            count_set(SetHostResidual::AlreadyHome);
+            continue;
+        }
+        if (!IsPinnedCoalesceProducer(producer->GetOp()) &&
+            !IsWidthChainRootProducer(producer)) {
+            count_set(SetHostResidual::NotProducer);
+            g_notprod[static_cast<u8>(producer->GetOp())].fetch_add(
+                    1, std::memory_order_relaxed);
+            continue;
+        }
+
+        const bool last_use =
+                stored.Id() < use_end.size() &&
+                wrapper->GetUses() == 1 &&
+                use_end[stored.Id()] == store.Id() &&
+                (!zext || (producer->GetUses() == 1 && produced.Id() < use_end.size() &&
+                           use_end[produced.Id()] == zext->Id()));
+        if (!last_use && stored.Id() < use_end.size()) {
+            const u32 last = std::max<u32>(store.Id(), use_end[stored.Id()]);
+            bool after = false;
+            bool rewrite = false;
+            bool helper = false;
+            for (auto& scan : list) {
+                if (&scan == &store) {
+                    after = true;
+                    continue;
+                }
+                if (!after || scan.Id() > last) {
+                    continue;
+                }
+                if (scan.GetOp() == OpCode::SetHostGPR &&
+                    scan.GetArg<Imm>(1).Get() == target) {
+                    rewrite = true;
+                    break;
+                }
+                if (IsCallerSavedPin(target) && IsHelperClobber(scan.GetOp())) {
+                    helper = true;
+                }
+            }
+            if (rewrite) {
+                count_set(SetHostResidual::LiveRewrite);
+                continue;
+            }
+            if (helper) {
+                count_set(SetHostResidual::LiveHelper);
+                continue;
+            }
+            count_set(SetHostResidual::LiveOk);
+            continue;
+        }
+
+        if (HasGuestGPRTargetConflict(
+                    lir_block, reg_alloc, use_end, producer, wrapper, &store,
+                    target)) {
+            count_set(SetHostResidual::Conflict);
+            continue;
+        }
+        bool after_producer = false;
+        bool observer = false;
+        for (auto& scan : list) {
+            if (&scan == producer) {
+                after_producer = true;
+                continue;
+            }
+            if (!after_producer || &scan == wrapper) {
+                continue;
+            }
+            if (&scan == &store) {
+                break;
+            }
+            if (IsPinnedCoalesceObserver(scan.GetOp()) ||
+                (scan.GetOp() == OpCode::GetHostGPR &&
+                 scan.GetArg<Imm>(0).Get() == target) ||
+                (scan.GetOp() == OpCode::SetHostGPR &&
+                 scan.GetArg<Imm>(1).Get() == target)) {
+                observer = true;
+                break;
+            }
+        }
+        if (observer) {
+            count_set(SetHostResidual::Observer);
+            continue;
+        }
+        count_set(SetHostResidual::Other);
+    }
+
+    for (auto& read : list) {
+        if (read.GetOp() != OpCode::GetHostGPR) {
+            continue;
+        }
+        if (reg_alloc->IsHostReadCoalesced(read.Id())) {
+            count_get(GetHostResidual::Coalesced);
+            continue;
+        }
+        const u32 offset = read.GetArg<Imm>(1).Get();
+        const u32 target = read.GetArg<Imm>(0).Get();
+        const u32 width = GetValueSizeByte(read.ReturnType());
+        if (offset != 0) {
+            count_get(GetHostResidual::Partial);
+            continue;
+        }
+        if (width < sizeof(u32)) {
+            count_get(GetHostResidual::Narrow);
+            continue;
+        }
+        if (!IsPinnedCoalesceTarget(target)) {
+            count_get(target == 19 || target == 20 || target == 21
+                              ? GetHostResidual::CalleeHome
+                              : GetHostResidual::OtherHome);
+            continue;
+        }
+        Inst* latest_store = nullptr;
+        bool blocked = false;
+        for (auto& scan : list) {
+            if (&scan == &read) {
+                break;
+            }
+            if (scan.GetOp() == OpCode::SetHostGPR &&
+                scan.GetArg<Imm>(1).Get() == target) {
+                latest_store = &scan;
+                blocked = false;
+                continue;
+            }
+            if (latest_store && IsPinnedCoalesceObserver(scan.GetOp())) {
+                blocked = true;
+            }
+        }
+        if (!latest_store) {
+            count_get(GetHostResidual::NoStore);
+            continue;
+        }
+        if (blocked) {
+            count_get(GetHostResidual::Observer);
+            continue;
+        }
+        count_get(GetHostResidual::Other);
+    }
+    auto s = [&](SetHostResidual r) {
+        return set_local[static_cast<u32>(r)];
+    };
+    auto g = [&](GetHostResidual r) {
+        return get_local[static_cast<u32>(r)];
+    };
+    std::fprintf(
+            stderr,
+            "[svm-sethost-residual-block] pc=0x%llx stores=%llu coalesced=%llu already_home=%llu "
+            "partial=%llu narrow=%llu callee_home=%llu other_home=%llu no_producer=%llu "
+            "not_producer=%llu live_ok=%llu live_rewrite=%llu live_helper=%llu conflict=%llu "
+            "observer=%llu other=%llu reads=%llu r_coalesced=%llu r_callee_home=%llu "
+            "r_other_home=%llu r_partial=%llu r_narrow=%llu r_no_store=%llu r_observer=%llu "
+            "r_other=%llu\n",
+            static_cast<unsigned long long>(lir_block->GetStartLocation().Value()),
+            static_cast<unsigned long long>(s(SetHostResidual::Coalesced) +
+                                            s(SetHostResidual::AlreadyHome) +
+                                            s(SetHostResidual::Partial) +
+                                            s(SetHostResidual::Narrow) +
+                                            s(SetHostResidual::CalleeHome) +
+                                            s(SetHostResidual::OtherHome) +
+                                            s(SetHostResidual::NoProducer) +
+                                            s(SetHostResidual::NotProducer) +
+                                            s(SetHostResidual::LiveOk) +
+                                            s(SetHostResidual::LiveRewrite) +
+                                            s(SetHostResidual::LiveHelper) +
+                                            s(SetHostResidual::Conflict) +
+                                            s(SetHostResidual::Observer) +
+                                            s(SetHostResidual::Other)),
+            static_cast<unsigned long long>(s(SetHostResidual::Coalesced)),
+            static_cast<unsigned long long>(s(SetHostResidual::AlreadyHome)),
+            static_cast<unsigned long long>(s(SetHostResidual::Partial)),
+            static_cast<unsigned long long>(s(SetHostResidual::Narrow)),
+            static_cast<unsigned long long>(s(SetHostResidual::CalleeHome)),
+            static_cast<unsigned long long>(s(SetHostResidual::OtherHome)),
+            static_cast<unsigned long long>(s(SetHostResidual::NoProducer)),
+            static_cast<unsigned long long>(s(SetHostResidual::NotProducer)),
+            static_cast<unsigned long long>(s(SetHostResidual::LiveOk)),
+            static_cast<unsigned long long>(s(SetHostResidual::LiveRewrite)),
+            static_cast<unsigned long long>(s(SetHostResidual::LiveHelper)),
+            static_cast<unsigned long long>(s(SetHostResidual::Conflict)),
+            static_cast<unsigned long long>(s(SetHostResidual::Observer)),
+            static_cast<unsigned long long>(s(SetHostResidual::Other)),
+            static_cast<unsigned long long>(g(GetHostResidual::Coalesced) +
+                                            g(GetHostResidual::CalleeHome) +
+                                            g(GetHostResidual::OtherHome) +
+                                            g(GetHostResidual::Partial) +
+                                            g(GetHostResidual::Narrow) +
+                                            g(GetHostResidual::NoStore) +
+                                            g(GetHostResidual::Observer) +
+                                            g(GetHostResidual::Other)),
+            static_cast<unsigned long long>(g(GetHostResidual::Coalesced)),
+            static_cast<unsigned long long>(g(GetHostResidual::CalleeHome)),
+            static_cast<unsigned long long>(g(GetHostResidual::OtherHome)),
+            static_cast<unsigned long long>(g(GetHostResidual::Partial)),
+            static_cast<unsigned long long>(g(GetHostResidual::Narrow)),
+            static_cast<unsigned long long>(g(GetHostResidual::NoStore)),
+            static_cast<unsigned long long>(g(GetHostResidual::Observer)),
+            static_cast<unsigned long long>(g(GetHostResidual::Other)));
+}
 
 }  // namespace swift::runtime::ir

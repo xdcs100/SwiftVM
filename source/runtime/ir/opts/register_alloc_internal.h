@@ -75,6 +75,10 @@ void CoalesceGuestGPRWrites(
         const Vector<u32>& use_end,
         const Vector<u32>& fixed_gpr_clobbers,
         const RegisterAllocFamilyCallbacks& callbacks);
+void CensusPinnedHostResidual(
+        Block* lir_block,
+        backend::RegAlloc* reg_alloc,
+        const Vector<u32>& use_end);
 bool IsResidentFPRTarget(u32 reg);
 bool IsScalarFPRBinaryProducer(OpCode op);
 bool IsResidentFPRProducer(OpCode op, bool scalar_tie);

@@ -903,6 +903,7 @@ private:
                     lir_block, reg_alloc, features, use_end, fixed_gpr_clobbers,
                     callbacks);
             CoalesceGuestGPRReads(lir_block, reg_alloc, use_end);
+            CensusPinnedHostResidual(lir_block, reg_alloc, use_end);
         };
 
         if (function) {
@@ -996,6 +997,7 @@ private:
                 !ValidateWidthComponentTransaction(lir_block, reg_alloc)) {
                 reg_alloc->RestoreGPRCoalesceState(std::move(baseline));
             }
+            CensusPinnedHostResidual(lir_block, reg_alloc, use_end);
         };
 
         if (function) {
