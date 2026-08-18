@@ -1133,7 +1133,11 @@ void JitContext::TickIR(ir::Inst* instr) {
         // x12/x13 remain outside the allocator's value pool, preserving the
         // documented six-register level-2 pool. Lease them only as explicit
         // instruction-local scratch when the opcode has no fixed use.
+        // FLAGS_REGS keeps x12 as last_result; it is never a scratch lease.
         for (u32 code : {12u, 13u}) {
+            if (code == 12 && GetSvmConfig().flags_regs) {
+                continue;
+            }
             if (!(fixed & (1u << code))) {
                 cur_dirty_gprs.Clear(code);
                 tick_dirty_gprs.Clear(code);
@@ -1251,9 +1255,11 @@ void JitContext::BeginTerminalScratch() {
         }
     }
     if (backend::X86PinExtScratchOnlyEnabled(reg_alloc.GetGprs(), features)) {
-        cur_dirty_gprs.Clear(12);
+        if (!GetSvmConfig().flags_regs) {
+            cur_dirty_gprs.Clear(12);
+            tick_dirty_gprs.Clear(12);
+        }
         cur_dirty_gprs.Clear(13);
-        tick_dirty_gprs.Clear(12);
         tick_dirty_gprs.Clear(13);
     }
     BeginVixlScratch(true);

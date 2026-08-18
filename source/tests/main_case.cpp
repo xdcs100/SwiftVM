@@ -304,6 +304,8 @@ TEST_CASE("FeatureSet snapshots every B-class field and applies sparse overrides
     REQUIRE(FeatureSet{}.zero_store_zr);
     REQUIRE_FALSE(FeatureSet{}.flags_regs_audit);
     REQUIRE_FALSE(FeatureSet{}.ra_fixed_class);
+    REQUIRE_FALSE(GetSvmConfig().flags_regs);
+    REQUIRE_FALSE(FlagsRegsEnabled());
     const auto& svm = GetSvmConfig();
     const auto snapshot = svm.GetFeatureSet();
 #define CHECK_FEATURE_COPY(field, default_value) REQUIRE(snapshot.field == svm.field);
@@ -507,6 +509,64 @@ TEST_CASE("mapped main-image range owns only its guest addresses") {
     REQUIRE(ComputeConfigHash(config,
                               space.GetDefaultModule()->GetModuleConfig(),
                               one) != base_hash);
+}
+
+TEST_CASE("SVM_FLAGS_REGS is A-class, default OFF, and pins x12 out of XPOOL") {
+    using namespace swift::runtime;
+    using namespace swift::runtime::backend;
+
+    REQUIRE_FALSE(FlagsRegsEnabled());
+    REQUIRE(FeatureSet{}.jit_scratch_xpool);
+
+    const GPRSMask empty_gprs{0};
+    const FPRSMask empty_fprs{0};
+    {
+        RegAlloc off{1, empty_gprs, empty_fprs, FeatureSet{}};
+        REQUIRE_FALSE(off.GetGprs().Get(12));
+    }
+
+    auto save = [](const char* name) {
+        const char* old = GetRawSvmConfigEnvForTest(name);
+        return std::pair<bool, std::string>{old != nullptr, old ? old : ""};
+    };
+    auto restore = [](const char* name, const std::pair<bool, std::string>& saved) {
+        if (saved.first) {
+            SetSvmConfigEnvForTest(name, saved.second.c_str(), 1);
+        } else {
+            UnsetSvmConfigEnvForTest(name);
+        }
+    };
+
+    const auto old_flags = save("SVM_FLAGS_REGS");
+    const auto old_latch = save("SVM_BACKEDGE_LATCH");
+    const auto old_p1 = save("SVM_BACKEDGE_FLAGS");
+
+    UnsetSvmConfigEnvForTest("SVM_FLAGS_REGS");
+    const auto missing = ComputeEnvHash();
+    SetSvmConfigEnvForTest("SVM_FLAGS_REGS", "0", 1);
+    const auto disabled = ComputeEnvHash();
+    SetSvmConfigEnvForTest("SVM_FLAGS_REGS", "1", 1);
+    const auto enabled = ComputeEnvHash();
+
+    REQUIRE(missing == disabled);
+    REQUIRE(disabled != enabled);
+    REQUIRE(FlagsRegsEnabled());
+    {
+        RegAlloc on{1, empty_gprs, empty_fprs, FeatureSet{}};
+        REQUIRE(on.GetGprs().Get(12));
+    }
+    // Reservation-only: do not imply latch emit. P1 still loses if both set.
+    UnsetSvmConfigEnvForTest("SVM_BACKEDGE_LATCH");
+    UnsetSvmConfigEnvForTest("SVM_BACKEDGE_FLAGS");
+    REQUIRE_FALSE(BackedgeLatchEnabled());
+    SetSvmConfigEnvForTest("SVM_BACKEDGE_LATCH", "1", 1);
+    SetSvmConfigEnvForTest("SVM_BACKEDGE_FLAGS", "1", 1);
+    REQUIRE(BackedgeLatchEnabled());
+    REQUIRE_FALSE(BackedgeFlagsEnabled());
+
+    restore("SVM_BACKEDGE_FLAGS", old_p1);
+    restore("SVM_BACKEDGE_LATCH", old_latch);
+    restore("SVM_FLAGS_REGS", old_flags);
 }
 
 TEST_CASE("JIT cache environment hash separates absolute constant materialization") {

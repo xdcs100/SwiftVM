@@ -86,6 +86,12 @@ void TrampolinesArm64::Build() {
         gpr_regs.Mark(local.GetCode());
     }
     gpr_regs.Mark(flags.GetCode());
+    if (GetSvmConfig().flags_regs) {
+        // last_result home. Process-wide so the AddressSpace mask and the
+        // per-unit RegAlloc constructor agree; XPOOL still exposes x11/x13/
+        // x16/x17 as the bindable union.
+        gpr_regs.Mark(atomic_scratch.GetCode());
+    }
     // x11-x13/x16-x17 是否进入 value pool 是单 unit FeatureSet 决策。
     // 这里保留可用并集，RegAlloc 构造时再按该 unit 的快照收紧；否则默认
     // module 的值会永久限制同一 AddressSpace 里的其他 module。

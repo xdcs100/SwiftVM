@@ -152,8 +152,9 @@ flags 专项桶只有 0.03——**真实 flags 成本藏在 Sub/And/Or/BitExtrac
   - 门 3:W81 latch + per-block fault map 可复用;缺的是 token→x26 配方,
     不是再做 latch。`FLAGS_REGS=1` 隐含 latch,不翻 P1 `BACKEDGE_FLAGS`。
   - 门 4:新 `SVM_FLAGS_REGS` 默认 OFF,`=0` 回今天的 x26 急切打包。
-  - **挡发射**:last_result 的 GPR 家未选(推荐可分配池再钉 1 枚;禁 x25/x27/
-    pin 家)。下一刀=只读池扫描。
+  - **挡发射**:last_result 家已定为 x12。`SVM_FLAGS_REGS` 默认 OFF 只预留该
+    寄存器(池 −1),不改 pack 发射、不隐含 latch。下一刀=Linux identity
+    spill 扫描;过门才写 `EmitSplitFlagsPublish`。
 
 ### 2.3 独立小项(不挡 P0-A)
 

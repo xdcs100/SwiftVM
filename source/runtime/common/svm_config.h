@@ -276,6 +276,7 @@ struct FeatureOverrides {
     X(std::string, swift_fuzz_seed, "SWIFT_FUZZ_SEED", RawString, "", "x86 fuzz 随机种子原串；显式时 strtoull(base 0)，缺省 random_device；原 x86_fuzz.cpp:547") \
     X(bool, swift_fuzz_trace, "SWIFT_FUZZ_TRACE", Presence, false, "x86 fuzz trace；变量存在即开；原 x86_fuzz.cpp:769") \
     X(bool, flags_regs_audit, "SVM_FLAGS_REGS_AUDIT", NonZero, false, "W-beta flags 寄存器化纯计数审计；非 0 开，缺省 OFF；零发码改动") \
+    X(bool, flags_regs, "SVM_FLAGS_REGS", NonZero, false, "P0-B last_result 家预留(x12)；非 0 开，缺省 OFF；本刀只收池，不改 flags 发射；A 类，不进 FeatureSet") \
     X(bool, ra_fixed_class, "SVM_RA_FIXED_CLASS", NonZero, false, "W-gamma guest GPR fixed register class；非 0 开，缺省 OFF；需 SVM_X86_PIN_EXT=3")
 
 struct SvmConfig {
@@ -315,6 +316,13 @@ inline constexpr std::array<SvmConfigFieldInfo, kSvmConfigFieldCount> kSvmConfig
 // 首次调用通过 call_once 读取整张表；返回引用在进程生命周期内稳定。
 const SvmConfig& GetSvmConfig();
 void InitSvmConfig();
+
+// A-class P0-B last_result pin. Default OFF. Not a FeatureSet field: the
+// token home must be process-wide. This slice only reserves x12; it does
+// not change flags emission or imply BACKEDGE_LATCH.
+[[nodiscard]] inline bool FlagsRegsEnabled() {
+    return GetSvmConfig().flags_regs;
+}
 
 // 仅供无并发 reader 的测试使用：丢弃快照并在下一次读取时重新解析 environ。
 void ReloadSvmConfigForTest();

@@ -77,11 +77,13 @@ JitDiskCache::JitDiskCache(AddressSpace& space)
     const auto& config = address_space.GetConfig();
     if (BackedgeFlagsEnabled() ||
         (config.region_edges && svm_config.backedge_flags) ||
-        svm_config.flags_loop_lazy) {
+        svm_config.flags_loop_lazy || svm_config.flags_regs) {
         // Recovery veneers are block-local code offsets. SerialBlock does
         // not yet serialize that relocation/eligibility contract, so refuse
         // disk reuse rather than reviving a unit with an imprecise recipe.
-        LOG_WARNING("SVM_JIT_CACHE: lazy backedge flags are incompatible; cache disabled");
+        // FLAGS_REGS additionally pins last_result in x12; that home is not
+        // in SerialBlock yet.
+        LOG_WARNING("SVM_JIT_CACHE: lazy flags ABI is incompatible; cache disabled");
         return;
     }
     if (host_image.size == 0) {

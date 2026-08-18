@@ -181,7 +181,8 @@ public:
                 backend::X86PinExtScratchOnlyEnabled(pool, features);
         if (level2_scratch) {
             const u32 fixed = backend::FixedGPRClobbers(op, features, true);
-            count += ((fixed & (1u << 12)) ? 0u : 1u) +
+            const bool last_result_pinned = GetSvmConfig().flags_regs;
+            count += ((fixed & (1u << 12)) || last_result_pinned ? 0u : 1u) +
                      ((fixed & (1u << 13)) ? 0u : 1u);
         }
         return count;

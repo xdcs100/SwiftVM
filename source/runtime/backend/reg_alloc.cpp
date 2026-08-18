@@ -474,6 +474,12 @@ RegAlloc::RegAlloc(u32 instr_size, const GPRSMask& gprs, const FPRSMask& fprs,
             this->gprs.Mark(code);
         }
     }
+    // A-class last_result home. XPOOL ON otherwise puts x12 in the value
+    // pool; pin it out so later token emission can keep it live across the
+    // dispatcher. XPOOL OFF already reserved it above.
+    if (FlagsRegsEnabled()) {
+        this->gprs.Mark(12);
+    }
     // v11-v14 are an emitter-local NaN cold ABI, not a cross-unit ABI. Keep
     // their availability a per-unit FeatureSet decision: the trampoline mask
     // exposes the AFP-capable union, while an OFF or non-AFP unit restores the
