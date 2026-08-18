@@ -453,6 +453,7 @@ private:
     void EmitSplitFlagsPublish();
     void ParkFlagsHot();
     void UnparkFlagsHot();
+    void EmitFlagsPublishedVeneer(ir::Block* block);
 
     JitContext &context;
     MacroAssembler &masm;

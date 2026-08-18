@@ -30,16 +30,22 @@ void EmitFlagsPark(MacroAssembler& assembler) {
     __ Str(x12, MemOperand(state, state_offset_flags_result_park));
 }
 
-void EmitFlagsUnpark(MacroAssembler& assembler, Label* skip) {
+void EmitFlagsUnpark(MacroAssembler& assembler) {
     if (!FlagsRegsEnabled()) {
         return;
     }
+    Label from_x26;
+    Label done;
     __ Ldr(ip1, MemOperand(state, state_offset_flags_nzcv_park));
-    __ Tbz(ip1, kFlagsNzcvParkValidBit, skip);
+    __ Tbz(ip1, kFlagsNzcvParkValidBit, &from_x26);
     __ Ldr(x12, MemOperand(state, state_offset_flags_result_park));
     __ And(ip1, ip1, 0xF0000000ull);
     __ Msr(NZCV, ip1);
-    __ Bind(skip);
+    __ B(&done);
+    __ Bind(&from_x26);
+    __ And(ip1, flags, 0xF0000000ull);
+    __ Msr(NZCV, ip1);
+    __ Bind(&done);
 }
 }  // namespace
 
@@ -300,8 +306,7 @@ void TrampolinesArm64::BuildRuntimeEntry(MacroAssembler& assembler) {
         __ Ldr(pt, MemOperand(state, state_offset_pt));
     }
     __ Ldr(flags, MemOperand(state, state_offset_host_flags));
-    Label unpark_entry;
-    EmitFlagsUnpark(assembler, &unpark_entry);
+    EmitFlagsUnpark(assembler);
     // load local
     if (config.has_local_operation) {
         __ Ldr(local, MemOperand(state, state_offset_local_buffer));
@@ -458,8 +463,7 @@ void TrampolinesArm64::BuildRuntimeEntry(MacroAssembler& assembler) {
     }
     __ Ldr(rsb_ptr, MemOperand(state, state_offset_rsb_pointer));
     __ Ldr(flags, MemOperand(state, state_offset_host_flags));
-    Label unpark_host;
-    EmitFlagsUnpark(assembler, &unpark_host);
+    EmitFlagsUnpark(assembler);
     BuildRestoreStaticUniform(assembler);
 }
 

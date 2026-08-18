@@ -206,7 +206,8 @@ public:
     }
 
     void SetCurrent(ir::Function *function);
-    void SetCurrent(ir::Block *block, bool split_backedge_entry = false);
+    void SetCurrent(ir::Block *block, bool split_backedge_entry = false,
+                    bool defer_published_entry = false);
     void BindInternalEntry(LocationDescriptor location);
     // Completes a split block entry after the translator has emitted the
     // published-entry branch and bound the self-only body label.

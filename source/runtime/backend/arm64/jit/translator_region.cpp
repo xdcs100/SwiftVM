@@ -213,9 +213,7 @@ void JitTranslator::EmitRegionEdge(ir::Location target,
     if (fallthrough && IsSelfEdge(target) && loop_hoist_body_entry) {
         fallthrough = false;
     }
-    if (commit_flags) {
-        // Dual-entry blocks can be reached from L2. Do not leave last_result
-        // lazy across a region edge; AdvancePC stays lazy inside the block.
+    if (commit_flags && !FlagsRegsEnabled()) {
         MergeNZCV(FlagsRegsAuditMergeCause::TerminalInternal,
                   FlagsRegsAuditEdgeKind::RegionInternal);
     }

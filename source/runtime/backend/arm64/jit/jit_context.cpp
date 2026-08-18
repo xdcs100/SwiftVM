@@ -1029,14 +1029,17 @@ bool JitContext::IsUniform(const Register& reg) {
     }
 }
 
-void JitContext::SetCurrent(ir::Block* block, bool split_backedge_entry) {
+void JitContext::SetCurrent(ir::Block* block, bool split_backedge_entry,
+                            bool defer_published_entry) {
     cur_block = block;
     if (!unit_start_set) {
         unit_start = block->GetStartLocation().Value();
         unit_start_set = true;
     }
     auto label = GetLabel(block->GetStartLocation().Value());
-    __ Bind(label);
+    if (!defer_published_entry && !label->IsBound()) {
+        __ Bind(label);
+    }
     if (hot_counter_storage_enabled) {
         if (hot_coalesce_enabled) ASSERT(!hot_collecting);
         hot_coalesce_slot =

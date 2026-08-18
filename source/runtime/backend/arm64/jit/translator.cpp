@@ -771,7 +771,8 @@ JitTranslator::PrepareBlockState(ir::Block* block) {
                     : nullptr;
     const bool split_flags_entry = backedge_flags_plan &&
                                    !backedge_flags_plan->dead_successor;
-    context.SetCurrent(block, split_flags_entry);
+    context.SetCurrent(block, split_flags_entry,
+                       FlagsRegsEnabled() && region_edges_active);
     flags_audit_block_edge = ClassifyFlagsAuditEdge(block->GetTerminal());
     if (region_edges_active) {
         context.BindInternalEntry(block->GetStartLocation().Value());
@@ -1240,6 +1241,9 @@ void JitTranslator::Translate(ir::Block* block) {
     u32& loop_hoist_prefix_begin = block_state.loop_hoist_prefix_begin;
     u32& loop_hoist_prefix_ops = block_state.loop_hoist_prefix_ops;
     const bool split_flags_entry = block_state.split_flags_entry;
+    if (FlagsRegsEnabled() && region_edges_active) {
+        nzcv_dirty = true;
+    }
     if (split_flags_entry) {
         // Every published/external entry takes the cold initializer below;
         // only the self edge targets local_entry. This makes host NZCV valid
@@ -1330,6 +1334,11 @@ void JitTranslator::Translate(ir::HIRFunction* function) {
                                              .Value()}
                 : std::nullopt;
         Translate(block);
+    }
+    if (FlagsRegsEnabled() && region_edges_active) {
+        for (auto* block : emitted_blocks) {
+            EmitFlagsPublishedVeneer(block);
+        }
     }
     translating_function = false;
     PlacementPoint("unit", placement_unit_pc);
