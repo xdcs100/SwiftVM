@@ -21,7 +21,8 @@ static void MapGuestFixedGPR(backend::RegAlloc* reg_alloc,
 }
 
 bool IsPinnedCoalesceTarget(u32 reg) {
-    return reg <= 9 || reg == 22 || reg == 23 || reg == 29;
+    return reg <= 9 || reg == 19 || reg == 20 || reg == 21 ||
+           reg == 22 || reg == 23 || reg == 29;
 }
 
 bool IsPinnedCoalesceProducer(OpCode op) {

@@ -4488,6 +4488,19 @@ TEST_CASE("guest GPR coalescing keeps publication and snapshot proofs local") {
         return ExpandedCase{std::move(block), produced, conflict, publish};
     };
 
+    SECTION("callee-saved RSP/RBX/RBP homes enter the same publication proof") {
+        for (swift::u16 home : {19u, 20u, 21u}) {
+            IntrusivePtr<Block> block{new Block(0, Location{0x86c8})};
+            auto value = block->LoadImm(Imm{swift::u64{0x123456789abcdef0}})
+                                 .SetType(ValueType::U64);
+            auto* publish = block->AppendInst(
+                    OpCode::SetHostGPR, value, HostRegIndex(home), Imm{0u});
+            auto on = allocate(block.get(), true);
+            REQUIRE(on->ValueGPR(value).id == home);
+            REQUIRE(on->IsHostWriteCoalesced(publish->Id()));
+        }
+    }
+
     SECTION("last-use full-width publication enters the fixed home") {
         IntrusivePtr<Block> block{new Block(0, Location{0x86c0})};
         auto value = block->LoadImm(Imm{swift::u64{0x123456789abcdef0}})

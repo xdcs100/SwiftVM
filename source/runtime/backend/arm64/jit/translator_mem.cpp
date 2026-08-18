@@ -1012,7 +1012,9 @@ void JitTranslator::EmitGetHostGPR(ir::Inst* inst) {
     auto reg_index = inst->GetArg<ir::Imm>(0).Get();
     const u32 value_size = ir::GetValueSizeByte(inst->ReturnType());
     const bool pin_ext_reg =
-            reg_index <= 9 || reg_index == 22 || reg_index == 23 || reg_index == 29;
+            reg_index <= 9 || reg_index == 19 || reg_index == 20 ||
+            reg_index == 21 || reg_index == 22 || reg_index == 23 ||
+            reg_index == 29;
     if (offset == 0 && pin_ext_reg &&
         inst->GetUses() == 1 && value_size <= sizeof(u32)) {
         auto& list = cur_block->GetInstList();
@@ -1137,7 +1139,9 @@ void JitTranslator::EmitSetHostGPR(ir::Inst* inst) {
     ASSERT_MSG(bit_offset + bit_width <= 64,
                "invalid fixed GPR write offset {} width {}", bit_offset, bit_width);
     const bool pin_ext_reg =
-            reg_index <= 9 || reg_index == 22 || reg_index == 23 || reg_index == 29;
+            reg_index <= 9 || reg_index == 19 || reg_index == 20 ||
+            reg_index == 21 || reg_index == 22 || reg_index == 23 ||
+            reg_index == 29;
     if (bit_offset == 0 && bit_width == 32 && pin_ext_reg) {
         if (value_reg.W() != host_reg.W()) {
             __ Mov(host_reg.W(), value_reg.W());
