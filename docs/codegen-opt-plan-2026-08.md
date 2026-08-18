@@ -116,6 +116,8 @@ flags 专项桶只有 0.03——**真实 flags 成本藏在 Sub/And/Or/BitExtrac
   **不翻默认**。
 
 **P0-B flags 打包算术(W-β 重开,先设计后代码)**
+现行上限对齐方案:docs/codegen-flags-rebuild-2026-08.md
+(三层 ABI:热 PSTATE+x12 / 已发布 x26 / 停泊槽;双入口 fallthrough=internal)。
 
 - 对象:为 PF/AF/窄 CF 服务的 `Sub`/`And`/`Or`/`Xor`。FEX 对应是
   NZCV 永驻 PSTATE + PF/AF 专用 GPR,这类 ALU **根本不出现**。

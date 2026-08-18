@@ -307,6 +307,11 @@ TEST_CASE("FeatureSet snapshots every B-class field and applies sparse overrides
     REQUIRE_FALSE(FeatureSet{}.ra_fixed_class);
     REQUIRE_FALSE(GetSvmConfig().flags_regs);
     REQUIRE_FALSE(FlagsRegsEnabled());
+    STATIC_REQUIRE(kFlagsNzcvParkSlot == 0);
+    STATIC_REQUIRE(kFlagsResultParkSlot == 1);
+    STATIC_REQUIRE(state_offset_flags_nzcv_park == state_offset_spill_area);
+    STATIC_REQUIRE(state_offset_flags_result_park ==
+                   state_offset_spill_area + 8);
     const auto& svm = GetSvmConfig();
     const auto snapshot = svm.GetFeatureSet();
 #define CHECK_FEATURE_COPY(field, default_value) REQUIRE(snapshot.field == svm.field);

@@ -106,11 +106,27 @@ void JitTranslator::CaptureFlagsToken(const Register& result,
 void JitTranslator::FinishFlagsTokenProducer(const Register& result,
                                              ir::ValueType type,
                                              const PseudoFlags& pseudo) {
-    // PF/AF write x26 on the producer. last_result capture here would add a
-    // mov and force Merge to unpack PF again — that was the +3/exit tax.
     (void)result;
     (void)type;
     (void)pseudo;
+}
+
+void JitTranslator::ParkFlagsHot() {
+    if (!FlagsRegsEnabled()) {
+        return;
+    }
+    __ Mrs(ip, NZCV);
+    __ Str(ip, MemOperand(state, state_offset_flags_nzcv_park));
+    __ Str(atomic_scratch, MemOperand(state, state_offset_flags_result_park));
+}
+
+void JitTranslator::UnparkFlagsHot() {
+    if (!FlagsRegsEnabled()) {
+        return;
+    }
+    __ Ldr(atomic_scratch, MemOperand(state, state_offset_flags_result_park));
+    __ Ldr(ip, MemOperand(state, state_offset_flags_nzcv_park));
+    __ Msr(NZCV, ip);
 }
 
 void JitTranslator::EmitSplitFlagsPublish() {

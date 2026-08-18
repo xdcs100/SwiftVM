@@ -451,6 +451,8 @@ private:
                                   ir::ValueType type,
                                   const PseudoFlags& pseudo);
     void EmitSplitFlagsPublish();
+    void ParkFlagsHot();
+    void UnparkFlagsHot();
 
     JitContext &context;
     MacroAssembler &masm;
