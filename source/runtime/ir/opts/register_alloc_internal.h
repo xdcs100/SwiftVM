@@ -67,7 +67,8 @@ bool HasGuestGPRTargetConflict(
         Inst* producer,
         Inst* wrapper,
         Inst* store,
-        u32 target);
+        u32 target,
+        u32 live_end);
 void CoalesceGuestGPRWrites(
         Block* lir_block,
         backend::RegAlloc* reg_alloc,

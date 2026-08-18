@@ -2496,6 +2496,17 @@ void RegisterAllocPass::RunForCoalesceTest(ir::Block* block,
                 features.ra_spill_evict);
 }
 
+void RegisterAllocPass::RunForCoalesceLiveTest(ir::Block* block,
+                                               backend::RegAlloc* reg_alloc,
+                                               bool live) {
+    auto features = FeatureSet{};
+    features.ra_coalesce = true;
+    features.ra_coalesce_live = live;
+    RunVerified(block, reg_alloc, features, false, false,
+                features.ra_intwidth_tie, features.induct_tie,
+                features.ra_spill_evict);
+}
+
 void RegisterAllocPass::RunForCoalesceConflictTest(ir::Block* block,
                                                    backend::RegAlloc* reg_alloc,
                                                    u32 tied_value_id,

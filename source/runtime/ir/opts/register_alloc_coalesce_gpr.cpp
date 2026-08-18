@@ -762,29 +762,35 @@ bool HasGuestGPRTargetConflict(
         Inst* producer,
         Inst* wrapper,
         Inst* store,
-        u32 target) {
+        u32 target,
+        u32 live_end) {
     auto& list = lir_block->GetInstList();
     auto mapped_to = [&](Value value, u32 mapped_target) {
         return GuestGPRMappedTo(value, mapped_target, reg_alloc);
     };
     for (auto& other : list) {
         if (&other == producer || &other == wrapper || &other == store ||
-            !other.HasValue() || other.IsBitCastOperation() ||
-            other.Id() >= store->Id()) {
+            !other.HasValue() || other.IsBitCastOperation()) {
+            continue;
+        }
+        // A later GetHost of this home is a read of the published value,
+        // not a third-party writer occupying the pin.
+        if (other.Id() > store->Id() && other.GetOp() == OpCode::GetHostGPR &&
+            other.GetArg<Imm>(0).Get() == target) {
             continue;
         }
         Value value{&other};
         if (!mapped_to(value, target)) {
             continue;
         }
+        const u32 start = other.Id();
         const u32 end = value.Id() < use_end.size() ? use_end[value.Id()] : value.Id();
         // A pre-existing tie can define a new value in the
         // producer->publication window. Its ordinary emitter then
         // writes the fixed home even though no Get/SetHostGPR is
         // present for the observer scan to see. Reject every
-        // third-party target interval intersecting that window,
-        // from either side of the producer definition.
-        if (end > producer->Id()) {
+        // third-party target interval intersecting [producer, live_end].
+        if (start <= live_end && end > producer->Id()) {
             return true;
         }
     }
@@ -804,9 +810,10 @@ void CoalesceGuestGPRWrites(
         return GuestGPRMappedTo(value, target, reg_alloc);
     };
     auto has_target_conflict = [&](Inst* producer, Inst* wrapper,
-                                   Inst* store, u32 target) {
+                                   Inst* store, u32 target, u32 live_end) {
         return HasGuestGPRTargetConflict(
-                lir_block, reg_alloc, use_end, producer, wrapper, store, target);
+                lir_block, reg_alloc, use_end, producer, wrapper, store, target,
+                live_end);
     };
     auto CheckInstr = [&](Inst* inst, u32 extra_gpr, u32 extra_fpr) {
         return callbacks.check_instr(callbacks.context, inst, extra_gpr, extra_fpr);
@@ -830,9 +837,16 @@ void CoalesceGuestGPRWrites(
                  (wrapper->GetOp() == OpCode::ZeroExtend32To64 &&
                   IsWidthChainRootProducer(
                           ResolveBitCastSource(wrapper->GetArg<Value>(0)).Def())));
+        const bool last_use_is_store =
+                wrapper && stored.Id() < use_end.size() &&
+                wrapper->GetUses() == 1 && use_end[stored.Id()] == store.Id();
+        const bool live_publish =
+                features.ra_coalesce_live && wrapper &&
+                stored.Id() < use_end.size() && !tentative_width_root &&
+                use_end[stored.Id()] >= store.Id() &&
+                (wrapper->GetUses() != 1 || use_end[stored.Id()] != store.Id());
         if (!wrapper || stored.Id() >= use_end.size() ||
-            (!tentative_width_root &&
-             (wrapper->GetUses() != 1 || use_end[stored.Id()] != store.Id()))) {
+            (!tentative_width_root && !last_use_is_store && !live_publish)) {
             continue;
         }
 
@@ -844,11 +858,17 @@ void CoalesceGuestGPRWrites(
             zero_extend_chain = true;
             width_root = features.ra_width_chain &&
                          IsWidthChainRootProducer(produced.Def());
+            const bool inner_last =
+                    produced.Def() && produced.Id() < use_end.size() &&
+                    produced.Def()->GetUses() == 1 &&
+                    use_end[produced.Id()] == wrapper->Id();
+            const bool inner_live =
+                    features.ra_coalesce_live && !width_root && produced.Def() &&
+                    produced.Id() < use_end.size() &&
+                    use_end[produced.Id()] >= wrapper->Id();
             if ((!HasKnownWWrite(produced) && !width_root) || !produced.Def() ||
                 produced.Id() >= use_end.size() ||
-                (!width_root &&
-                 (produced.Def()->GetUses() != 1 ||
-                  use_end[produced.Id()] != wrapper->Id()))) {
+                (!width_root && !inner_last && !inner_live)) {
                 continue;
             }
         }
@@ -967,8 +987,45 @@ void CoalesceGuestGPRWrites(
             (!zero_extend_chain || mapped_to(stored, target))) {
             continue;
         }
-        if (has_target_conflict(producer, wrapper, &store, target)) {
+        u32 live_end = store.Id();
+        if (features.ra_coalesce_live && stored.Id() < use_end.size()) {
+            live_end = std::max<u32>(live_end, use_end[stored.Id()]);
+            if (zero_extend_chain && produced.Id() < use_end.size()) {
+                live_end = std::max<u32>(live_end, use_end[produced.Id()]);
+            }
+        }
+        if (has_target_conflict(producer, wrapper, &store, target, live_end)) {
             continue;
+        }
+        if (live_end > store.Id()) {
+            bool after_store = false;
+            bool live_blocked = false;
+            for (auto& scan : list) {
+                if (&scan == &store) {
+                    after_store = true;
+                    continue;
+                }
+                if (!after_store || scan.Id() > live_end) {
+                    continue;
+                }
+                if (scan.GetOp() == OpCode::SetHostGPR &&
+                    scan.GetArg<Imm>(1).Get() == target) {
+                    live_blocked = true;
+                    break;
+                }
+                if (target <= 9 &&
+                    (scan.GetOp() == OpCode::CallLambda ||
+                     scan.GetOp() == OpCode::CallLocation ||
+                     scan.GetOp() == OpCode::CallDynamic ||
+                     scan.GetOp() == OpCode::X87Op ||
+                     scan.GetOp() == OpCode::Sse42Str)) {
+                    live_blocked = true;
+                    break;
+                }
+            }
+            if (live_blocked) {
+                continue;
+            }
         }
 
         bool after_producer = false;
@@ -1364,7 +1421,7 @@ void CensusPinnedHostResidual(
 
         if (HasGuestGPRTargetConflict(
                     lir_block, reg_alloc, use_end, producer, wrapper, &store,
-                    target)) {
+                    target, store.Id())) {
             count_set(SetHostResidual::Conflict);
             continue;
         }

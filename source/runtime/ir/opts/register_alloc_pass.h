@@ -49,6 +49,9 @@ public:
     static void RunForCoalesceTest(ir::Block *block,
                                    backend::RegAlloc *reg_alloc,
                                    bool coalesce);
+    static void RunForCoalesceLiveTest(ir::Block *block,
+                                       backend::RegAlloc *reg_alloc,
+                                       bool live);
     static void RunForCoalesceConflictTest(ir::Block *block,
                                            backend::RegAlloc *reg_alloc,
                                            u32 tied_value_id,

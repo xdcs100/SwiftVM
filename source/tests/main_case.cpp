@@ -299,7 +299,8 @@ TEST_CASE("FeatureSet snapshots every B-class field and applies sparse overrides
     using namespace swift::runtime;
     using namespace swift::runtime::backend;
 
-    STATIC_REQUIRE(kFeatureCount == 71);
+    STATIC_REQUIRE(kFeatureCount == 72);
+    REQUIRE_FALSE(FeatureSet{}.ra_coalesce_live);
     REQUIRE(FeatureSet{}.operand_copy_kill);
     REQUIRE(FeatureSet{}.zero_store_zr);
     REQUIRE_FALSE(FeatureSet{}.flags_regs_audit);
@@ -4509,6 +4510,47 @@ TEST_CASE("guest GPR coalescing keeps publication and snapshot proofs local") {
         auto on = allocate(block.get(), true);
         REQUIRE(on->ValueGPR(value).id != 22);
         REQUIRE_FALSE(on->IsHostWriteCoalesced(publish->Id()));
+    }
+
+    SECTION("live SSA after publish enters the home only with coalesce live") {
+        auto make = [&] {
+            IntrusivePtr<Block> block{new Block(0, Location{0x86d4})};
+            auto value = block->LoadImm(Imm{swift::u64{11}}).SetType(ValueType::U64);
+            auto* publish = block->AppendInst(
+                    OpCode::SetHostGPR, value, HostRegIndex(22), Imm{0u});
+            block->StoreUniform(Uniform{32, ValueType::U64}, value);
+            return std::pair{std::move(block), publish};
+        };
+        auto [off_block, off_publish] = make();
+        auto off = allocate(off_block.get(), true);
+        REQUIRE(off->ValueGPR(Value{&off_block->GetInstList().front()}).id != 22);
+        REQUIRE_FALSE(off->IsHostWriteCoalesced(off_publish->Id()));
+
+        auto [on_block, on_publish] = make();
+        on_block->SetTerminal(terminal::ReturnToDispatch{});
+        on_block->ReIdInstr();
+        auto on_alloc = std::make_unique<RegAlloc>(
+                on_block->MaxInstrId(), pinned_gprs(), fprs, FeatureSet{});
+        RegisterAllocPass::RunForCoalesceLiveTest(on_block.get(), on_alloc.get(), true);
+        auto value_on = Value{&on_block->GetInstList().front()};
+        REQUIRE(on_alloc->ValueGPR(value_on).id == 22);
+        REQUIRE(on_alloc->IsHostWriteCoalesced(on_publish->Id()));
+
+        IntrusivePtr<Block> rewrite{new Block(0, Location{0x86d5})};
+        auto live = rewrite->LoadImm(Imm{swift::u64{11}}).SetType(ValueType::U64);
+        auto* first = rewrite->AppendInst(
+                OpCode::SetHostGPR, live, HostRegIndex(22), Imm{0u});
+        auto next = rewrite->LoadImm(Imm{swift::u64{22}}).SetType(ValueType::U64);
+        rewrite->SetHostGPR(next, HostRegIndex(22), Imm{0u});
+        rewrite->StoreUniform(Uniform{32, ValueType::U64}, live);
+        rewrite->SetTerminal(terminal::ReturnToDispatch{});
+        rewrite->ReIdInstr();
+        auto rewrite_alloc = std::make_unique<RegAlloc>(
+                rewrite->MaxInstrId(), pinned_gprs(), fprs, FeatureSet{});
+        RegisterAllocPass::RunForCoalesceLiveTest(
+                rewrite.get(), rewrite_alloc.get(), true);
+        REQUIRE(rewrite_alloc->ValueGPR(live).id != 22);
+        REQUIRE_FALSE(rewrite_alloc->IsHostWriteCoalesced(first->Id()));
     }
 
     SECTION("a pre-tied value born inside the publication window rejects coalescing") {

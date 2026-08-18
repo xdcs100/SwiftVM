@@ -207,7 +207,9 @@ bool JitTranslator::ReproveCoalescedHostWrite(ir::Inst* inst) const {
     auto* wrapper = stored.Def();
     const bool width_wrapper = stored.Defined() &&
                                context.IsWidthChainCoalesced(stored.Id());
-    if (!wrapper || (!width_wrapper && wrapper->GetUses() != 1)) {
+    const bool live_publish =
+            context.GetFeatures().ra_coalesce_live && !width_wrapper;
+    if (!wrapper || (!width_wrapper && !live_publish && wrapper->GetUses() != 1)) {
         return false;
     }
     auto produced = stored;
@@ -218,7 +220,8 @@ bool JitTranslator::ReproveCoalescedHostWrite(ir::Inst* inst) const {
         const bool width_root = produced.Defined() &&
                                 context.IsWidthChainCoalesced(produced.Id()) &&
                                 context.WidthChainAnchor(produced.Id()) == produced.Id();
-        if (!produced.Def() || (!width_root && produced.Def()->GetUses() != 1) ||
+        if (!produced.Def() ||
+            (!width_root && !live_publish && produced.Def()->GetUses() != 1) ||
             !IsWidthChainHostWWrite(produced, target, context.GetFeatures())) {
             return false;
         }
@@ -294,11 +297,23 @@ bool JitTranslator::ReproveCoalescedHostWrite(ir::Inst* inst) const {
         }
     }
 
+    u32 live_end = inst->Id();
+    if (live_publish) {
+        live_end = std::max<u32>(live_end, last_use(wrapper));
+        if (zero_extend_chain) {
+            live_end = std::max<u32>(live_end, last_use(producer));
+        }
+    }
     for (auto& other : cur_block->GetInstList()) {
         if (&other == component_source || &other == producer ||
             &other == wrapper || &other == inst ||
             !other.HasValue() || other.IsBitCastOperation() ||
-            other.Id() >= inst->Id()) {
+            other.Id() > live_end) {
+            continue;
+        }
+        if (other.Id() > inst->Id() &&
+            other.GetOp() == ir::OpCode::GetHostGPR &&
+            other.GetArg<ir::Imm>(0).Get() == target) {
             continue;
         }
         ir::Value value{&other};
@@ -328,21 +343,46 @@ bool JitTranslator::ReproveCoalescedHostWrite(ir::Inst* inst) const {
             return false;
         }
     }
-    for (auto& scan : cur_block->GetInstList()) {
-        if (scan.Id() <= inst->Id()) {
-            continue;
-        }
-        for (auto value : scan.GetValues()) {
-            if (ResolveHostCoalesceBitCast(value).Def() == wrapper) {
-                if (width_wrapper) {
-                    continue;
+    if (!live_publish) {
+        for (auto& scan : cur_block->GetInstList()) {
+            if (scan.Id() <= inst->Id()) {
+                continue;
+            }
+            for (auto value : scan.GetValues()) {
+                if (ResolveHostCoalesceBitCast(value).Def() == wrapper) {
+                    if (width_wrapper) {
+                        continue;
+                    }
+                    return false;
                 }
-                return false;
             }
         }
+        if (TerminalUsesHostCoalesceValue(cur_block->GetTerminal(), wrapper)) {
+            return false;
+        }
+        return true;
     }
-    if (TerminalUsesHostCoalesceValue(cur_block->GetTerminal(), wrapper)) {
-        return false;
+    bool after_store = false;
+    for (auto& scan : cur_block->GetInstList()) {
+        if (&scan == inst) {
+            after_store = true;
+            continue;
+        }
+        if (!after_store || scan.Id() > live_end) {
+            continue;
+        }
+        if (scan.GetOp() == ir::OpCode::SetHostGPR &&
+            scan.GetArg<ir::Imm>(1).Get() == target) {
+            return false;
+        }
+        if (target <= 9 &&
+            (scan.GetOp() == ir::OpCode::CallLambda ||
+             scan.GetOp() == ir::OpCode::CallLocation ||
+             scan.GetOp() == ir::OpCode::CallDynamic ||
+             scan.GetOp() == ir::OpCode::X87Op ||
+             scan.GetOp() == ir::OpCode::Sse42Str)) {
+            return false;
+        }
     }
     return true;
 }
@@ -1075,9 +1115,11 @@ void JitTranslator::EmitGetHostFPR(ir::Inst* inst) {
 
 void JitTranslator::EmitSetHostGPR(ir::Inst* inst) {
     if (context.IsHostWriteCoalesced(inst->Id())) {
-        ASSERT_MSG(ReproveCoalescedHostWrite(inst),
+        if (ReproveCoalescedHostWrite(inst)) {
+            return;
+        }
+        ASSERT_MSG(context.GetFeatures().ra_coalesce_live,
                    "SetHostGPR coalescing proof diverged at IR {}", inst->Id());
-        return;
     }
     auto offset = inst->GetArg<ir::Imm>(2).Get();
     auto reg_index = inst->GetArg<ir::Imm>(1).Get();
