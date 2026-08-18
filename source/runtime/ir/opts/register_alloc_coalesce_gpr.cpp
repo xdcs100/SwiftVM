@@ -40,6 +40,7 @@ bool IsPinnedCoalesceProducer(OpCode op) {
         case OpCode::Mul:
         case OpCode::Div:
         case OpCode::Not:
+        case OpCode::Neg:
         case OpCode::LslImm:
         case OpCode::LslValue:
         case OpCode::LsrImm:

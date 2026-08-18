@@ -69,7 +69,7 @@ namespace swift::runtime {
     X(fpr_ipv_reclaim, true) \
     X(ra_spill_evict, true) \
     X(ra_coalesce, true) \
-    X(ra_coalesce_live, false) \
+    X(ra_coalesce_live, true) \
     X(ra_width_chain, false) \
     X(ra_width_chain_long, true) \
     X(const_addr_cache, false) \
@@ -209,7 +209,7 @@ struct FeatureOverrides {
     X(bool, fpr_ipv_reclaim, "SVM_FPR_IPV_RECLAIM", DefaultOn, true, "AFP 已覆盖 NaN cold ABI 时归还 v11-v14；缺省 ON，=0 回退；单独关本开关时 SVM_XMM_RESIDENT_HI 退化为有税形态；原 trampolines.cpp") \
     X(bool, ra_spill_evict, "SVM_RA_SPILL_EVICT", DefaultOn, true, "RA farthest-end 驱逐；缺省 ON，=0 回退；原 register_alloc_pass.cpp:106") \
     X(bool, ra_coalesce, "SVM_RA_COALESCE", DefaultOn, true, "guest GPR 发布点定向合并；缺省 ON，=0 回退；原 register_alloc_pass.cpp") \
-    X(bool, ra_coalesce_live, "SVM_RA_COALESCE_LIVE", NonZero, false, "发布后仍活的 SSA 绑到 pin 家；非 0 开，缺省 OFF；同 pin 再写或 caller-saved helper 拒绝") \
+    X(bool, ra_coalesce_live, "SVM_RA_COALESCE_LIVE", DefaultOn, true, "发布后仍活的 SSA 绑到 pin 家；缺省 ON，=0 回退 last-use W-alpha；同 pin 再写或 caller-saved helper 拒绝") \
     X(bool, ra_width_chain, "SVM_RA_WIDTH_CHAIN", NonZero, false, "unit 内多节点整数宽度 identity 链合并；非 0 开，缺省 OFF；原 register_alloc_pass.cpp") \
     X(bool, ra_width_chain_long, "SVM_RA_WIDTH_CHAIN_LONG", DefaultOn, true, "unit 内长 Add/Xor 发布链的低 32 位 ownership 合并；缺省 ON，=0 回退；原 register_alloc_pass.cpp") \
     X(bool, const_addr_cache, "SVM_CONST_ADDR_CACHE", NonZero, false, "unit 内重复绝对地址寄存器缓存；非 0 开，缺省 OFF；原 register_alloc_pass.cpp") \

@@ -2491,6 +2491,7 @@ void RegisterAllocPass::RunForCoalesceTest(ir::Block* block,
                                            bool coalesce) {
     auto features = FeatureSet{};
     features.ra_coalesce = coalesce;
+    features.ra_coalesce_live = false;
     RunVerified(block, reg_alloc, features, false, false,
                 features.ra_intwidth_tie, features.induct_tie,
                 features.ra_spill_evict);
@@ -2516,6 +2517,7 @@ void RegisterAllocPass::RunForCoalesceConflictTest(ir::Block* block,
     // only run; keep the initial verified pass from coalescing on its own
     // regardless of the FeatureSet default.
     features.ra_coalesce = false;
+    features.ra_coalesce_live = false;
     RunVerified(block, reg_alloc, features, false, false,
                 features.ra_intwidth_tie, features.induct_tie,
                 features.ra_spill_evict);

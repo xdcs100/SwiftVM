@@ -300,7 +300,7 @@ TEST_CASE("FeatureSet snapshots every B-class field and applies sparse overrides
     using namespace swift::runtime::backend;
 
     STATIC_REQUIRE(kFeatureCount == 72);
-    REQUIRE_FALSE(FeatureSet{}.ra_coalesce_live);
+    REQUIRE(FeatureSet{}.ra_coalesce_live);
     REQUIRE(FeatureSet{}.operand_copy_kill);
     REQUIRE(FeatureSet{}.zero_store_zr);
     REQUIRE_FALSE(FeatureSet{}.flags_regs_audit);
@@ -4359,6 +4359,7 @@ TEST_CASE("guest GPR coalescing keeps publication and snapshot proofs local") {
             ExpandedProducer{OpCode::Div, "Div"},
             ExpandedProducer{OpCode::AndNot, "AndNot"},
             ExpandedProducer{OpCode::Not, "Not"},
+            ExpandedProducer{OpCode::Neg, "Neg"},
             ExpandedProducer{OpCode::LslImm, "LslImm"},
             ExpandedProducer{OpCode::LslValue, "LslValue"},
             ExpandedProducer{OpCode::LsrImm, "LsrImm"},
@@ -4410,6 +4411,8 @@ TEST_CASE("guest GPR coalescing keeps publication and snapshot proofs local") {
                 return binary([&](Value left, Value right) {
                     return block->Not(left, Operand{right});
                 });
+            case OpCode::Neg:
+                return block->Neg(load_scalar(0x123456789abcdef0ull)).SetType(type);
             case OpCode::LslImm:
                 return block->LslImm(load_scalar(0x123456789abcdef0ull), Imm{5u})
                         .SetType(type);
