@@ -54,6 +54,172 @@ bool IsScalarFPRBinary(ir::OpCode op) {
     }
 }
 
+bool IsAluSplitOpcode(ir::OpCode op) {
+    using O = ir::OpCode;
+    return op == O::Sub || op == O::And || op == O::Or || op == O::Xor;
+}
+
+bool IsWidthBridgeOpcode(ir::OpCode op) {
+    using O = ir::OpCode;
+    switch (op) {
+        case O::BitCast:
+        case O::ZeroExtend32:
+        case O::ZeroExtend32To64:
+        case O::ZeroExtend64:
+        case O::BitExtract:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool DataIsDef(const ir::Operand::Type& data, ir::Inst* def) {
+    return data.IsValue() && data.value.Def() == def;
+}
+
+bool InstRefsDef(ir::Inst* user, ir::Inst* def) {
+    const auto op = user->GetOp();
+    if (op == ir::OpCode::StoreMemory || op == ir::OpCode::StoreMemoryTSO) {
+        const auto addr = user->GetArg<ir::Operand>(0);
+        const auto data = user->GetArg<ir::Value>(1);
+        return DataIsDef(addr.GetLeft(), def) || DataIsDef(addr.GetRight(), def) ||
+               data.Def() == def;
+    }
+    if (op == ir::OpCode::LoadMemory || op == ir::OpCode::LoadMemoryTSO ||
+        op == ir::OpCode::GetOperand) {
+        const auto addr = user->GetArg<ir::Operand>(0);
+        return DataIsDef(addr.GetLeft(), def) || DataIsDef(addr.GetRight(), def);
+    }
+    for (auto value : user->GetValues()) {
+        if (value.Def() == def) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool IsAddressUse(ir::Inst* user, ir::Inst* def) {
+    using O = ir::OpCode;
+    const auto op = user->GetOp();
+    if (op == O::GetOperand || op == O::LoadMemory || op == O::LoadMemoryTSO) {
+        return true;
+    }
+    if (op == O::StoreMemory || op == O::StoreMemoryTSO) {
+        return user->GetArg<ir::Value>(1).Def() != def;
+    }
+    if (op == O::AtomicExchange || op == O::AtomicFetchAdd) {
+        return user->GetArg<ir::Value>(0).Def() == def &&
+               user->GetArg<ir::Value>(1).Def() != def;
+    }
+    if (op == O::AtomicRMW) {
+        return user->GetArg<ir::Value>(1).Def() == def;
+    }
+    return false;
+}
+
+struct AluSplitAudit {
+    const char* role = "none";
+    u32 value_uses = 0;
+    u32 flags = 0;
+    u32 pack_b = 0;
+    u32 alu_b = 0;
+    u32 addr_b = 0;
+};
+
+AluSplitAudit ClassifyAluSplit(ir::Block* block,
+                               ir::Inst* inst,
+                               u32 emitted,
+                               bool has_flags,
+                               u32 flags_mask) {
+    AluSplitAudit out;
+    if (!IsAluSplitOpcode(inst->GetOp()) || emitted == 0) {
+        return out;
+    }
+    out.value_uses = inst->GetUses(true);
+    out.flags = flags_mask;
+
+    std::array<ir::Inst*, 32> family{};
+    u32 family_n = 1;
+    family[0] = inst;
+    bool grew = true;
+    while (grew) {
+        grew = false;
+        for (auto& user : block->GetInstList()) {
+            if (!IsWidthBridgeOpcode(user.GetOp()) || family_n >= family.size()) {
+                continue;
+            }
+            bool already = false;
+            for (u32 i = 0; i < family_n; ++i) {
+                if (family[i] == &user) {
+                    already = true;
+                    break;
+                }
+            }
+            if (already) {
+                continue;
+            }
+            auto src = user.GetArg<ir::Value>(0).Def();
+            for (u32 i = 0; i < family_n; ++i) {
+                if (family[i] == src) {
+                    family[family_n++] = &user;
+                    grew = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    bool saw_addr = false;
+    bool saw_value = false;
+    u32 found = 0;
+    for (auto& user : block->GetInstList()) {
+        bool in_family = false;
+        for (u32 i = 0; i < family_n; ++i) {
+            if (family[i] == &user) {
+                in_family = true;
+                break;
+            }
+        }
+        if (in_family) {
+            continue;
+        }
+        ir::Inst* which = nullptr;
+        for (u32 i = 0; i < family_n; ++i) {
+            if (InstRefsDef(&user, family[i])) {
+                which = family[i];
+                break;
+            }
+        }
+        if (!which) {
+            continue;
+        }
+        ++found;
+        if (IsAddressUse(&user, which)) {
+            saw_addr = true;
+        } else {
+            saw_value = true;
+        }
+    }
+
+    if (has_flags && out.value_uses == 0) {
+        out.role = "pack";
+        out.pack_b = emitted;
+    } else if (saw_addr && !saw_value && out.value_uses > 0 &&
+               out.value_uses == found) {
+        out.role = "addr";
+        out.addr_b = emitted;
+    } else if (has_flags && (saw_value || out.value_uses > 0)) {
+        out.role = "mixed";
+        const u32 alu = emitted >= 4 ? 4u : emitted;
+        out.alu_b = alu;
+        out.pack_b = emitted - alu;
+    } else {
+        out.role = "alu";
+        out.alu_b = emitted;
+    }
+    return out;
+}
+
 enum class DensityCategory : size_t {
     Flags,
     Uniform,
@@ -841,12 +1007,20 @@ void JitTranslator::TranslateBlockInstructions(
                         ir::Value{&inst}, inst.GetArg<ir::Value>(0));
                 const bool shufps_left_fixed = shufps && context.IsHostReadCoalesced(
                         ResolveBitCastValue(inst.GetArg<ir::Value>(0)).Id());
+                const auto pf = GetPseudoFlags(&inst);
+                const auto alu_split = ClassifyAluSplit(
+                        block,
+                        &inst,
+                        production_emitted,
+                        !pf.Null(),
+                        static_cast<u32>(pf.set));
                 std::fprintf(stderr,
                              "[svm-gap-op] block=0x%llx guest_pc=0x%llx id=%u "
                              "op=%s bytes=%u host_offset=%u scalar_binary=%u scalar_tied=%u "
                              "shufps=%u shufps_imm=%u shufps_alias=%u "
                              "shufps_left_tied=%u shufps_left_fixed=%u "
-                             "advpc_nzcv_dirty=%u advpc_nzcv_requested=0x%llx\n",
+                             "advpc_nzcv_dirty=%u advpc_nzcv_requested=0x%llx "
+                             "alu_role=%s value_uses=%u flags=%u pack_b=%u alu_b=%u addr_b=%u\n",
                              static_cast<unsigned long long>(
                                      block->GetStartLocation().Value()),
                              static_cast<unsigned long long>(audit_guest_pc),
@@ -857,7 +1031,9 @@ void JitTranslator::TranslateBlockInstructions(
                              shufps_alias ? 1u : 0u, shufps_left_tied ? 1u : 0u,
                              shufps_left_fixed ? 1u : 0u,
                              audit_nzcv_dirty ? 1u : 0u,
-                             static_cast<unsigned long long>(audit_nzcv_requested));
+                             static_cast<unsigned long long>(audit_nzcv_requested),
+                             alu_split.role, alu_split.value_uses, alu_split.flags,
+                             alu_split.pack_b, alu_split.alu_b, alu_split.addr_b);
             }
         }
         if (inst.GetOp() == ir::OpCode::AdvancePC) {
