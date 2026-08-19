@@ -810,19 +810,30 @@ bool OpClobbersPstate(ir::OpCode op) {
     }
 }
 
-bool ZeroStillInPstate(ir::Block* block, ir::Inst* test) {
-    bool zero_live = false;
+// Z/N/V have the same host/guest polarity. C does not (see CarryStillInPstate).
+bool SimpleFlagStillInPstate(ir::Block* block, ir::Inst* test, ir::Flags flag) {
+    bool live = false;
     for (auto& inst : block->GetInstList()) {
         if (&inst == test) {
-            return zero_live;
+            return live;
         }
         if (inst.GetOp() == ir::OpCode::SaveFlags ||
             inst.GetOp() == ir::OpCode::BranchOnlyFlags) {
-            zero_live = True(inst.GetArg<ir::Flags>(1) & ir::Flags::Zero);
+            live = True(inst.GetArg<ir::Flags>(1) & flag);
+            continue;
+        }
+        if (inst.GetOp() == ir::OpCode::ClearFlags &&
+            True(inst.GetArg<ir::Flags>(0) & flag)) {
+            live = false;
+            continue;
+        }
+        if (flag == ir::Flags::Overflow &&
+            inst.GetOp() == ir::OpCode::SetOverflow) {
+            live = false;
             continue;
         }
         if (OpClobbersPstate(inst.GetOp())) {
-            zero_live = false;
+            live = false;
         }
     }
     return false;
@@ -887,8 +898,18 @@ bool CarryStillInPstate(ir::Block* block, ir::Inst* test) {
 void JitTranslator::EmitTestFlags(ir::Inst* inst) {
     auto test = inst->GetArg<ir::Flags>(0);
     if (FlagsRegsEnabled() && test == ir::Flags::Zero &&
-        ZeroStillInPstate(cur_block, inst) &&
+        SimpleFlagStillInPstate(cur_block, inst, ir::Flags::Zero) &&
         RecordLocalCondition(inst, ir::Cond::EQ)) {
+        return;
+    }
+    if (FlagsRegsEnabled() && test == ir::Flags::Negate &&
+        SimpleFlagStillInPstate(cur_block, inst, ir::Flags::Negate) &&
+        RecordLocalCondition(inst, ir::Cond::MI)) {
+        return;
+    }
+    if (FlagsRegsEnabled() && test == ir::Flags::Overflow &&
+        SimpleFlagStillInPstate(cur_block, inst, ir::Flags::Overflow) &&
+        RecordLocalCondition(inst, ir::Cond::VS)) {
         return;
     }
     if (FlagsRegsEnabled() && test == ir::Flags::Carry &&
@@ -941,8 +962,18 @@ void JitTranslator::EmitTestFlags(ir::Inst* inst) {
 void JitTranslator::EmitTestNotFlags(ir::Inst* inst) {
     auto test = inst->GetArg<ir::Flags>(0);
     if (FlagsRegsEnabled() && test == ir::Flags::Zero &&
-        ZeroStillInPstate(cur_block, inst) &&
+        SimpleFlagStillInPstate(cur_block, inst, ir::Flags::Zero) &&
         RecordLocalCondition(inst, ir::Cond::NE)) {
+        return;
+    }
+    if (FlagsRegsEnabled() && test == ir::Flags::Negate &&
+        SimpleFlagStillInPstate(cur_block, inst, ir::Flags::Negate) &&
+        RecordLocalCondition(inst, ir::Cond::PL)) {
+        return;
+    }
+    if (FlagsRegsEnabled() && test == ir::Flags::Overflow &&
+        SimpleFlagStillInPstate(cur_block, inst, ir::Flags::Overflow) &&
+        RecordLocalCondition(inst, ir::Cond::VC)) {
         return;
     }
     if (FlagsRegsEnabled() && test == ir::Flags::Carry &&
