@@ -305,7 +305,12 @@ bool JitTranslator::SuccessorCoversIncomingNzcv(ir::Block* succ,
             }
             continue;
         }
-        if (op == ir::OpCode::SaveFlags || op == ir::OpCode::BranchOnlyFlags) {
+        if (op == ir::OpCode::BranchOnlyFlags) {
+            // The Flags arg is the Jcc live subset, not the PSTATE write.
+            // CMP/TEST/INC already left architectural NZCV in the host.
+            return true;
+        }
+        if (op == ir::OpCode::SaveFlags) {
             needed &= static_cast<HostFlags>(
                     ~static_cast<u64>(GuestNZCVToHost(inst.GetArg<ir::Flags>(1))));
             if (!True(needed)) {
