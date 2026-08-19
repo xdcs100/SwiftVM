@@ -1039,6 +1039,11 @@ void JitContext::SetCurrent(ir::Block* block, bool split_backedge_entry,
     auto label = GetLabel(block->GetStartLocation().Value());
     if (!defer_published_entry && !label->IsBound()) {
         __ Bind(label);
+    } else if (defer_published_entry) {
+        auto* counted = GetCountedEntryLabel(block->GetStartLocation().Value());
+        if (!counted->IsBound()) {
+            __ Bind(counted);
+        }
     }
     if (hot_counter_storage_enabled) {
         if (hot_coalesce_enabled) ASSERT(!hot_collecting);
@@ -1069,7 +1074,8 @@ void JitContext::SetCurrent(ir::Block* block, bool split_backedge_entry,
 void JitContext::BindInternalEntry(LocationDescriptor location) {
     auto* label = GetInternalLabel(location);
     ASSERT(!label->IsBound());
-    // 当前只内部化控制边，状态 ABI 仍逐块提交，因此两个入口暂时同址。
+    // Taken internal edges skip the entry counter. L2 veneers land on the
+    // counted-entry label bound before BeginBackedgeBody.
     __ Bind(label);
 }
 
@@ -1325,6 +1331,15 @@ vixl::aarch64::Label* JitContext::GetInternalLabel(LocationDescriptor location) 
         return &itr->second;
     }
     return &internal_labels.try_emplace(location).first->second;
+}
+
+vixl::aarch64::Label* JitContext::GetCountedEntryLabel(
+        LocationDescriptor location) {
+    if (auto itr = counted_entry_labels.find(location);
+        itr != counted_entry_labels.end()) {
+        return &itr->second;
+    }
+    return &counted_entry_labels.try_emplace(location).first->second;
 }
 
 void JitContext::FlushLabels(VAddr target) {

@@ -209,6 +209,8 @@ public:
     void SetCurrent(ir::Block *block, bool split_backedge_entry = false,
                     bool defer_published_entry = false);
     void BindInternalEntry(LocationDescriptor location);
+    [[nodiscard]] vixl::aarch64::Label* GetCountedEntryLabel(
+            LocationDescriptor location);
     // Completes a split block entry after the translator has emitted the
     // published-entry branch and bound the self-only body label.
     void BeginBackedgeBody();
@@ -336,6 +338,10 @@ private:
     std::array<ir::HostGPR, ARM64_MAX_X_REGS> spilled_fprs;
     std::map<LocationDescriptor, Label> labels;
     std::map<LocationDescriptor, Label> internal_labels;
+    // FLAGS_REGS L2 veneer lands here, immediately before the entry counter.
+    // Internal taken edges still use internal_labels after the counter, matching
+    // FLAGS=0.
+    std::map<LocationDescriptor, Label> counted_entry_labels;
     // value id -> scratch reg code for the current instruction's spilled
     // def (repeated def accesses within one instruction must return the
     // same register); cleared at every TickIR.

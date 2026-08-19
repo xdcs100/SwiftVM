@@ -46,7 +46,9 @@ void JitTranslator::EmitFlagsPublishedVeneer(ir::Block* block) {
     }
     __ Bind(published);
     UnparkFlagsHot();
-    __ B(context.GetInternalLabel(block->GetStartLocation().Value()));
+    // Land before the entry counter so L2 visits match FLAGS=0 published
+    // entries. Internal taken edges still target the post-counter label.
+    __ B(context.GetCountedEntryLabel(block->GetStartLocation().Value()));
 }
 
 }  // namespace swift::runtime::backend::arm64
