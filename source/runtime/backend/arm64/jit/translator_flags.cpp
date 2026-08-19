@@ -918,7 +918,18 @@ ir::Inst* SoleUserInBlock(ir::Block* block, ir::Inst* def) {
     return found;
 }
 
-bool JitTranslator::FoldJaFromCarryTest(ir::Inst* test_flags) {
+ir::Inst* OtherAndOrArg(ir::Inst* combine, ir::Inst* known) {
+    if (!combine || !known) {
+        return nullptr;
+    }
+    if (combine->GetArg<ir::Value>(0).Def() == known) {
+        auto rhs = combine->GetArg<ir::Operand>(1).GetLeft();
+        return rhs.IsValue() ? rhs.value.Def() : nullptr;
+    }
+    return combine->GetArg<ir::Value>(0).Def();
+}
+
+bool JitTranslator::FoldCcFromCarryTest(ir::Inst* test_flags) {
     if (!FlagsRegsEnabled() || !cur_block || !test_flags) {
         return false;
     }
@@ -928,32 +939,32 @@ bool JitTranslator::FoldJaFromCarryTest(ir::Inst* test_flags) {
     if (!CarryStillInPstate(cur_block, test_flags)) {
         return false;
     }
-    auto* tz = SoleUserInBlock(cur_block, test_flags);
-    if (!tz || tz->GetOp() != ir::OpCode::TestZero) {
+    auto* pred = SoleUserInBlock(cur_block, test_flags);
+    if (!pred) {
         return false;
     }
-    auto* andi = SoleUserInBlock(cur_block, tz);
-    if (!andi || andi->GetOp() != ir::OpCode::And) {
+    auto* combine = SoleUserInBlock(cur_block, pred);
+    if (!combine) {
         return false;
     }
-    ir::Inst* other = nullptr;
-    if (andi->GetArg<ir::Value>(0).Def() == tz) {
-        auto rhs = andi->GetArg<ir::Operand>(1).GetLeft();
-        if (rhs.IsValue()) {
-            other = rhs.value.Def();
-        }
-    } else {
-        other = andi->GetArg<ir::Value>(0).Def();
-    }
-    if (!other || other->GetOp() != ir::OpCode::CondSet ||
-        other->GetArg<ir::Cond>(0) != ir::Cond::NE) {
+    auto* other = OtherAndOrArg(combine, pred);
+    if (!other || other->GetOp() != ir::OpCode::CondSet) {
         return false;
     }
-    return RecordLocalCondition(andi, ir::Cond::HI);
+    const auto zcond = other->GetArg<ir::Cond>(0);
+    if (pred->GetOp() == ir::OpCode::TestZero &&
+        combine->GetOp() == ir::OpCode::And && zcond == ir::Cond::NE) {
+        return RecordLocalCondition(combine, ir::Cond::HI);
+    }
+    if (pred->GetOp() == ir::OpCode::TestNotZero &&
+        combine->GetOp() == ir::OpCode::Or && zcond == ir::Cond::EQ) {
+        return RecordLocalCondition(combine, ir::Cond::LS);
+    }
+    return false;
 }
 
 void JitTranslator::EmitTestFlags(ir::Inst* inst) {
-    if (FoldJaFromCarryTest(inst)) {
+    if (FoldCcFromCarryTest(inst)) {
         return;
     }
     auto test = inst->GetArg<ir::Flags>(0);

@@ -134,7 +134,8 @@ void JitTranslator::EmitRorValue(ir::Inst* inst) {
 void JitTranslator::EmitTestZero(ir::Inst* inst) {
     if (inst->GetUses() == 1) {
         for (auto& user : cur_block->GetInstList()) {
-            if (user.GetOp() == ir::OpCode::And &&
+            if ((user.GetOp() == ir::OpCode::And ||
+                 user.GetOp() == ir::OpCode::Or) &&
                 local_conditions.contains(&user)) {
                 for (auto value : user.GetValues()) {
                     if (value.Def() == inst) {
@@ -336,6 +337,19 @@ void JitTranslator::EmitSignExtend(ir::Inst* inst) {
 }
 
 void JitTranslator::EmitTestNotZero(ir::Inst* inst) {
+    if (inst->GetUses() == 1) {
+        for (auto& user : cur_block->GetInstList()) {
+            if ((user.GetOp() == ir::OpCode::And ||
+                 user.GetOp() == ir::OpCode::Or) &&
+                local_conditions.contains(&user)) {
+                for (auto value : user.GetValues()) {
+                    if (value.Def() == inst) {
+                        return;
+                    }
+                }
+            }
+        }
+    }
     auto value = inst->GetArg<ir::Value>(0);
     auto result = context.W(ir::Value{inst});
     MergeNZCV();

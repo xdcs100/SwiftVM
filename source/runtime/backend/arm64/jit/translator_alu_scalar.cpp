@@ -464,6 +464,9 @@ void JitTranslator::EmitAndNot(ir::Inst* inst) {
 }
 
 void JitTranslator::EmitOr(ir::Inst* inst) {
+    if (local_conditions.contains(inst)) {
+        return;
+    }
     auto left = inst->GetArg<ir::Value>(0);
     auto right = inst->GetArg<ir::Operand>(1);
     auto right_operand = context.GetFeatures().int_imm_fold && right.IsImm() &&
@@ -780,7 +783,8 @@ void JitTranslator::EmitCondSelect(ir::Inst* inst) {
 void JitTranslator::EmitCondSet(ir::Inst* inst) {
     if (inst->GetUses() == 1) {
         for (auto& user : cur_block->GetInstList()) {
-            if (user.GetOp() == ir::OpCode::And &&
+            if ((user.GetOp() == ir::OpCode::And ||
+                 user.GetOp() == ir::OpCode::Or) &&
                 local_conditions.contains(&user)) {
                 for (auto value : user.GetValues()) {
                     if (value.Def() == inst) {

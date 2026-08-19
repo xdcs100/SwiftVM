@@ -311,7 +311,7 @@ private:
     bool RecordLocalCondition(ir::Inst *inst, ir::Cond cond);
     [[nodiscard]] std::optional<Condition> LocalConditionFor(ir::Value value) const;
     [[nodiscard]] bool LaterNeedsHostPstate(ir::Inst* from) const;
-    bool FoldJaFromCarryTest(ir::Inst* test_flags);
+    bool FoldCcFromCarryTest(ir::Inst* test_flags);
     [[nodiscard]] static bool IsCompactFCmp(ir::Value value);
 
     // Merge pending guest flags kept in host NZCV into the flags register.
