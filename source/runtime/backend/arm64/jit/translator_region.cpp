@@ -266,7 +266,8 @@ bool JitTranslator::SuccessorCoversIncomingNzcv(ir::Block* succ,
         const auto op = inst.GetOp();
         if (op == ir::OpCode::GetFlags || op == ir::OpCode::CallLambda ||
             op == ir::OpCode::CallLocation || op == ir::OpCode::CallDynamic ||
-            op == ir::OpCode::X87Op) {
+            op == ir::OpCode::X87Op || op == ir::OpCode::TestFlags ||
+            op == ir::OpCode::TestNotFlags) {
             return false;
         }
         if (op == ir::OpCode::SaveFlags || op == ir::OpCode::BranchOnlyFlags) {
@@ -275,9 +276,13 @@ bool JitTranslator::SuccessorCoversIncomingNzcv(ir::Block* succ,
             if (!True(needed)) {
                 return true;
             }
+            // Partial producer (INC/DEC): leftover bits are not in PSTATE.
+            return false;
         }
     }
-    return false;
+    // No observer and no producer: CheckHalt/GetFlags copy PSTATE. Safe only
+    // when every NZCV bit is live, so copy-all cannot smash a preserved CF.
+    return incoming == HostFlags::NZCV;
 }
 
 bool JitTranslator::EmitRegionIf(const ir::terminal::If& terminal,

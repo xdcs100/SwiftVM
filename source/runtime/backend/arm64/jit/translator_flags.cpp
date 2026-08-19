@@ -133,7 +133,14 @@ void JitTranslator::MergeNZCV(FlagsRegsAuditMergeCause cause,
         // Bits NOT requested (e.g. C/V when only SF/ZF were saved) keep
         // their existing value in the flags register, so a ClearFlags(CF)
         // between two flag-setting instructions is not overwritten.
-        const u64 req = static_cast<u64>(nzcv_requested);
+        u64 req = static_cast<u64>(nzcv_requested);
+        // Empty mask after a skipped full-NZCV If: PSTATE still holds guest
+        // NZCV. Copy it at CheckHalt/GetFlags/helper, not at If (PStateClobber),
+        // so a Tst in a no-producer block cannot smash x26.
+        if (FlagsRegsEnabled() && req == 0 &&
+            cause != FlagsRegsAuditMergeCause::PStateClobber) {
+            req = static_cast<u64>(HostFlags::NZCV);
+        }
         u64 keep = ~req;
         __ Mrs(scratch, NZCV);
         __ And(flags, flags, ForceCast<s64>(keep));
