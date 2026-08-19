@@ -372,8 +372,22 @@ bool JitTranslator::EmitRegionCondition(
     }
 
     const auto host_cond = MapCond(terminal.cond);
-    // 与 EmitRegionIf 相同，提交 flags 的指令保持当前 NZCV，条件可直接复用。
-    if (save_in_nzcv && nzcv_dirty) {
+    auto* then_block = region_block_map.contains(then_target->Value())
+            ? region_block_map[then_target->Value()]
+            : nullptr;
+    auto* else_block = region_block_map.contains(else_target->Value())
+            ? region_block_map[else_target->Value()]
+            : nullptr;
+    // Same successor proof as EmitRegionIf. b.cond reads live PSTATE, so
+    // Merge is only x26 publication. !dirty still must LoadNZCVFromFlags.
+    const bool skip_pack =
+            FlagsRegsEnabled() && save_in_nzcv && nzcv_dirty &&
+            True(nzcv_requested) &&
+            SuccessorCoversIncomingNzcv(then_block, nzcv_requested) &&
+            SuccessorCoversIncomingNzcv(else_block, nzcv_requested);
+    if (skip_pack) {
+        PublishFlagsToken();
+    } else if (save_in_nzcv && nzcv_dirty) {
         MergeNZCV(FlagsRegsAuditMergeCause::PStateClobber,
                   FlagsRegsAuditEdgeKind::RegionInternal);
     } else {
