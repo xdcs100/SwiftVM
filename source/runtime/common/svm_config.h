@@ -202,7 +202,7 @@ struct FeatureOverrides {
     X(bool, sse_afp_minmax, "SVM_SSE_AFP_MINMAX", NonZero, false, "AFP/AH scalar SSE MIN/MAX 单指令 lowering；非 0 开，缺省 OFF，依赖有效 SVM_SSE_AFP_NAN；原 translator_alu.cpp") \
     X(bool, mem_hostbase_fold, "SVM_MEM_HOSTBASE_FOLD", DefaultOn, true, "host-base fold；缺省 ON，=0 回退；原 translator/x86/translator.cpp:728") \
     X(bool, induct_tie, "SVM_INDUCT_TIE", DefaultOn, true, "induction tie；缺省 ON，=0 回退；原 register_alloc_pass.cpp:98") \
-    X(bool, region_edges, "SVM_REGION_EDGES", DefaultOn, true, "region edge 内部化（bounded16）；缺省 ON，=0 回退；原 translator/x86/translator.cpp:730") \
+    X(bool, region_edges, "SVM_REGION_EDGES", DefaultOn, true, "region edge 内部化（bounded32）；缺省 ON，=0 回退；原 translator/x86/translator.cpp:730") \
     X(bool, exec_trace, "SVM_EXEC_TRACE", NonZero, false, "执行 trace 探针；非 0 开，缺省 OFF；原 runtime.cpp:80/jit_context.cpp:78") \
     X(bool, scratch_precise, "SVM_SCRATCH_PRECISE", DefaultOn, true, "Add/Sub 精确 scratch 计费；缺省 ON，=0 回退；原 reg_alloc.cpp:92") \
     X(bool, fpr_scratch_precise, "SVM_FPR_SCRATCH_PRECISE", DefaultOn, true, "FPR 高预算 opcode 按实例精确定价；缺省 ON，=0 回退；原 reg_alloc.cpp") \
