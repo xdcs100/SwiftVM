@@ -907,7 +907,62 @@ bool CarryStillInPstate(ir::Block* block, ir::Inst* test) {
 }
 }  // namespace
 
+ir::Inst* SoleUserInBlock(ir::Block* block, ir::Inst* def) {
+    if (!block || !def || def->GetUses() != 1) {
+        return nullptr;
+    }
+    ir::Inst* found = nullptr;
+    for (auto& inst : block->GetInstList()) {
+        for (auto value : inst.GetValues()) {
+            if (value.Def() == def) {
+                if (found) {
+                    return nullptr;
+                }
+                found = &inst;
+            }
+        }
+    }
+    return found;
+}
+
+bool JitTranslator::FoldJaFromCarryTest(ir::Inst* test_flags) {
+    if (!FlagsRegsEnabled() || !cur_block || !test_flags) {
+        return false;
+    }
+    if (test_flags->GetArg<ir::Flags>(0) != ir::Flags::Carry) {
+        return false;
+    }
+    if (!CarryStillInPstate(cur_block, test_flags)) {
+        return false;
+    }
+    auto* tz = SoleUserInBlock(cur_block, test_flags);
+    if (!tz || tz->GetOp() != ir::OpCode::TestZero) {
+        return false;
+    }
+    auto* andi = SoleUserInBlock(cur_block, tz);
+    if (!andi || andi->GetOp() != ir::OpCode::And) {
+        return false;
+    }
+    ir::Inst* other = nullptr;
+    if (andi->GetArg<ir::Value>(0).Def() == tz) {
+        auto rhs = andi->GetArg<ir::Operand>(1).GetLeft();
+        if (rhs.IsValue()) {
+            other = rhs.value.Def();
+        }
+    } else {
+        other = andi->GetArg<ir::Value>(0).Def();
+    }
+    if (!other || other->GetOp() != ir::OpCode::CondSet ||
+        other->GetArg<ir::Cond>(0) != ir::Cond::NE) {
+        return false;
+    }
+    return RecordLocalCondition(andi, ir::Cond::HI);
+}
+
 void JitTranslator::EmitTestFlags(ir::Inst* inst) {
+    if (FoldJaFromCarryTest(inst)) {
+        return;
+    }
     auto test = inst->GetArg<ir::Flags>(0);
     if (FlagsRegsEnabled() && test == ir::Flags::Zero &&
         SimpleFlagStillInPstate(cur_block, inst, ir::Flags::Zero) &&

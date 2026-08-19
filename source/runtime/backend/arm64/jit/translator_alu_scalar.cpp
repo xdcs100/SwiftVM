@@ -372,6 +372,9 @@ void JitTranslator::EmitSbb(ir::Inst* inst) {
 }
 
 void JitTranslator::EmitAnd(ir::Inst* inst) {
+    if (local_conditions.contains(inst)) {
+        return;
+    }
     auto left = inst->GetArg<ir::Value>(0);
     auto right = inst->GetArg<ir::Operand>(1);
     auto pinned_w = [&](ir::Value value) -> std::optional<WRegister> {
@@ -775,6 +778,18 @@ void JitTranslator::EmitCondSelect(ir::Inst* inst) {
 // the front end would silently change which flag state the condition sees.
 // Kept in step with Interpreter::RunCondSet.
 void JitTranslator::EmitCondSet(ir::Inst* inst) {
+    if (inst->GetUses() == 1) {
+        for (auto& user : cur_block->GetInstList()) {
+            if (user.GetOp() == ir::OpCode::And &&
+                local_conditions.contains(&user)) {
+                for (auto value : user.GetValues()) {
+                    if (value.Def() == inst) {
+                        return;
+                    }
+                }
+            }
+        }
+    }
     auto cond = inst->GetArg<ir::Cond>(0);
     // Cond is untyped, so Inst::SetArg cannot infer a return type here and a
     // front end that forgets SetType leaves it VOID.  That is silent in this
