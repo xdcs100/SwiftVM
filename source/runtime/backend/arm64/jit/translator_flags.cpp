@@ -1,5 +1,7 @@
 #include "translator.h"
 
+#include <optional>
+
 #include "runtime/backend/context.h"
 #include "runtime/backend/arm64/defines.h"
 #include "runtime/common/svm_config.h"
@@ -791,8 +793,49 @@ void JitTranslator::EmitGetFlags(ir::Inst* inst) {
     RecordPFAFDensity(PFAFDensityKind::WholeFlags, begin);
 }
 
+namespace {
+bool OpClobbersPstate(ir::OpCode op) {
+    switch (op) {
+        case ir::OpCode::TestFlags:
+        case ir::OpCode::TestNotFlags:
+        case ir::OpCode::CallLambda:
+        case ir::OpCode::CallLocation:
+        case ir::OpCode::CallDynamic:
+        case ir::OpCode::VecFCmp:
+        case ir::OpCode::PublishFCmpFlags:
+        case ir::OpCode::X87Op:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool ZeroStillInPstate(ir::Block* block, ir::Inst* test) {
+    bool zero_live = false;
+    for (auto& inst : block->GetInstList()) {
+        if (&inst == test) {
+            return zero_live;
+        }
+        if (inst.GetOp() == ir::OpCode::SaveFlags ||
+            inst.GetOp() == ir::OpCode::BranchOnlyFlags) {
+            zero_live = True(inst.GetArg<ir::Flags>(1) & ir::Flags::Zero);
+            continue;
+        }
+        if (OpClobbersPstate(inst.GetOp())) {
+            zero_live = false;
+        }
+    }
+    return false;
+}
+}  // namespace
+
 void JitTranslator::EmitTestFlags(ir::Inst* inst) {
     auto test = inst->GetArg<ir::Flags>(0);
+    if (FlagsRegsEnabled() && test == ir::Flags::Zero &&
+        ZeroStillInPstate(cur_block, inst) &&
+        RecordLocalCondition(inst, ir::Cond::EQ)) {
+        return;
+    }
     auto result = context.W(ir::Value{inst});
     auto nzcv_mask = static_cast<u32>(GuestNZCVToHost(test));
     bool first{true};
@@ -837,6 +880,11 @@ void JitTranslator::EmitTestFlags(ir::Inst* inst) {
 
 void JitTranslator::EmitTestNotFlags(ir::Inst* inst) {
     auto test = inst->GetArg<ir::Flags>(0);
+    if (FlagsRegsEnabled() && test == ir::Flags::Zero &&
+        ZeroStillInPstate(cur_block, inst) &&
+        RecordLocalCondition(inst, ir::Cond::NE)) {
+        return;
+    }
     auto nzcv_mask = static_cast<u32>(GuestNZCVToHost(test));
     if (nzcv_mask && !True(test & (ir::Flags::Parity | ir::Flags::AuxiliaryCarry))) {
         auto result = context.W(ir::Value{inst});
