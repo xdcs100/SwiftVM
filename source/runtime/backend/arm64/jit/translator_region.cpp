@@ -296,10 +296,22 @@ bool JitTranslator::SuccessorCoversIncomingNzcv(ir::Block* succ,
             op == ir::OpCode::TestNotFlags) {
             return false;
         }
+        if (op == ir::OpCode::ClearFlags) {
+            needed &= static_cast<HostFlags>(
+                    ~static_cast<u64>(GuestNZCVToHost(
+                            inst.GetArg<ir::Flags>(0) & ir::Flags::NZCV)));
+            if (!True(needed)) {
+                return true;
+            }
+            continue;
+        }
         if (op == ir::OpCode::SaveFlags || op == ir::OpCode::BranchOnlyFlags) {
             needed &= static_cast<HostFlags>(
                     ~static_cast<u64>(GuestNZCVToHost(inst.GetArg<ir::Flags>(1))));
-            return !True(needed);
+            if (!True(needed)) {
+                return true;
+            }
+            continue;
         }
     }
     // mov/jmp/ret: PSTATE still holds TEST/CMP NZ (C=V=0). Guest RET copies it.
