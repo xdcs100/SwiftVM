@@ -130,7 +130,8 @@ void JitTranslator::MergeNZCV(FlagsRegsAuditMergeCause cause,
             FlagsRegsEnabled() && !nzcv_dirty && !True(nzcv_requested) &&
             BlockIsFlagsTransparent(cur_block) &&
             (cause == FlagsRegsAuditMergeCause::HostExit ||
-             cause == FlagsRegsAuditMergeCause::TerminalDispatcher);
+             (cause == FlagsRegsAuditMergeCause::TerminalDispatcher &&
+              region_edges_active));
     if ((save_in_nzcv && nzcv_dirty) || force_ret_pstate) {
         const u32 begin = context.CurrentBufferSize();
         const auto scratch = context.GetSharedTmpX();
