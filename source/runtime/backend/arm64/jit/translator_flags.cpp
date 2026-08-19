@@ -934,7 +934,9 @@ void JitTranslator::EmitTestFlags(ir::Inst* inst) {
             __ Mrs(scratch, NZCV);
             __ Tst(scratch, nzcv_mask);
             __ Cset(result, ne);
-            __ Msr(NZCV, scratch);
+            if (LaterNeedsHostPstate(inst)) {
+                __ Msr(NZCV, scratch);
+            }
         } else {
             __ Tst(flags, nzcv_mask);
             __ Cset(result, ne);
@@ -994,7 +996,9 @@ void JitTranslator::EmitTestNotFlags(ir::Inst* inst) {
             __ Mrs(scratch, NZCV);
             __ Tst(scratch, nzcv_mask);
             __ Cset(result, eq);
-            __ Msr(NZCV, scratch);
+            if (LaterNeedsHostPstate(inst)) {
+                __ Msr(NZCV, scratch);
+            }
         } else {
             __ Tst(flags, nzcv_mask);
             __ Cset(result, eq);

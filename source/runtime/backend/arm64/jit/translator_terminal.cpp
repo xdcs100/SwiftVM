@@ -199,6 +199,55 @@ std::optional<Condition> JitTranslator::LocalConditionFor(ir::Value value) const
     return std::nullopt;
 }
 
+bool JitTranslator::LaterNeedsHostPstate(ir::Inst* from) const {
+    if (!local_conditions.empty()) {
+        return true;
+    }
+    bool seen = false;
+    for (auto& inst : cur_block->GetInstList()) {
+        if (!seen) {
+            seen = &inst == from;
+            continue;
+        }
+        switch (inst.GetOp()) {
+            case ir::OpCode::CondSet:
+            case ir::OpCode::CondSelect:
+            case ir::OpCode::LocalCondSet:
+            case ir::OpCode::FCmpCondSet:
+            case ir::OpCode::InvertCarry:
+            case ir::OpCode::Adc:
+            case ir::OpCode::Sbb:
+            case ir::OpCode::TestFlags:
+            case ir::OpCode::TestNotFlags:
+            case ir::OpCode::VecFCmp:
+            case ir::OpCode::PublishFCmpFlags:
+                return true;
+            default:
+                break;
+        }
+    }
+    bool needs = false;
+    std::function<void(const ir::Terminal&)> visit = [&](const ir::Terminal& terminal) {
+        VisitVariant<void>(terminal, [&](auto term) {
+            using T = std::decay_t<decltype(term)>;
+            if constexpr (std::is_same_v<T, ir::terminal::Condition>) {
+                needs = true;
+            } else if constexpr (std::is_same_v<T, ir::terminal::If>) {
+                visit(term.then_);
+                visit(term.else_);
+            } else if constexpr (std::is_same_v<T, ir::terminal::CheckHalt>) {
+                visit(term.else_);
+            } else if constexpr (std::is_same_v<T, ir::terminal::Switch>) {
+                for (const auto& arm : term.cases) {
+                    visit(arm.then);
+                }
+            }
+        });
+    };
+    visit(cur_block->GetTerminal());
+    return needs;
+}
+
 bool JitTranslator::IsCompactFCmp(ir::Value value) {
     return value.Def() && value.Def()->GetOp() == ir::OpCode::VecFCmp &&
            value.Def()->GetArg<ir::Imm>(3).Get() != 0;
