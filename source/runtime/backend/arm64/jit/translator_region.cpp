@@ -267,7 +267,11 @@ bool JitTranslator::EmitRegionIf(const ir::terminal::If& terminal,
     }
 
     const auto local = LocalConditionFor(terminal.cond);
-    // MergeNZCV 只使用 MRS/AND/ORR，不改 host NZCV；因此可在条件判定前提交一次。
+    // Must pack here. FLAGS+region successors start nzcv_dirty=true with
+    // nzcv_requested={}: their MergeNZCV keeps x26 and copies no PSTATE bits.
+    // AdvancePC also skips Merge under FLAGS_REGS. CheckHalt/GetFlags/helper
+    // Ret then hands the dispatcher/Unpark-from-x26 a stale word. Cycle-only
+    // skips still SIGABRT because acyclic arms have the same successor ABI.
     MergeNZCV(FlagsRegsAuditMergeCause::PStateClobber,
               FlagsRegsAuditEdgeKind::RegionInternal);
     auto branch = [&](Label* label, bool on_true) {
