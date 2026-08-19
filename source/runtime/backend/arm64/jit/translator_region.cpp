@@ -256,35 +256,6 @@ void JitTranslator::EmitRegionEdge(ir::Location target,
                         context.CurrentBufferSize());
 }
 
-bool JitTranslator::SuccessorCoversIncomingNzcv(ir::Block* succ,
-                                               HostFlags incoming) const {
-    if (!succ || !True(incoming)) {
-        return false;
-    }
-    HostFlags needed = incoming;
-    for (auto& inst : succ->GetInstList()) {
-        const auto op = inst.GetOp();
-        if (op == ir::OpCode::GetFlags || op == ir::OpCode::CallLambda ||
-            op == ir::OpCode::CallLocation || op == ir::OpCode::CallDynamic ||
-            op == ir::OpCode::X87Op || op == ir::OpCode::TestFlags ||
-            op == ir::OpCode::TestNotFlags) {
-            return false;
-        }
-        if (op == ir::OpCode::SaveFlags || op == ir::OpCode::BranchOnlyFlags) {
-            needed &= static_cast<HostFlags>(
-                    ~static_cast<u64>(GuestNZCVToHost(inst.GetArg<ir::Flags>(1))));
-            if (!True(needed)) {
-                return true;
-            }
-            // Partial producer (INC/DEC): leftover bits are not in PSTATE.
-            return false;
-        }
-    }
-    // No observer and no producer: CheckHalt/GetFlags copy PSTATE. Safe only
-    // when every NZCV bit is live, so copy-all cannot smash a preserved CF.
-    return incoming == HostFlags::NZCV;
-}
-
 bool JitTranslator::EmitRegionIf(const ir::terminal::If& terminal,
                                  bool allow_fallthrough) {
     const auto then_target = RegionLeafTarget(terminal.then_);
@@ -296,25 +267,10 @@ bool JitTranslator::EmitRegionIf(const ir::terminal::If& terminal,
     }
 
     const auto local = LocalConditionFor(terminal.cond);
-    auto* then_block = region_block_map.contains(then_target->Value())
-            ? region_block_map[then_target->Value()]
-            : nullptr;
-    auto* else_block = region_block_map.contains(else_target->Value())
-            ? region_block_map[else_target->Value()]
-            : nullptr;
-    // Do not change empty-requested Merge. Skip only when both successors
-    // SaveFlags the incoming bits before any x26 observer. CMP/Jcc/CMP
-    // loops qualify; INC/empty/CheckHalt do not.
-    const bool skip_pack =
-            FlagsRegsEnabled() && True(nzcv_requested) &&
-            SuccessorCoversIncomingNzcv(then_block, nzcv_requested) &&
-            SuccessorCoversIncomingNzcv(else_block, nzcv_requested);
-    if (skip_pack) {
-        PublishFlagsToken();
-    } else {
-        MergeNZCV(FlagsRegsAuditMergeCause::PStateClobber,
-                  FlagsRegsAuditEdgeKind::RegionInternal);
-    }
+    // Always pack. Forcing dirty at entry + skip made TestFlags Mrs/Tst/Cset
+    // on every block; that tax beat the skipped Merges on default RE.
+    MergeNZCV(FlagsRegsAuditMergeCause::PStateClobber,
+              FlagsRegsAuditEdgeKind::RegionInternal);
     auto branch = [&](Label* label, bool on_true) {
         if (local) {
             const auto cond = on_true
@@ -377,22 +333,7 @@ bool JitTranslator::EmitRegionCondition(
     }
 
     const auto host_cond = MapCond(terminal.cond);
-    auto* then_block = region_block_map.contains(then_target->Value())
-            ? region_block_map[then_target->Value()]
-            : nullptr;
-    auto* else_block = region_block_map.contains(else_target->Value())
-            ? region_block_map[else_target->Value()]
-            : nullptr;
-    // Same successor proof as EmitRegionIf. b.cond reads live PSTATE, so
-    // Merge is only x26 publication. !dirty still must LoadNZCVFromFlags.
-    const bool skip_pack =
-            FlagsRegsEnabled() && save_in_nzcv && nzcv_dirty &&
-            True(nzcv_requested) &&
-            SuccessorCoversIncomingNzcv(then_block, nzcv_requested) &&
-            SuccessorCoversIncomingNzcv(else_block, nzcv_requested);
-    if (skip_pack) {
-        PublishFlagsToken();
-    } else if (save_in_nzcv && nzcv_dirty) {
+    if (save_in_nzcv && nzcv_dirty) {
         MergeNZCV(FlagsRegsAuditMergeCause::PStateClobber,
                   FlagsRegsAuditEdgeKind::RegionInternal);
     } else {
