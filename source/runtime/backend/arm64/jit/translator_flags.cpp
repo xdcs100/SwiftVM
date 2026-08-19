@@ -827,6 +827,61 @@ bool ZeroStillInPstate(ir::Block* block, ir::Inst* test) {
     }
     return false;
 }
+
+bool IsAddFamilyCarryProducer(ir::Inst* producer) {
+    if (!producer) {
+        return false;
+    }
+    const auto op = producer->GetOp();
+    return op == ir::OpCode::Add || op == ir::OpCode::Adc;
+}
+
+// Host C matches the bit TestFlags(Carry) reads: either the last Carry
+// SaveFlags came from Add/Adc (no later invert), or InvertCarry ran after
+// that save and PSTATE was not clobbered. Sub/Sbb/Cmp without invert keep
+// ARM not-borrow, which is the stored C bit only until CFINV.
+bool CarryStillInPstate(ir::Block* block, ir::Inst* test) {
+    bool saw_carry_save = false;
+    bool clobbered = false;
+    bool invert_live = false;
+    bool add_family_live = false;
+    for (auto& inst : block->GetInstList()) {
+        if (&inst == test) {
+            return invert_live || add_family_live;
+        }
+        if (inst.GetOp() == ir::OpCode::SaveFlags ||
+            inst.GetOp() == ir::OpCode::BranchOnlyFlags) {
+            if (True(inst.GetArg<ir::Flags>(1) & ir::Flags::Carry)) {
+                saw_carry_save = true;
+                clobbered = false;
+                invert_live = false;
+                add_family_live =
+                        IsAddFamilyCarryProducer(inst.GetArg<ir::Value>(0).Def());
+            }
+            continue;
+        }
+        if (inst.GetOp() == ir::OpCode::InvertCarry) {
+            invert_live = saw_carry_save && !clobbered;
+            add_family_live = false;
+            continue;
+        }
+        if (inst.GetOp() == ir::OpCode::SetCarry ||
+            (inst.GetOp() == ir::OpCode::ClearFlags &&
+             True(inst.GetArg<ir::Flags>(0) & ir::Flags::Carry))) {
+            saw_carry_save = false;
+            invert_live = false;
+            add_family_live = false;
+            clobbered = true;
+            continue;
+        }
+        if (OpClobbersPstate(inst.GetOp())) {
+            clobbered = true;
+            invert_live = false;
+            add_family_live = false;
+        }
+    }
+    return false;
+}
 }  // namespace
 
 void JitTranslator::EmitTestFlags(ir::Inst* inst) {
@@ -834,6 +889,11 @@ void JitTranslator::EmitTestFlags(ir::Inst* inst) {
     if (FlagsRegsEnabled() && test == ir::Flags::Zero &&
         ZeroStillInPstate(cur_block, inst) &&
         RecordLocalCondition(inst, ir::Cond::EQ)) {
+        return;
+    }
+    if (FlagsRegsEnabled() && test == ir::Flags::Carry &&
+        CarryStillInPstate(cur_block, inst) &&
+        RecordLocalCondition(inst, ir::Cond::CS)) {
         return;
     }
     auto result = context.W(ir::Value{inst});
@@ -883,6 +943,11 @@ void JitTranslator::EmitTestNotFlags(ir::Inst* inst) {
     if (FlagsRegsEnabled() && test == ir::Flags::Zero &&
         ZeroStillInPstate(cur_block, inst) &&
         RecordLocalCondition(inst, ir::Cond::NE)) {
+        return;
+    }
+    if (FlagsRegsEnabled() && test == ir::Flags::Carry &&
+        CarryStillInPstate(cur_block, inst) &&
+        RecordLocalCondition(inst, ir::Cond::CC)) {
         return;
     }
     auto nzcv_mask = static_cast<u32>(GuestNZCVToHost(test));
