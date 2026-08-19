@@ -287,6 +287,7 @@ private:
                                     bool allow_fallthrough);
     [[nodiscard]] bool SuccessorCoversIncomingNzcv(ir::Block* succ,
                                                   HostFlags incoming) const;
+    [[nodiscard]] bool BlockIsFlagsTransparent(ir::Block* block) const;
     [[nodiscard]] bool EmitRegionCondition(const ir::terminal::Condition& terminal,
                                            bool allow_fallthrough);
     [[nodiscard]] bool HasSelfEdge(const ir::Terminal& terminal) const;

@@ -256,6 +256,32 @@ void JitTranslator::EmitRegionEdge(ir::Location target,
                         context.CurrentBufferSize());
 }
 
+bool JitTranslator::BlockIsFlagsTransparent(ir::Block* block) const {
+    if (!block) {
+        return false;
+    }
+    for (auto& inst : block->GetInstList()) {
+        switch (inst.GetOp()) {
+            case ir::OpCode::GetFlags:
+            case ir::OpCode::CallLambda:
+            case ir::OpCode::CallLocation:
+            case ir::OpCode::CallDynamic:
+            case ir::OpCode::X87Op:
+            case ir::OpCode::TestFlags:
+            case ir::OpCode::TestNotFlags:
+            case ir::OpCode::SaveFlags:
+            case ir::OpCode::BranchOnlyFlags:
+            case ir::OpCode::SetCarry:
+            case ir::OpCode::ClearFlags:
+            case ir::OpCode::InvertCarry:
+                return false;
+            default:
+                break;
+        }
+    }
+    return true;
+}
+
 bool JitTranslator::SuccessorCoversIncomingNzcv(ir::Block* succ,
                                                HostFlags incoming) const {
     if (!succ || !True(incoming)) {
@@ -276,7 +302,10 @@ bool JitTranslator::SuccessorCoversIncomingNzcv(ir::Block* succ,
             return !True(needed);
         }
     }
-    return false;
+    // mov/jmp/ret: PSTATE still holds TEST/CMP NZ (C=V=0). Guest RET copies it.
+    // Not NZV (INC): copy-all would smash preserved CF.
+    return BlockIsFlagsTransparent(succ) &&
+           (incoming == HostFlags::NZCV || incoming == HostFlags::NZ);
 }
 
 bool JitTranslator::EmitRegionIf(const ir::terminal::If& terminal,

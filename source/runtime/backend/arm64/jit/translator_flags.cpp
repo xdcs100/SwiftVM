@@ -126,14 +126,20 @@ void JitTranslator::MergeNZCV() {
 
 void JitTranslator::MergeNZCV(FlagsRegsAuditMergeCause cause,
                               FlagsRegsAuditEdgeKind edge) {
-    if (save_in_nzcv && nzcv_dirty) {
+    const bool force_ret_pstate =
+            FlagsRegsEnabled() && !nzcv_dirty && !True(nzcv_requested) &&
+            BlockIsFlagsTransparent(cur_block) &&
+            (cause == FlagsRegsAuditMergeCause::HostExit ||
+             cause == FlagsRegsAuditMergeCause::TerminalDispatcher);
+    if ((save_in_nzcv && nzcv_dirty) || force_ret_pstate) {
         const u32 begin = context.CurrentBufferSize();
         const auto scratch = context.GetSharedTmpX();
         // Only merge the NZCV bits that SaveFlags actually requested.
         // Bits NOT requested (e.g. C/V when only SF/ZF were saved) keep
         // their existing value in the flags register, so a ClearFlags(CF)
         // between two flag-setting instructions is not overwritten.
-        const u64 req = static_cast<u64>(nzcv_requested);
+        const u64 req = force_ret_pstate ? static_cast<u64>(HostFlags::NZCV)
+                                         : static_cast<u64>(nzcv_requested);
         u64 keep = ~req;
         __ Mrs(scratch, NZCV);
         __ And(flags, flags, ForceCast<s64>(keep));
