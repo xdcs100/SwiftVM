@@ -285,6 +285,8 @@ private:
                         bool commit_flags = true);
     [[nodiscard]] bool EmitRegionIf(const ir::terminal::If& terminal,
                                     bool allow_fallthrough);
+    [[nodiscard]] bool SuccessorCoversIncomingNzcv(ir::Block* succ,
+                                                  HostFlags incoming) const;
     [[nodiscard]] bool EmitRegionCondition(const ir::terminal::Condition& terminal,
                                            bool allow_fallthrough);
     [[nodiscard]] bool HasSelfEdge(const ir::Terminal& terminal) const;
@@ -315,6 +317,7 @@ private:
     void MergeNZCV();
     void MergeNZCV(FlagsRegsAuditMergeCause cause,
                    FlagsRegsAuditEdgeKind edge);
+    void PublishFlagsToken();
 
     // Restore host NZCV from the flags register (uses the emission's shared scratch).
     void LoadNZCVFromFlags();

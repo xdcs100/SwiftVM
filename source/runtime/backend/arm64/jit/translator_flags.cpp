@@ -184,17 +184,22 @@ void JitTranslator::MergeNZCV(FlagsRegsAuditMergeCause cause,
                                          2);
         }
     }
-    if (flags_token_valid) {
-        __ Bfi(flags, atomic_scratch, HostFlagsBit::ParityByte, 8);
-        if (flags_token_af) {
-            const auto scratch = context.GetSharedTmpX();
-            __ Ubfx(scratch, atomic_scratch, 63, 1);
-            __ Bfi(flags, scratch, HostFlagsBit::AuxiliaryCarry, 1);
-        }
-        if (!flags_token_keep) {
-            flags_token_valid = false;
-            flags_token_af = false;
-        }
+    PublishFlagsToken();
+}
+
+void JitTranslator::PublishFlagsToken() {
+    if (!flags_token_valid) {
+        return;
+    }
+    __ Bfi(flags, atomic_scratch, HostFlagsBit::ParityByte, 8);
+    if (flags_token_af) {
+        const auto scratch = context.GetSharedTmpX();
+        __ Ubfx(scratch, atomic_scratch, 63, 1);
+        __ Bfi(flags, scratch, HostFlagsBit::AuxiliaryCarry, 1);
+    }
+    if (!flags_token_keep) {
+        flags_token_valid = false;
+        flags_token_af = false;
     }
 }
 
