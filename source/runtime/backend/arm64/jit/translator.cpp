@@ -1241,8 +1241,8 @@ void JitTranslator::Translate(ir::Block* block) {
     u32& loop_hoist_prefix_begin = block_state.loop_hoist_prefix_begin;
     u32& loop_hoist_prefix_ops = block_state.loop_hoist_prefix_ops;
     const bool split_flags_entry = block_state.split_flags_entry;
-    // Do not force dirty at region entry. TestFlags can Tst x26 when the
-    // predecessor If packed. Skip-pack is disabled below for the same reason.
+    // Do not force dirty at region entry. TestFlags Tst x26 after a packed
+    // predecessor. Skip-pack only when the successor SaveFlags first.
     if (split_flags_entry) {
         // Every published/external entry takes the cold initializer below;
         // only the self edge targets local_entry. This makes host NZCV valid
