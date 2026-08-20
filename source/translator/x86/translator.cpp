@@ -729,7 +729,10 @@ struct X86Instance::Impl final {
                                                   : LazyFuncBudget())
                                        : kMaxFuncBlocks);
             const size_t decode_cap = std::min(lazy_budget, kMaxFuncBlocks);
-            const bool lazy = lazy_budget < kMaxFuncBlocks;
+            // `<=` so SVM_FUNC_LAZY=128 (the cap) stays lazy and still skips
+            // already-published L2 blocks. `<` treated 128 as eager and
+            // re-decoded those blocks, exploding host_dynamic.
+            const bool lazy = lazy_budget <= kMaxFuncBlocks;
             size_t decoded_count = 0;
             bool hit_block_cap = false;
             PerfScope perf_decode{GetPerfStats().decode_ns};
