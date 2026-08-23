@@ -111,7 +111,7 @@ public:
     // "SetLocation(imm) + ReturnToDispatch" shape a direct jmp/call decodes to.
     // Prefer a tracked direct-link site and retain the inline L2 lookup when the
     // region cannot host one. Emits nothing when the target is not linkable;
-    // state->current_loc already contains the dispatcher fallback location.
+    // Commits state->current_loc only on a dispatcher fallback.
     [[nodiscard]] bool ForwardStatic(ir::Location location,
                                      Label* cycle_exit = nullptr,
                                      LinkSiteKind direct_link_kind =

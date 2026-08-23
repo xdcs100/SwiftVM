@@ -15,9 +15,13 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
                                  LinkSiteKind direct_link_kind) {
     VisitVariant<void>(terminal, [this, direct_link_kind](auto term) {
         using T = std::decay_t<decltype(term)>;
+        if constexpr (!std::is_same_v<T, ir::terminal::Invalid> &&
+                      !std::is_same_v<T, ir::terminal::ReturnToDispatch>) {
+            PublishPendingStaticLocation();
+        }
         if constexpr (std::is_same_v<T, ir::terminal::Invalid>) {
-            // Flat decoded blocks have no explicit terminal: the next location was
-            // already written to state->current_loc by a SetLocation instruction.
+            // Flat decoded blocks have no explicit terminal; their trailing
+            // SetLocation supplies the next dispatch location.
             MergeNZCV(FlagsRegsAuditMergeCause::TerminalDispatcher,
                       FlagsRegsAuditEdgeKind::Dispatcher);
             context.RecordExecCounter(static_next_loc ? exec_offset_exit_direct
@@ -335,11 +339,15 @@ bool JitTranslator::EmitStaticForward(LinkSiteKind direct_link_kind) {
         return false;
     }
     const u64 target = *static_next_loc;
-    static_next_loc.reset();
     const u32 link_before = context.CurrentBufferSize();
     const auto location = ir::Location{target};
     const bool emitted = context.ForwardStatic(
             location, GetDirectCycleExit(location), direct_link_kind);
+    if (emitted) {
+        static_next_loc.reset();
+    } else {
+        PublishPendingStaticLocation();
+    }
     RecordBoundaryRange(BoundarySubsequence::LinkTail, link_before,
                         context.CurrentBufferSize());
     return emitted;

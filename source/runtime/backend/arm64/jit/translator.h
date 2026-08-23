@@ -274,6 +274,7 @@ private:
     };
 
     void Translate(ir::Inst *inst);
+    void PublishPendingStaticLocation();
 
     // Terminals
     void EmitTerminal(const ir::Terminal &terminal,
@@ -476,6 +477,7 @@ private:
     MacroAssembler &masm;
     ir::Block *cur_block{};
     ir::Inst *cur_instr{};
+    ir::Inst *terminal_body_inst{};
     BitVector disable_instructions{};
     std::map<ir::Inst *, Label> local_labels{};
     std::map<ir::Inst *, Condition> local_conditions{};
@@ -551,6 +553,8 @@ private:
     bool cur_block_is_call{};
     // Set by EmitSetLocation when the next guest location is a compile-time
     // constant, cleared by every other instruction (Translate(ir::Inst*)).
+    // A trailing SetLocation remains pending until its terminal needs a
+    // dispatcher fallback.
     // A ReturnToDispatch/Invalid terminal reached with this set is a direct
     // jmp/call: use a tracked direct link when possible, otherwise read the
     // exact dispatch-table slot instead of returning to the hash lookup.

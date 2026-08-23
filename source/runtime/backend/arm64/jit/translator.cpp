@@ -959,6 +959,13 @@ void JitTranslator::TranslateBlockInstructions(
         u32& loop_hoist_prefix_begin,
         u32& loop_hoist_prefix_ops) {
     loop_hoist_prefix_begin = context.CurrentBufferSize();
+    terminal_body_inst = nullptr;
+    for (auto& inst : block->GetInstList()) {
+        if (inst.Id() >= disable_instructions.size() ||
+            !disable_instructions.test(inst.Id())) {
+            terminal_body_inst = &inst;
+        }
+    }
     VAddr audit_guest_pc = block->GetStartLocation().Value();
     for (auto& inst : block->GetInstList()) {
         auto category = DensityCategory::Work;
@@ -1057,6 +1064,7 @@ void JitTranslator::TranslateBlockInstructions(
             audit_guest_pc += inst.GetArg<ir::Imm>(0).Get();
         }
     }
+    terminal_body_inst = nullptr;
 }
 
 void JitTranslator::EmitBlockTerminalAndColdPaths(

@@ -527,6 +527,8 @@ bool JitContext::ForwardStatic(ir::Location location,
     __ Br(ip);
     __ Bind(&empty_slot);
     RecordExecCounter(exec_offset_link_miss);
+    __ Mov(ip, location.Value());
+    __ Str(ip, MemOperand(state, state_offset_current_loc));
     __ Ret();
     return true;
 }

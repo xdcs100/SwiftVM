@@ -622,6 +622,15 @@ void JitTranslator::EmitGetLocation(ir::Inst* inst) {
     __ Ldr(context.X(ir::Value{inst}), MemOperand(state, state_offset_current_loc));
 }
 
+void JitTranslator::PublishPendingStaticLocation() {
+    if (!static_next_loc) {
+        return;
+    }
+    __ Mov(ip, *static_next_loc);
+    __ Str(ip, MemOperand(state, state_offset_current_loc));
+    static_next_loc.reset();
+}
+
 void JitTranslator::EmitSetLocation(ir::Inst* inst) {
     auto location = inst->GetArg<ir::Lambda>(0);
     // Any SetLocation invalidates an earlier constant, including a dynamic one:
@@ -636,13 +645,10 @@ void JitTranslator::EmitSetLocation(ir::Inst* inst) {
         __ Str(context.X(location.GetValue()), MemOperand(state, state_offset_current_loc));
         dynamic_next_loc = location.GetValue();
     } else {
-        __ Mov(ip, location.GetImm().Get());
-        __ Str(ip, MemOperand(state, state_offset_current_loc));
-        // Remember the constant for the terminal: Translate(ir::Inst*) clears
-        // this again for every instruction that is not a SetLocation, so it
-        // only survives to the terminal when nothing could have changed
-        // state->current_loc in between.
         static_next_loc = location.GetImm().Get();
+        if (inst != terminal_body_inst) {
+            PublishPendingStaticLocation();
+        }
     }
 }
 
