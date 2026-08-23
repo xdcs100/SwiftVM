@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`431be30`** `feat: publish vector zip results in place`
+- Code tip: **`fa1768a`** `feat: reuse retained return targets in RSB`
 - Tracked tree is clean before the documentation commit. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -32,6 +32,8 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 | `d0578b6` | Fold adjacent single-use `BitExtract(0,32) -> ZeroExtend32To64` into one non-destructive W move; fix temporary-container iterator UB in width proofs |
 | `11abed9` | Replace local `BitExtract(ZeroExtend32To64(v32),0,32)` round trips with the original U32 SSA and let DCE remove both redundant nodes |
 | `ff42917` | Fold `BitExtract(v32,0,32)` into the original 32-bit SSA only for proven W-width consumers; reject narrow and opaque ABI uses |
+| `7110d20` / `7045d3b` / `431be30` | Coalesce complete legacy scalar FPR results, compact full-NZCV publication, and publish VecZip results in place |
+| `fa1768a` | Reuse the retained dynamic return target in both RSB pop formats instead of reloading `State::current_loc` |
 
 Hot files:
 
@@ -146,19 +148,25 @@ Validation for `ff42917`:
   1,047,523 passed / 45 failed assertions. The unsafe generic prototype had added one U16 helper
   failure; the final consumer whitelist removes it.
 
-Validation for `7110d20` / `7045d3b` / `431be30`:
+Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a`:
 
 - Current formal smallpt is `smallpt_wh_x64 8 128 96`; do not substitute the fixed 1024×768
   `smallpt_x64` when updating the formal FEX ratio.
-- Formal smallpt default-region host: `1,321,651,162 → 1,303,939,990 → 1,297,980,655`;
-  cumulative `-23,670,507` (`-1.791%`), spill 0 throughout. The first arrow is full-NZCV
-  compaction; the second is VecZip resident publication. `7110d20` is neutral on this binary but
-  saves 452,646,984 host instructions on the fixed 1024×768 smallpt.
-- c-ray equal-entry common-PC deltas: full-NZCV `-999,520`, VecZip `-124,308`; no common PC grows.
-  CoreMark after full-NZCV is about `5,973,080,081` host (`-61.19M`, CRC final `0x382f`);
+- Formal smallpt default-region host:
+  `1,321,651,162 → 1,303,939,990 → 1,297,980,655 → 1,296,969,640`;
+  cumulative `-24,681,522` (`-1.867%`), spill 0 throughout. The arrows are full-NZCV
+  compaction, VecZip resident publication, then retained RSB return-target reuse. `7110d20` is
+  neutral on this binary but saves 452,646,984 host instructions on fixed 1024×768 smallpt.
+- RSB reuse shrinks 328 formal smallpt PCs with no growth. EXEC_PROF records 8,080,989 hits / 248
+  misses, so the earlier 0.076% static heuristic was not an execution ceiling. c-ray equal-entry
+  delta is `-414,747` with 967 PCs smaller and none larger; CoreMark equal-entry delta is
+  `-25,442,605`. A call-dense workload is exactly `-64,000,000` under both RSB frame formats.
+- Earlier c-ray equal-entry common-PC deltas: full-NZCV `-999,520`, VecZip `-124,308`; no common PC
+  grows. CoreMark after full-NZCV is about `5,973,080,081` host (`-61.19M`, CRC final `0x382f`);
   VecZip is neutral there.
 - FEX-aligned RE=0 same-harness refresh for formal smallpt: SVM host/guest
-  `3.335622 → 3.267832`; with unchanged FEX `1.549`, ratio `2.153× → 2.110×`. The earlier
+  `3.335622 → 3.267832`; retained-RSB reuse folds this to about `3.265287`. With unchanged FEX
+  `1.549`, ratio is `2.153× → 2.108×`. The earlier
   2.180× table used a different retained unit-formation artifact, so quote the current gap as
   approximately 2.11–2.14× rather than mixing the two raw tables.
 - PPM SHA-256 remains
@@ -167,8 +175,11 @@ Validation for `7110d20` / `7045d3b` / `431be30`:
 - FPR-focused tests: 3 cases / 10 assertions plus resident coalescing 1 case / 794 assertions;
   full-NZCV structure 1 case / 3 assertions. FLAGS six-grid, helper-fault 38/0, clone four-grid
   and 1664-unit/11-guest fingerprint all pass.
+- RSB/indirect structure focus passes 21 assertions. A temporary mismatched-return probe passes
+  default, `SVM_SHADOW_LEAN=0` and `SVM_FLAGS_REGS=0` paths and was deleted. Mac `swift_runtime`
+  and the Orb all-target build pass.
 - Fixed `SWIFT_FUZZ_SEED=123456`: 183 passed / 35 existing failed cases,
-  1,047,656 passed / 44 failed assertions; no new failure location.
+  1,047,651 passed / 44 failed assertions; no new failure category.
 - Detailed mechanism table, the rejected Linux scalar-insert prototype and exact deltas are in
   `docs/codegen-fpr-flags-refresh-2026-08-24.md`.
 
@@ -214,13 +225,12 @@ Validation for `7110d20` / `7045d3b` / `431be30`:
 | SHA census from failing OpenSSL path | PageFatal at `rip=0x62b930` before valid hashing; no performance evidence |
 | Generic same-width fold including U8/U16/CallLambda | fixed-seed U16 popcount helper mismatch; narrowed to U32 W-consumer whitelist |
 | Linux AFP scalar insert | c-ray −1.92%, but smallpt diverges from the exact FEX PPM; tie=0 still diverges, fully reverted |
-| RSB pop reuses dynamic SetLocation | one-instruction ceiling is only 0.076% smallpt / 0.313% c-ray |
 
 ## Next ready (pick one, measure, revert on 124/134)
 
-1. **smallpt call/return and public-exit boundary** — boundary remains about 23%, link about 13%.
-   Reopen only a specific call/return or public-exit shape with fault, SMC and RSB proof; do not
-   infer a removable pool from the aggregate bucket.
+1. **smallpt call push and public-exit boundary** — boundary remains about 23%, link about 13%.
+   Return-target reload is landed. Reopen only a specific call-push or public-exit shape with fault,
+   SMC and RSB proof; do not infer a removable pool from the aggregate bucket.
 2. **Remaining FPR publication** — SetHostFPR is about 5%, but full writes are only about 2.3%.
    Extend the producer set only for a single-instruction complete V128 write with exact alias proof.
 3. **CoreMark remaining truncations** — raw BitExtract is no longer a pool. Only reopen 8/16-bit
