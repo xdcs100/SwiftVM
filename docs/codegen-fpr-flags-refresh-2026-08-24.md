@@ -33,11 +33,12 @@ boundary 22.116%、uniform 6.522%、flags IR 2.506%；FPR state 为 5.484%，
 8 月 23 日静态表中的 smallpt 为 SVM/FEX 2.180×。本轮同 harness、同旧 TSV
 权重的 RE=0 重采从 SVM 3.335622 host/guest 降至 3.267832；加入 RSB 返回目标复用、
 静态出口 direct-link、默认 return-L1、cycle successor layout、indirect-L1 状态成对加载、
-live resident-FPR publication 和 scalar-load FPR fusion 后，按正式 host 权重折算约为
-2.942137。以未变的 FEX 1.549 为分母，对应 2.153×→1.899×。
+live resident-FPR publication、scalar-load FPR fusion 和 scalar-sqrt resident publication 后，
+按正式 host 权重折算约为 2.934303。以未变的 FEX 1.549 为分母，对应
+2.153×→1.894×。
 旧表与这次重采的
 unit 形成参数不完全相同，
-因此不直接覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 1.90–1.94×。
+因此不直接覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 1.89–1.94×。
 
 ## 已落地
 
@@ -206,7 +207,23 @@ load 同时清零 V[127:64]。其余形态继续逐条发射，且 load 点再�
 - STREAM 等 entry 减少 174，7 个共同 PC 缩短、0 个增长，`Solution Validates`；
   CoreMark 等 entry 为 0，CRC final 保持 `0x382f`。
 
-十项合计使正式 smallpt 默认 region host 减少 153,036,764（11.579%）。
+### Scalar sqrt resident publication
+
+提交 `97009a3` 允许 legacy scalar `VecFUnary(kind=sqrt)` 的完整 V128 结果直接继承已驻留的
+merge home。merge 必须是同目标、offset 0 的已合并 `GetHostFPR`，且其最后使用必须精确落在
+producer；producer 到 publication 之间仍沿用完整 observer、fixed-home 和 live-overlap 门。
+allocator 与 emitter 分别复证。命中后 legacy lowering 省掉 merge 自复制，最终
+`SetHostFPR` 也成为空发射；merge 仍存活的形态保持原路径。
+
+- 残余归因中 `VecFUnary` 为 2,119,260 次；严格窗口命中 1,555,871 次，每次精确减少两条；
+- smallpt_wh 1,168,614,398→1,165,502,656，减少 3,111,742（0.2663%）；20 个共同
+  PC 均精确缩短两条、0 个增长，entries、units、spill 和 PPM 均一致；
+- 320×240、64-spp c-ray 等 entry 减少 1,036,470，1 个共同 PC 缩短两条、0 个增长，
+  IDAT MD5 保持 `d0c71130abf3544a86b64417bc488c21`；
+- STREAM 与 CoreMark 等 entry 均为 0，分别保持 `Solution Validates` 与 CRC final
+  `0x382f`。
+
+十一项合计使正式 smallpt 默认 region host 减少 156,148,506（11.815%）。
 
 ## 否决项
 
@@ -214,8 +231,12 @@ load 同时清零 V[127:64]。其余形态继续逐条发射，且 load 点再�
 但 smallpt 输出与 FEX 分离；单独关闭 scalar tie 后仍是同一错误输出，证明问题在 scalar
 insert 契约而非 RA tie。该原型已完整删除。
 
-剩余完整 `SetHostFPR` 中 `VecFUnary` 仅 0.163%，其 lowering 不是单条完整写；不把
-producer 白名单泛化到缺少原子性证明的 opcode。
+`VecFUnary` 的通用 producer 白名单仍不成立：packed、RCP/RSQRT 以及 merge 非最后使用的
+形态继续拒绝。本轮只批准 legacy scalar sqrt 的完整 merge-home 证明。
+
+终端尾部回边轮询曾尝试把 `LDAR + CBNZ cold + B target` 改为 `LDAR + CBZ target`；正式
+smallpt 两臂均为 1,168,614,398，证明现有 successor layout 已吸收所有安全命中。原型和
+接口改动已完整删除。
 
 ## 验证
 
@@ -229,6 +250,9 @@ producer 白名单泛化到缺少原子性证明的 opcode。
 - function fingerprint 对阶段基线保持 1664 units / 11 guests，自一致且逐项匹配。
 - AVX VEX.128 move differential 在固定 seed 424242 下通过 Mac 与 Orb，覆盖 memory VMOVQ
   的 high-half zero 语义。
+- scalar sqrt resident-publication 测试通过 2 个形态 / 6 assertions，覆盖精确两指令
+  缩短和 merge 继续存活时的拒绝；既有 FPR focus 在 Mac 与 Orb 均为 8 cases /
+  119 assertions。
 - RSB/indirect 结构测试 26 assertions，覆盖八指令 L1 快路径、无 push 和无目标
   dispatcher 路径；显式改写栈返回地址的临时 probe 在默认、L1-off 两种 RSB frame、
   FLAGS-off 和 interpreter 下均 rc=0，probe 已删除。
@@ -239,8 +263,9 @@ producer 白名单泛化到缺少原子性证明的 opcode。
 - region edge、direct cycle signal 和 region flags 专项分别通过 42、30、46 assertions；
   cycle successor layout 的 function fingerprint 对基线保持 1664 units / 11 guests 一致。
 - 200 轮 `smc_mt_stress` 为 host_fails/guest_lost/timeouts = 0/0/0。
-- Catch 与 fuzz seed 同为 424242 时为 189 passed / 35 个既有 failed cases、44 个失败
-  断言，仍是既有 VIXL 尾部反汇编自一致性和 jit-cache/lazy-flags 配置类别。
+- Catch 与 fuzz seed 同为 424242 时，Orb 为 190 passed / 35 个既有 failed cases、44 个
+  失败断言；Mac 为 191 / 34、41。新增用例通过，失败仍全部属于既有 VIXL 尾部反汇编
+  自一致性和 jit-cache/lazy-flags 配置类别。
 - smallpt_wh PPM SHA-256 两臂均为
   `fe96f7e48295b27c8df8236294052d138c3ed130b81d022739907fe6b2cde5aa`；
   原 equal-entry c-ray sample 的 IDAT MD5 两臂均为
@@ -254,7 +279,7 @@ producer 白名单泛化到缺少原子性证明的 opcode。
    link tail 约 1.95%，其中 acquire poll 与跨本块 cold stub 的目标跳转不可直接删除；
    八条 return-L1 静态序列约 1.42%，其中 `AND + ADD + LDP + CMP + CSEL + BR` 没有
    明确的基础 ISA 融合机会。公开 host exit 仍仅 139 次。
-2. 剩余 `SetHostFPR` 为 34,231,561（2.929%），其中完整写 12,355,778（1.057%）。
+2. 剩余 `SetHostFPR` 约为 32,675,690（2.804%），其中完整写约 10,799,907（0.927%）。
    low-64 `LoadMemory` 与 high-64 zero 分别余 10,641,609 / 10,093,484；相邻池中约
    8.29M 次因 fault/alias/fixed-home 门拒绝，不为继续扩池放宽精确状态边界。
 3. CoreMark 的 8/16-bit truncation 仍要求 consumer-specific 物理高位证明，并保留 U16
