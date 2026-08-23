@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`d0578b6`** `feat: fold adjacent low32 copy chains`
+- Code tip: **`11abed9`** `feat: eliminate redundant low32 round trips`
 - Dirty tree before the documentation commit: this handoff and `docs/codegen-gap-refresh-2026-08-23.md`, plus the preserved untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -30,6 +30,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 | `df5a54e` | Fail closed before reading non-And/Or carry-test args; reject packed-flags consumers from region transparent/cover proofs |
 | `a91697b` | Hand a pinned W-view bridge directly to a proven destructive U32 result published back to the same fixed home |
 | `d0578b6` | Fold adjacent single-use `BitExtract(0,32) -> ZeroExtend32To64` into one non-destructive W move; fix temporary-container iterator UB in width proofs |
+| `11abed9` | Replace local `BitExtract(ZeroExtend32To64(v32),0,32)` round trips with the original U32 SSA and let DCE remove both redundant nodes |
 
 Hot files:
 
@@ -39,6 +40,7 @@ Hot files:
 - `translator/x86/translator.cpp` — `RegionFuncBudget`, `kMaxFuncBlocks=128`, lazy skip of published L2
 - `register_alloc_coalesce_gpr.cpp` — pinned guest GPR read/write coalescing and full-width load publication
 - `register_alloc_coalesce_copy.cpp` — exact adjacent low32 copy-chain ownership
+- `integer_width_elimination_pass.cpp` — local zero-extend/low32-extract round-trip elimination
 - `svm_config.h` — `flags_regs` default true; `region_edges` bounded64
 
 ## Honest density (coremark `0x0 0x0 0x66 20000 7 1 2000`)
@@ -66,7 +68,8 @@ Synchronize all tracked sources Mac → Orb before cmake. A touched-files-only c
 | FLAGS=1, window 64 (before `3641e32`) | **6.348B** | **−14%** vs old FLAGS=0/16 |
 | FLAGS=1, window 64 (after `3641e32`) | **6.300B** | `6,347,614,988 → 6,299,957,711` (**−0.751%**) from direct load publication |
 | FLAGS=1, window 64 (after `a91697b`) | **6.251B** | `6,299,957,565 → 6,250,517,460` (**−0.785%**) from pinned W-view handoff |
-| FLAGS=1, window 64 (**current default**) | **6.210B** | `6,250,517,196 → 6,210,114,894` (**−0.646%**) from adjacent low32 copies |
+| FLAGS=1, window 64 (after `d0578b6`) | **6.210B** | `6,250,517,196 → 6,210,114,929` (**−0.646%**) from adjacent low32 copies |
+| FLAGS=1, window 64 (**current default**) | **6.087B** | `6,210,114,929 → 6,087,169,784` (**−1.980%**) from local width round trips |
 | FLAGS=0, window 64 (**current rollback**) | **6.712B** | CRC `0x382f`; FLAGS remains **−6.1%** at the same window |
 | FLAGS=1, RE=0 | 26.009B | vs FLAGS=0 RE=0 **26.774B (−2.9%)** |
 | FLAGS=1, window 32 | 6.882B | |
@@ -74,10 +77,10 @@ Synchronize all tracked sources Mac → Orb before cmake. A touched-files-only c
 
 After If-skip, `SVM_FLAGS_REGS_AUDIT=1` on window-32: **PStateClobber/RegionInternal ≈ 2.3k entries**. Remaining ~70M “flags audit” is **L2 `ldr` cache-reload** (Dispatcher/RSBHit), not MergeNZCV.
 
-Move bucket is now **34.058%** of host (`move_dynamic = 2,115,039,290`). `d0578b6`
-removes 40.402M dynamic host/move instructions from CoreMark; 44 common PCs shrink and zero
-grow. smallpt removes 2.362M at common-PC weights; STREAM is nearly neutral. Remaining move
-volume is not automatically removable W-alpha space.
+Move bucket is now **32.726%** of host (`move_dynamic = 1,992,094,068`). `11abed9` removes
+122.945M common-PC host instructions from CoreMark after `d0578b6`; spill remains zero. STREAM,
+smallpt and c-ray respectively remove 5,854 / 868,884 / 1,283,611 common-PC host instructions.
+Remaining move volume is not automatically removable W-alpha space.
 
 Validation for `3641e32`:
 
@@ -108,6 +111,19 @@ Validation for `d0578b6`:
   Two width-chain assertions turn green; remaining differential failures are the same VIXL tail
   disassembly self-consistency class, not a semantic regression.
 
+Validation for `11abed9`:
+
+- New width pass: 2 cases / 8 assertions. Combined low32/int-width/width-chain/GPR/fault/high-half
+  focus: 8 cases / 474 assertions, PASS on Mac and Orb.
+- CoreMark: `6,210,114,929 → 6,087,169,784`; common-PC host `-122,945,220`,
+  move `-122,945,213`, spill 0→0, CRC `0x382f`.
+- STREAM/smallpt/c-ray common-PC host: `-5,854 / -868,884 / -1,283,611`; no workload grows
+  in total. smallpt PPM SHA-256 and c-ray canonical PNG IDAT MD5 match across arms.
+- FLAGS `0/1` × function/block/interpreter func_tests: rc=101 and checksum
+  `9f52b7d59285dbe5` in all six cells; helper-fault 38/0; clone futex/lock four cells rc=0.
+- Fingerprint self-consistency: 1664 units / 11 guests. Against the exact old binary, the unique
+  guest-PC set is unchanged; 400 units reduce IR, 0 increase, total IR `-2,025`.
+
 ## Invariants (do not violate)
 
 - Recorded cond is **guest** polarity; PSTATE is **host NZCV** (maybe CFINV). Unproven `b.cs` inverts JC/JNC.
@@ -122,6 +138,9 @@ Validation for `d0578b6`:
 - A faulting full-width `LoadMemory` may publish directly into its pinned home because the fault does not commit the destination. Partial/narrow writes and any path rejected by the existing local observer, conflict, or liveness proof must keep the real publication instruction.
 - A low32 copy may skip `BitExtract` only when its sole use is the immediately following
   `ZeroExtend32To64`; the wrapper must still emit a W move and keep all later uses.
+- A width round trip may substitute the original U32 SSA only for
+  `BitExtract(ZeroExtend32To64(v32), 0, 32)` with one ordinary same-block consumer inside the
+  128-IR window. Pseudo consumers, other widths, other producers and multiple uses must remain.
 
 ## Failed / do not retry
 
@@ -140,12 +159,14 @@ Validation for `d0578b6`:
 | `GetHostGPR` 32-bit `Mov W` for callee-saved pins | 0 |
 | `SVM_FUNC_LAZY=128` before `15e5165` | **31.3B** host, RE=0-shaped entries |
 | Require every successor-cover to survive fault and reach AdvancePC | **6.300→6.551B** host; too conservative, reverted |
+| PF/AF dedicated GPR on current CoreMark | saves 0; adds 67,754,766 dispatcher/RSB recovery instructions |
+| SHA census from failing OpenSSL path | PageFatal at `rip=0x62b930` before valid hashing; no performance evidence |
 
 ## Next ready (pick one, measure, revert on 124/134)
 
-1. **PF/AF dedicated GPRs** (W-β remainder). NZCV is already host-resident on FLAGS_REGS; PF/AF still live in x26 bitfields when published. High ABI risk; keep `FLAGS_REGS=0` rollback.
-2. **SHA boundary census** — remeasure hot block boundaries under bounded-64 before changing region scope or fault-map granularity.
-3. **Current FEX/SVM static table** — regenerate same-guest-PC blow-up ratios; the August 14 table predates the current flags/region/RA defaults.
+1. **Current FEX/SVM static table** — regenerate same-guest-PC blow-up ratios; the August 14 table predates the current flags/region/RA defaults and the new 6.087B CoreMark baseline.
+2. **SHA valid workload first** — fix or replace the current OpenSSL guest path that PageFatals before hashing, then redo the boundary census. Do not bypass guest fault semantics.
+3. **PF/AF dedicated GPR is closed** until a new canonical park/recovery carrier yields a nonzero mechanical saving; the current audit is strictly negative.
 4. **Do not** grow the default region window again for coremark (64 == 128). Other benches might still want 128 **after** the lazy fix.
 5. Wall-clock / dual-entry Unpark is **outside** `host_dynamic`. Don’t use Unpark 2-insn as a density win.
 

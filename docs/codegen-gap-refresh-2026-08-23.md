@@ -10,9 +10,9 @@ fixed-home 发布开销，但与 FEX 的剩余差距仍然主要来自三种结�
 1. FEX 的 SRA 把 16 个 guest GPR、PF、AF 和 16 个 XMM 都绑定到固定 host 家，
    LoadRegister/StoreRegister 与这些家做反向亲和，成功后不发指令。SwiftVM 目前只覆盖
    部分 GPR/XMM 家和局部发布点，32 位 W 视图、跨发布快照和边界同步仍产生大量桥接。
-2. SwiftVM 已把 NZCV 保留在 PSTATE，但 PF/AF 仍通过 `x26` 位域发布；FEX 用独立 GPR
-   保存 PF/AF。SwiftVM 的 fault、signal、dispatcher 和 region 外边仍必须维护可恢复的
-   canonical flags 状态。
+2. SwiftVM 已把 NZCV 保留在 PSTATE，但 PF/AF 仍通过 `x26` 位域发布。FEX 用独立 GPR
+   保存 PF/AF，不过当前 CoreMark 审计表明 SwiftVM 的 PF/AF 写没有可兑现的指令下界：
+   AF 主要是一条必要的 clear，专用寄存器反而会增加 dispatcher/RSB recovery 成本。
 3. FEX 默认 multiblock 可跨更大的前向窗口摊薄边界。SwiftVM 的 bounded-64 region 已明显
    降低 CoreMark 成本，但 SHA 等超块语料仍受函数边界、公开入口和 fault map 粒度限制。
 
@@ -27,26 +27,29 @@ fixed-home 发布开销，但与 FEX 的剩余差距仍然主要来自三种结�
 本次续轮在 Orb Linux 默认配置下禁用 JIT disk cache 和 `SVM_EXEC_PROF`，CoreMark 使用
 `0x0 0x0 0x66 20000 7 1 2000`：
 
-| 指标 | 优化前 | 本轮优化后 | 变化 |
+| 指标 | 相邻 low32 合并前 | 相邻合并后 | round-trip 消除后 |
 |---|---:|---:|---:|
-| host dynamic | 6,250,517,196 | 6,210,114,894 | -40,402,302 (-0.646%) |
-| move dynamic | 2,155,441,643 | 2,115,039,290 | -40,402,353 |
-| move 占比 | 34.484% | 34.058% | -0.426 pp |
+| host dynamic | 6,250,517,196 | 6,210,114,929 | 6,087,169,784 |
+| move dynamic | 2,155,441,643 | 2,115,039,274 | 1,992,094,068 |
+| move 占比 | 34.484% | 34.058% | 32.726% |
 | spill dynamic | 0 | 0 | 0 |
 
-按两臂共同 PC 的较小 entries 重算，44 个 PC 变小、0 个变大，精确减少 40,402,351 条
-host/move 指令。收益最大的五个 PC 为 `0x402d48`、`0x402de8`、`0x402218`、
-`0x403980`、`0x402d40`。
+相邻合并相对前一臂精确减少 40,402,351 条 host/move。新的 round-trip 消除再按共同
+PC 的较小 entries 重算，125 个 PC 变小、5 个冷 PC 各增一条，host 净减 122,945,220，
+move 净减 122,945,213；raw host 降 1.980%，spill 始终为零。两轮相对最初基线累计减少
+约 163.35M host 指令。
 
 其他确定性语料的共同 PC 结果：
 
 | workload | 共同 PC 减少 | 增长 PC | 动态 host/move 变化 |
 |---|---:|---:|---:|
-| STREAM | 22 | 0 | -89，接近中性 |
-| smallpt | 24 | 0 | -2,362,455 (-0.0053%) |
+| STREAM | 90 | 6 | -5,854 (-1.59%) |
+| smallpt | 100 | 7 | -868,884 (-0.0649%) |
+| c-ray | 372 | 9 | -1,283,611 (-0.94%) |
 
-本次 c-ray 缺少 scene stdin，两臂都按既有错误路径返回 255，不作为收益证据。7-Zip 和
-OpenSSL speed 在当前 Linux launcher 下仍会进入既有 signal/timer 退出路径，也不计入。
+smallpt 两臂 PPM 逐字一致，c-ray 两臂 PNG 的 IDAT 哈希一致。OpenSSL SHA 在进入有效
+hashing 前于 `rip=0x62b930` 触发既有 PageFatal，因此没有拿失败路径的计数充当 SHA 性能
+证据。当前 SQLite speedtest 二进制拒绝文档中的 `--size` 参数，亦不计入。
 
 ## 本轮优化
 
@@ -99,6 +102,35 @@ mov w29, w6
 白名单没有扩大。宽度链证明中三处从不同临时 `GetValues()` 容器取 begin/end 的未定义行为
 改为持有同一个 values 容器后遍历，长链测试不再受对象布局影响。
 
+## round-trip 消除
+
+剩余 BitExtract 的动态分类显示，最大的可证明冗余形态不是新的 RA width component，而是
+同一 block 内的整数宽度往返：
+
+```text
+v32 -> ZeroExtend32To64 -> ... -> BitExtract(0, 32) -> U32 consumer
+```
+
+`BitExtract(ZeroExtend32To64(v32), 0, 32)` 与 `v32` 严格等价。新的
+`IntegerWidthEliminationPass` 在 DCE 前把唯一的普通 consumer 直接改读原 U32 SSA；扩展和
+提取在失去最后使用后由既有 DCE 删除。它不改 allocator、fixed home、fault publication 或
+emitter 白名单，并严格拒绝窄提取、非 zero-extend 来源、多使用和 pseudo consumer。为避免
+把短值变成 block-wide live range，只处理 128 条 IR 内的局部往返；CoreMark、STREAM、
+smallpt、c-ray 的采样中没有更远的有效热候选。
+
+该职责位于独立 pass 文件，并同时接入 block/function pipeline；没有新增环境开关、日志或
+旧路径兜底。
+
+## PF/AF 与 SHA 审计结论
+
+- CoreMark 的 PF write 为 11,840,084 条动态指令，AF write 为 130,302,325 条；读侧接近零。
+  AF 热写主要是逻辑 flags 的单条 clear，换成专用 GPR 仍需要这一条。审计测得可删动态指令
+  为 0，而 dispatcher/RSBHit 的 cache/recovery 新成本为 67,754,766，因此当前专用 PF/AF
+  GPR 方案判定 NO-GO。
+- OpenSSL `speed -seconds 2 -evp sha256` 与 64 MiB `dgst -sha256` 都在
+  `rip=0x62b930` 以 PageFatal reason 2 退出。故障发生在形成有效 SHA 热账之前；不绕过
+  guest fault 语义，也不据此调整 region/fault-map 设计。
+
 ## 正确性收紧
 
 - flags carry-test 折叠在读取 `And/Or` 参数前先验证 opcode，非预期 IR 形态直接拒绝折叠。
@@ -111,22 +143,27 @@ mov w29, w6
 ## 验证
 
 - Orb 全量构建通过。
+- 新 round-trip pass：2 cases / 8 assertions；与既有 low32、int-width、width-chain、GPR
+  coalescing、resident-fault、W/X high-half 合跑为 8 cases / 474 assertions，全部通过。
 - 新 low32 copy 测试 6 assertions；GPR coalescing 353、width-chain 23、resident fault 21、
   W/X 高半部 17，全部通过。
 - func_tests：FLAGS 0/1 × function/block/interpreter 六格均为 rc=101，checksum
   `9f52b7d59285dbe5`。
 - helper-fault：38 passed，0 failed；clone futex/lock 在 FLAGS 0/1 下均 rc=0。
-- smallpt 两臂输出 SHA-256 均为
-  `3b1cb33bb83161a73fa45a23d92bcf3c690a75fbe631024bcc3e1962b3eed30e`。
-- 相对精确优化前二进制的 function fingerprint：1664 units / 11 guests，PASS。
+- 本轮 smallpt 两臂 PPM SHA-256 均为
+  `fe96f7e48295b27c8df8236294052d138c3ed130b81d022739907fe6b2cde5aa`；c-ray 两臂
+  PNG IDAT MD5 均为 `54256cb4b3c6313a65ea12ebb7b81e30`。
+- function fingerprint 自一致性为 1664 units / 11 guests。相对精确旧二进制，1648 个唯一
+  `(guest, pc)` 全部保留，400 个 unit 的 IR 减少、0 个增加，总 IR -2,025。
 - 固定 `SWIFT_FUZZ_SEED=123456` 的 Orb 全套件：基线为 40 failed cases / 53 assertions，
   候选为 39 / 52，并新增 1 个通过的 test case。两条既有 width-chain 断言随临时容器 UB
   修复转绿；剩余差异仍是同类 VIXL 尾部反汇编自一致性抖动，没有新增语义失败类别。
 
 ## 下一阶段
 
-1. PF/AF 独立家仍是 flags 主差距，但必须先给出 signal/fault/dispatcher 的 canonical
-   park 配方和 FLAGS_REGS=0 rollback，不接受只在热路径删 BFI 的实现。
-2. SHA 的主要差距是超块摊薄和公开入口状态义务。下一刀应先按当前 bounded-64 重新采集
-   SHA 热块边界账，再决定扩大跨函数 region 还是做更细 fault map。
-3. 用当前 FEX/SwiftVM 重新生成同 guest PC 的静态 blow-up 表，替换 8 月 14 日历史比值。
+1. 用当前 FEX/SwiftVM 重新生成同 guest PC 的静态 blow-up 表，替换 8 月 14 日历史比值，
+   以新的 6.087B CoreMark 基线重新排序差距。
+2. SHA 必须先修复或绕开当前 guest 自身的合法 PageFatal 触发点，得到有效 hashing 热账后，
+   才能判断 bounded-64、公开入口或 fault map 是否是主因。
+3. PF/AF 专用 GPR 在当前 ABI 下为 NO-GO；只有出现新的 canonical park/recovery 载体，并且
+   重新审计得到非零可删下界时才重开。
