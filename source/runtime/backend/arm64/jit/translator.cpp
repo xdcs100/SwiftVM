@@ -1380,7 +1380,9 @@ void JitTranslator::Translate(ir::Inst* inst) {
     context.TickIR(inst);
     if (inst->GetOp() != ir::OpCode::SetLocation) {
         static_next_loc.reset();
-        dynamic_next_loc.reset();
+        if (inst->GetOp() != ir::OpCode::PopRSB) {
+            dynamic_next_loc.reset();
+        }
     }
 
 #define INST(name, ...)                                                                            \

@@ -8701,6 +8701,11 @@ TEST_CASE("indirect L1 and lean shadow stack are independent and composable") {
             ret_off.bytes - 2 * vixl::aarch64::kInstructionSize);
     REQUIRE(ret_both.bytes == ret_shadow.bytes);
 
+    const auto ret_trailing = run(false, true, Shape::Return, true, false);
+    REQUIRE(ret_trailing.bytes ==
+            ret_shadow.bytes + 2 * vixl::aarch64::kInstructionSize);
+    REQUIRE(count(ret_trailing, "ldr") == count(ret_shadow, "ldr") + 1);
+
     // Any instruction after SetLocation clears the retained SSA register;
     // the feature must then emit the byte-identical dispatcher fallback.
     const auto trailing_off =

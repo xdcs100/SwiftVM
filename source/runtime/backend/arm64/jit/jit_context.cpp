@@ -772,7 +772,7 @@ void JitContext::EmitRSBPush(u64 guest_return_addr, u32 dispatch_index) {
     __ Bind(&rsb_full);
 }
 
-void JitContext::EmitRSBPop() {
+void JitContext::EmitRSBPop(std::optional<XRegister> actual_target) {
     if (features.shadow_lean) {
         Label rsb_miss, rsb_empty;
         const auto predicted = backend::ScratchXPoolEnabled(features) ? GetTmpX() : ip0;
@@ -791,8 +791,12 @@ void JitContext::EmitRSBPop() {
                              true);
         __ Add(slot, cache, Operand(slot, LSL, 3));
         __ Ldp(predicted, slot, MemOperand(slot, -8));
-        __ Ldr(ip, MemOperand(state, state_offset_current_loc));
-        __ Cmp(predicted, ip);
+        if (actual_target) {
+            __ Cmp(predicted, *actual_target);
+        } else {
+            __ Ldr(ip, MemOperand(state, state_offset_current_loc));
+            __ Cmp(predicted, ip);
+        }
         __ B(&rsb_miss, ne);
         __ Cbz(slot, &rsb_miss);
         RecordExecCounter(exec_offset_rsb_hit);
@@ -805,7 +809,6 @@ void JitContext::EmitRSBPop() {
     }
     Label rsb_miss, rsb_empty;
     const auto predicted = backend::ScratchXPoolEnabled(features) ? GetTmpX() : ip0;
-    const auto actual = backend::ScratchXPoolEnabled(features) ? GetTmpX() : ip1;
     // Underflow guard: if rsb_ptr has reached the empty top of the stack
     // (state->rsb_top == &rsb_frames[rsb_stack_size]), there are more guest
     // rets than recorded calls, so no valid prediction exists — fall back to
@@ -816,9 +819,13 @@ void JitContext::EmitRSBPop() {
     __ B(&rsb_empty, hs);
     // Load the predicted guest return address from the top RSB frame.
     __ Ldr(predicted, MemOperand(rsb_ptr, 0));
-    // Load the actual return target (set by the frontend's ret instruction).
-    __ Ldr(actual, MemOperand(state, state_offset_current_loc));
-    __ Cmp(predicted, actual);
+    if (actual_target) {
+        __ Cmp(predicted, *actual_target);
+    } else {
+        const auto actual = backend::ScratchXPoolEnabled(features) ? GetTmpX() : ip1;
+        __ Ldr(actual, MemOperand(state, state_offset_current_loc));
+        __ Cmp(predicted, actual);
+    }
     __ B(&rsb_miss, ne);
     // Prediction hit: load the L2 dispatch-table slot index and look up the
     // compiled code pointer.  cache (x27) holds the L2 table base at all

@@ -547,9 +547,9 @@ private:
     // Emits the inline dispatch for `static_next_loc`; returns false when no
     // static target is known and the caller must Ret to the dispatcher.
     bool EmitStaticForward();
-    // Dynamic SetLocation is remembered only while it remains the final body
-    // instruction. The terminal can therefore reuse its still-live register
-    // without extending an SSA lifetime or reloading State::current_loc.
+    // Dynamic SetLocation is remembered through the no-op PopRSB marker while
+    // it remains the final semantic body value. The terminal can reuse its
+    // register without extending an SSA lifetime or reloading State::current_loc.
     std::optional<ir::Value> dynamic_next_loc{};
     bool EmitIndirectForward();
     std::unique_ptr<Label> backedge_exit_label{};

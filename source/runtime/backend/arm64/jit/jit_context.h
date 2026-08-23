@@ -5,6 +5,7 @@
 #pragma once
 
 #include <map>
+#include <optional>
 #include <vector>
 #include "aarch64/macro-assembler-aarch64.h"
 #include "base/common_funcs.h"
@@ -124,8 +125,9 @@ public:
     // Push: stores a 16-byte frame via pre-decrement of rsb_ptr (x25). The
     //   default format is (guest_return_addr, dispatch_index); lean-shadow
     //   stores dispatch_index twice to avoid materializing the address.
-    // Pop: pops a frame, validates the predicted guest key against
-    //   state->current_loc, and on a hit branches through the L2 value.
+    // Pop: pops a frame, validates the predicted guest key against the retained
+    //   return target when available (otherwise state->current_loc), and on a
+    //   hit branches through the L2 value.
     //   A miss, empty slot, or underflow uses the normal dispatcher path.
     //
     // Bounds guards (State::rsb_bottom / rsb_top, wired in runtime.cpp):
@@ -136,7 +138,7 @@ public:
     //   past the buffer. Both convert an RSB imbalance into a safe dispatcher
     //   round-trip instead of a SIGSEGV.
     void EmitRSBPush(u64 guest_return_addr, u32 dispatch_index);
-    void EmitRSBPop();
+    void EmitRSBPop(std::optional<XRegister> actual_target = std::nullopt);
 
     // Reserves (GetOrPut) the L2 dispatch-table slot for a guest address and
     // returns its slot index (2*entry+1, pointing at the entry's value word).

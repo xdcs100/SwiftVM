@@ -102,7 +102,11 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
             context.RecordExecCounter(exec_offset_exit_ret);
             if (True(context.GetConfig().global_opts & Optimizations::ReturnStackBuffer)) {
                 const u32 link_before = context.CurrentBufferSize();
-                context.EmitRSBPop();
+                const auto actual_target = dynamic_next_loc
+                        ? std::optional{context.X(*dynamic_next_loc)}
+                        : std::nullopt;
+                dynamic_next_loc.reset();
+                context.EmitRSBPop(actual_target);
                 RecordBoundaryRange(BoundarySubsequence::LinkTail, link_before,
                                     context.CurrentBufferSize());
             } else {
