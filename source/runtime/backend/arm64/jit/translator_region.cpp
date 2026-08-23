@@ -272,8 +272,13 @@ bool JitTranslator::BlockIsFlagsTransparent(ir::Block* block) const {
             case ir::OpCode::SaveFlags:
             case ir::OpCode::BranchOnlyFlags:
             case ir::OpCode::SetCarry:
+            case ir::OpCode::SetOverflow:
             case ir::OpCode::ClearFlags:
             case ir::OpCode::InvertCarry:
+            case ir::OpCode::Adc:
+            case ir::OpCode::Sbb:
+            case ir::OpCode::CondSelect:
+            case ir::OpCode::CondSet:
                 return false;
             default:
                 break;
@@ -293,7 +298,9 @@ bool JitTranslator::SuccessorCoversIncomingNzcv(ir::Block* succ,
         if (op == ir::OpCode::GetFlags || op == ir::OpCode::CallLambda ||
             op == ir::OpCode::CallLocation || op == ir::OpCode::CallDynamic ||
             op == ir::OpCode::X87Op || op == ir::OpCode::TestFlags ||
-            op == ir::OpCode::TestNotFlags) {
+            op == ir::OpCode::TestNotFlags || op == ir::OpCode::Adc ||
+            op == ir::OpCode::Sbb ||
+            op == ir::OpCode::CondSelect || op == ir::OpCode::CondSet) {
             return false;
         }
         if (op == ir::OpCode::ClearFlags) {

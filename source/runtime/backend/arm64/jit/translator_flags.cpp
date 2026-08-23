@@ -926,7 +926,8 @@ ir::Inst* SoleUserInBlock(ir::Block* block, ir::Inst* def) {
 }
 
 ir::Inst* OtherAndOrArg(ir::Inst* combine, ir::Inst* known) {
-    if (!combine || !known) {
+    if (!combine || !known ||
+        (combine->GetOp() != ir::OpCode::And && combine->GetOp() != ir::OpCode::Or)) {
         return nullptr;
     }
     if (combine->GetArg<ir::Value>(0).Def() == known) {
