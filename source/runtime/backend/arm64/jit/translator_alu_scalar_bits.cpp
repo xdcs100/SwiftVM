@@ -327,9 +327,10 @@ bool JitTranslator::ReproveWidthChainBridge(ir::Inst* inst) const {
             continue;
         }
         if (other.Id() <= end && last_use(&other) >= inst->Id()) {
+            auto inputs = other.GetValues();
             const bool exact_last_use_handoff =
                     other.Id() == end && std::any_of(
-                            other.GetValues().begin(), other.GetValues().end(),
+                            inputs.begin(), inputs.end(),
                             [&](ir::Value input) {
                                 return ResolveWidthChainBitCast(input).Def() == inst;
                             });
@@ -342,6 +343,42 @@ bool JitTranslator::ReproveWidthChainBridge(ir::Inst* inst) const {
     return true;
 }
 
+bool JitTranslator::ReproveLow32Copy(ir::Inst* inst) const {
+    if (!inst || !context.IsLow32CopyCoalesced(inst->Id()) ||
+        inst->GetOp() != ir::OpCode::BitExtract ||
+        ir::GetValueSizeByte(inst->ReturnType()) != sizeof(u32) ||
+        inst->GetArg<ir::Imm>(1).Get() != 0 ||
+        inst->GetArg<ir::Imm>(2).Get() != 32 || inst->GetUses() != 1) {
+        return false;
+    }
+    auto source = ResolveWidthChainBitCast(inst->GetArg<ir::Value>(0));
+    if (!source.Defined() || context.Low32CopySource(inst->Id()) != source.Id() ||
+        !context.SharesGPR(source, ir::Value{inst})) {
+        return false;
+    }
+
+    const u32 source_target = context.X(source).GetCode();
+    if (!context.DirtyGPR(inst->Id()).Get(source_target)) {
+        return false;
+    }
+
+    auto& list = cur_block->GetInstList();
+    auto wrapper_it = std::next(list.iterator_to(*inst));
+    if (wrapper_it == list.end()) {
+        return false;
+    }
+    auto& wrapper = *wrapper_it;
+    if (wrapper.GetOp() != ir::OpCode::ZeroExtend32To64 ||
+        wrapper.GetArg<ir::Value>(0).Def() != inst ||
+        context.X(ir::Value{&wrapper}).GetCode() == source_target) {
+        return false;
+    }
+
+    return !context.IsWidthChainCoalesced(wrapper.Id()) &&
+           context.X(ir::Value{&wrapper}).GetCode() != source_target &&
+           context.DirtyGPR(wrapper.Id()).Get(source_target);
+}
+
 void JitTranslator::EmitBitExtract(ir::Inst* inst) {
     auto value = inst->GetArg<ir::Value>(0);
     auto left = inst->GetArg<ir::Imm>(1).Get();
@@ -350,6 +387,12 @@ void JitTranslator::EmitBitExtract(ir::Inst* inst) {
     if (context.IsWidthChainCoalesced(inst->Id())) {
         ASSERT_MSG(ReproveWidthChainBridge(inst),
                    "width-chain BitExtract proof drifted before emission at IR {}",
+                   inst->Id());
+        return;
+    }
+    if (context.IsLow32CopyCoalesced(inst->Id())) {
+        ASSERT_MSG(ReproveLow32Copy(inst),
+                   "low32 copy proof drifted before emission at IR {}",
                    inst->Id());
         return;
     }
@@ -458,6 +501,13 @@ void JitTranslator::EmitZeroExtend32To64(ir::Inst* inst) {
         ASSERT_MSG(ReproveWidthChainBridge(inst),
                    "width-chain ZeroExtend32To64 proof drifted before emission at IR {}",
                    inst->Id());
+        return;
+    }
+    if (source.Def() && context.IsLow32CopyCoalesced(source.Id())) {
+        ASSERT_MSG(ReproveLow32Copy(source.Def()),
+                   "low32 copy proof drifted at ZeroExtend32To64 IR {}",
+                   inst->Id());
+        EmitZeroExtend32(inst);
         return;
     }
     if (ir::GetValueSizeByte(source.Type()) == sizeof(u32) &&

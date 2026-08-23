@@ -28,6 +28,7 @@ bool IsHostCoalesceProducer(ir::OpCode op, bool width_chain) {
     using O = ir::OpCode;
     switch (op) {
         case O::LoadImm:
+        case O::LoadMemory:
         case O::LoadUniform:
         case O::Zero:
         case O::Add:
@@ -216,15 +217,28 @@ bool JitTranslator::ReproveCoalescedHostWrite(ir::Inst* inst) const {
     }
     auto produced = stored;
     bool zero_extend_chain = false;
+    bool low32_copy = false;
     if (wrapper->GetOp() == ir::OpCode::ZeroExtend32To64) {
         produced = ResolveHostCoalesceBitCast(wrapper->GetArg<ir::Value>(0));
         zero_extend_chain = true;
+        if (produced.Def() &&
+            context.IsLow32CopyCoalesced(produced.Id()) &&
+            produced.Def()->GetOp() == ir::OpCode::BitExtract &&
+            produced.Def()->GetArg<ir::Imm>(1).Get() == 0 &&
+            produced.Def()->GetArg<ir::Imm>(2).Get() == 32) {
+            auto source = ResolveHostCoalesceBitCast(
+                    produced.Def()->GetArg<ir::Value>(0));
+            low32_copy = source.Defined() &&
+                    context.Low32CopySource(produced.Id()) == source.Id() &&
+                    context.SharesGPR(source, produced);
+        }
         const bool width_root = produced.Defined() &&
                                 context.IsWidthChainCoalesced(produced.Id()) &&
                                 context.WidthChainAnchor(produced.Id()) == produced.Id();
         if (!produced.Def() ||
             (!width_root && !live_publish && produced.Def()->GetUses() != 1) ||
-            !IsWidthChainHostWWrite(produced, target, context.GetFeatures())) {
+            (!low32_copy &&
+             !IsWidthChainHostWWrite(produced, target, context.GetFeatures()))) {
             return false;
         }
     }
@@ -232,13 +246,14 @@ bool JitTranslator::ReproveCoalescedHostWrite(ir::Inst* inst) const {
     if (!producer ||
         !IsHostCoalesceProducer(producer->GetOp(),
                                 context.GetFeatures().ra_width_chain) ||
-        context.X(produced).GetCode() != target ||
+        (!low32_copy && context.X(produced).GetCode() != target) ||
         (zero_extend_chain && context.X(stored).GetCode() != target)) {
         return false;
     }
     const u32 width = ir::GetValueSizeByte(produced.Type());
     if ((width != sizeof(u32) && width != sizeof(u64)) ||
         (width == sizeof(u32) &&
+         !low32_copy &&
          !IsWidthChainHostWWrite(produced, target, context.GetFeatures()))) {
         return false;
     }
@@ -291,6 +306,10 @@ bool JitTranslator::ReproveCoalescedHostWrite(ir::Inst* inst) const {
 
     for (auto input : producer->GetValues()) {
         auto root = ResolveHostCoalesceBitCast(input);
+        if (low32_copy && root.Defined() &&
+            context.Low32CopySource(produced.Id()) == root.Id()) {
+            continue;
+        }
         if (!root.Defined() || !context.SharesGPR(root, produced)) {
             continue;
         }
@@ -313,13 +332,24 @@ bool JitTranslator::ReproveCoalescedHostWrite(ir::Inst* inst) const {
             other.Id() > live_end) {
             continue;
         }
+        const bool low32_copy_alias =
+                context.IsLow32CopyCoalesced(other.Id()) &&
+                other.GetOp() == ir::OpCode::BitExtract &&
+                other.GetArg<ir::Imm>(1).Get() == 0 &&
+                other.GetArg<ir::Imm>(2).Get() == 32 &&
+                (context.Low32CopySource(other.Id()) == stored.Id() ||
+                 context.Low32CopySource(other.Id()) == produced.Id());
+        if (low32_copy_alias) {
+            continue;
+        }
         if (other.Id() > inst->Id() &&
             other.GetOp() == ir::OpCode::GetHostGPR &&
             other.GetArg<ir::Imm>(0).Get() == target) {
             continue;
         }
         ir::Value value{&other};
-        if (context.SharesGPR(value, produced) &&
+        const auto publication_value = low32_copy ? stored : produced;
+        if (context.SharesGPR(value, publication_value) &&
             last_use(&other) > proof_start) {
             return false;
         }

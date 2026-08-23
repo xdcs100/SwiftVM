@@ -120,6 +120,7 @@ private:
     [[nodiscard]] bool ReprovePshufd4eExtConstant(ir::Inst* inst) const;
     [[nodiscard]] bool ReprovePshufd4eExtShuffle(ir::Inst* inst) const;
     [[nodiscard]] bool ReproveWidthChainBridge(ir::Inst* inst) const;
+    [[nodiscard]] bool ReproveLow32Copy(ir::Inst* inst) const;
     [[nodiscard]] bool ReproveCachedConstAddress(ir::Inst* inst) const;
 
     enum class BoundarySubsequence : size_t {

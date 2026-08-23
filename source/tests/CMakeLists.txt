@@ -5,6 +5,7 @@ add_executable(swift_test
         region_edges_test.cpp
         direct_link_production_test.cpp
         jit_cache_direct_link_test.cpp
+        register_alloc_copy_test.cpp
         main_case.cpp
         ../translator/linux/guest_memory.cpp
         smc_tracker_test.cpp

@@ -271,6 +271,7 @@ public:
     void MarkHostWriteCoalesced(u32 id);
     void MarkHostReadCoalesced(u32 id);
     void MarkWidthChainCoalesced(u32 id, u32 anchor_id);
+    void MarkLow32CopyCoalesced(u32 id, u32 source_id);
     bool FreezeWidthComponentOwner(u32 anchor_id, u16 target, bool high_zero);
     bool CommitWidthComponentOwner(u32 anchor_id, u16 target);
     void MarkConstAddressCached(u32 id, u32 anchor_id);
@@ -280,6 +281,8 @@ public:
     [[nodiscard]] bool IsHostReadCoalesced(u32 id) const;
     [[nodiscard]] bool IsWidthChainCoalesced(u32 id) const;
     [[nodiscard]] u32 WidthChainAnchor(u32 id) const;
+    [[nodiscard]] bool IsLow32CopyCoalesced(u32 id) const;
+    [[nodiscard]] u32 Low32CopySource(u32 id) const;
     [[nodiscard]] bool HasWidthComponentOwner(u32 anchor_id) const;
     [[nodiscard]] bool WidthComponentOwnerCommitted(u32 anchor_id) const;
     [[nodiscard]] u16 WidthComponentOwnerTarget(u32 anchor_id) const;
@@ -343,6 +346,7 @@ private:
     Vector<bool> coalesced_host_reads{};
     Vector<u32> width_chain_anchors{};
     Vector<WidthComponentOwner> width_component_owners{};
+    Vector<u32> low32_copy_sources{};
     Vector<u32> const_address_cache_anchors{};
     Vector<u16> aes_chain_targets{};
     Vector<bool> pshufd_4e_ext{};

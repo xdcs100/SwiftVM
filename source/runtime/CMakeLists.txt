@@ -76,6 +76,7 @@ add_library(swift_runtime STATIC
         ir/opts/const_folding_pass.cpp
         ir/opts/const_folding_pass.h
         ir/opts/register_alloc_coalesce_gpr.cpp
+        ir/opts/register_alloc_coalesce_copy.cpp
         ir/opts/register_alloc_coalesce_fpr.cpp
         ir/opts/register_alloc_const_address.cpp
         ir/opts/register_alloc_pass.cpp

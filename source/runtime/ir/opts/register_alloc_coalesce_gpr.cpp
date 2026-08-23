@@ -373,9 +373,9 @@ Vector<u8> CollectLongWidthChainBridges(
                 !safe_between(previous.store->Id(), current.producer->Id())) {
                 return false;
             }
+            auto inputs = current.producer->GetValues();
             return std::any_of(
-                    current.producer->GetValues().begin(),
-                    current.producer->GetValues().end(),
+                    inputs.begin(), inputs.end(),
                     [&](Value input) {
                         return low_extract_source(input).Def() == previous.wrapper;
                     });
@@ -496,10 +496,10 @@ void CoalesceWidthChainBridges(
                     ? std::max<u32>(other.Id(), use_end[other.Id()])
                     : other.Id();
             if (other.Id() <= end && other_end >= bridge.Id()) {
+                auto inputs = other.GetValues();
                 const bool exact_last_use_handoff =
                         long_candidate && other.Id() == end &&
-                        std::any_of(other.GetValues().begin(),
-                                    other.GetValues().end(),
+                        std::any_of(inputs.begin(), inputs.end(),
                                     [&](Value input) {
                                         return ResolveBitCastSource(input).Def() ==
                                                &bridge;

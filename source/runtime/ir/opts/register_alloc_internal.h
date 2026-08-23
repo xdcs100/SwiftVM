@@ -80,6 +80,11 @@ void CoalescePinnedWViewInputs(Block* lir_block,
                                backend::RegAlloc* reg_alloc,
                                const Vector<u32>& use_end,
                                const RegisterAllocFamilyCallbacks& callbacks);
+void CoalesceLow32CopyChains(
+        Block* lir_block,
+        backend::RegAlloc* reg_alloc,
+        const Vector<u32>& use_end,
+        const RegisterAllocFamilyCallbacks& callbacks);
 void CensusPinnedHostResidual(
         Block* lir_block,
         backend::RegAlloc* reg_alloc,

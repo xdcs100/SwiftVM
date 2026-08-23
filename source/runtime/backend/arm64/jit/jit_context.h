@@ -171,6 +171,12 @@ public:
     [[nodiscard]] u32 WidthChainAnchor(u32 id) const {
         return reg_alloc.WidthChainAnchor(id);
     }
+    [[nodiscard]] bool IsLow32CopyCoalesced(u32 id) const {
+        return reg_alloc.IsLow32CopyCoalesced(id);
+    }
+    [[nodiscard]] u32 Low32CopySource(u32 id) const {
+        return reg_alloc.Low32CopySource(id);
+    }
     [[nodiscard]] bool HasWidthComponentOwner(u32 anchor) const {
         return reg_alloc.HasWidthComponentOwner(anchor);
     }

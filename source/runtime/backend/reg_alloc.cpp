@@ -463,6 +463,7 @@ RegAlloc::RegAlloc(u32 instr_size, const GPRSMask& gprs, const FPRSMask& fprs,
           coalesced_host_reads(instr_size),
           width_chain_anchors(instr_size, UINT32_MAX),
           width_component_owners(instr_size),
+          low32_copy_sources(instr_size, UINT32_MAX),
           const_address_cache_anchors(instr_size, UINT32_MAX),
           aes_chain_targets(instr_size, UINT16_MAX),
           pshufd_4e_ext(instr_size),
@@ -498,6 +499,8 @@ void RegAlloc::ResetAllocations() {
     std::fill(width_chain_anchors.begin(), width_chain_anchors.end(), UINT32_MAX);
     std::fill(width_component_owners.begin(), width_component_owners.end(),
               WidthComponentOwner{});
+    std::fill(low32_copy_sources.begin(), low32_copy_sources.end(),
+              UINT32_MAX);
     std::fill(const_address_cache_anchors.begin(), const_address_cache_anchors.end(),
               UINT32_MAX);
     std::fill(aes_chain_targets.begin(), aes_chain_targets.end(), UINT16_MAX);
@@ -557,6 +560,12 @@ void RegAlloc::MarkWidthChainCoalesced(u32 id, u32 anchor_id) {
     width_chain_anchors[id] = anchor_id;
 }
 
+void RegAlloc::MarkLow32CopyCoalesced(u32 id, u32 source_id) {
+    ASSERT(id < low32_copy_sources.size());
+    ASSERT(source_id < low32_copy_sources.size());
+    low32_copy_sources[id] = source_id;
+}
+
 bool RegAlloc::FreezeWidthComponentOwner(u32 anchor_id, u16 target,
                                          bool high_zero) {
     ASSERT(anchor_id < width_component_owners.size());
@@ -610,6 +619,16 @@ bool RegAlloc::IsWidthChainCoalesced(u32 id) const {
 u32 RegAlloc::WidthChainAnchor(u32 id) const {
     ASSERT(IsWidthChainCoalesced(id));
     return width_chain_anchors[id];
+}
+
+bool RegAlloc::IsLow32CopyCoalesced(u32 id) const {
+    return id < low32_copy_sources.size() &&
+           low32_copy_sources[id] != UINT32_MAX;
+}
+
+u32 RegAlloc::Low32CopySource(u32 id) const {
+    ASSERT(IsLow32CopyCoalesced(id));
+    return low32_copy_sources[id];
 }
 
 bool RegAlloc::HasWidthComponentOwner(u32 anchor_id) const {

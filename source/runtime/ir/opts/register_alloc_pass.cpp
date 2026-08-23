@@ -401,6 +401,7 @@ public:
             CoalesceGuestRegisterAccesses();
             CoalesceWidthChains();
         }
+        CoalesceLow32Copies();
         CoalesceGuestFPRAccesses(xmm_resident);
         RecognizePshufd4eExt();
         CacheConstantAddresses();
@@ -882,6 +883,31 @@ private:
                     fixed_gpr_clobbers, callbacks);
         };
 
+        if (function) {
+            for (auto* hir_block : function->GetHIRBlocks()) {
+                coalesce_block(hir_block->GetBlock());
+            }
+        } else {
+            coalesce_block(block);
+        }
+    }
+
+    void CoalesceLow32Copies() {
+        if (!features.ra_coalesce ||
+            !backend::X86PinExtLevel2Enabled(reg_alloc->GetGprs())) {
+            return;
+        }
+        RegisterAllocFamilyCallbacks callbacks{
+                this,
+                [](void* context, Inst* inst, u32 extra_gpr, u32 extra_fpr) {
+                    return static_cast<LinearScanAllocator*>(context)->CheckInstr(
+                            inst, extra_gpr, extra_fpr);
+                },
+                nullptr};
+        auto coalesce_block = [&](Block* lir_block) {
+            auto use_end = CollectGuestGPRUseEnds(lir_block, InstrCount());
+            CoalesceLow32CopyChains(lir_block, reg_alloc, use_end, callbacks);
+        };
         if (function) {
             for (auto* hir_block : function->GetHIRBlocks()) {
                 coalesce_block(hir_block->GetBlock());
