@@ -103,14 +103,15 @@ public:
     [[nodiscard]] const std::vector<DirectLinkSiteInfo>& GetDirectLinkSites() const {
         return pending_direct_link_sites;
     }
-    // Inline dispatch to a compile-time-constant guest location, for the
+    // Dispatch to a compile-time-constant guest location, for the
     // "SetLocation(imm) + ReturnToDispatch" shape a direct jmp/call decodes to.
-    // Emits nothing and returns false when the target is not linkable (unknown
-    // module, cross-module, BlockLink disabled); the caller then Rets to the
-    // trampoline dispatcher as before. state->current_loc has already been
-    // written by EmitSetLocation, so the fallback path needs no fixup.
+    // Prefer a tracked direct-link site and retain the inline L2 lookup when the
+    // region cannot host one. Emits nothing when the target is not linkable;
+    // state->current_loc already contains the dispatcher fallback location.
     [[nodiscard]] bool ForwardStatic(ir::Location location,
-                                     Label* cycle_exit = nullptr);
+                                     Label* cycle_exit = nullptr,
+                                     LinkSiteKind direct_link_kind =
+                                             LinkSiteKind::Unconditional);
     // Polls the sticky signal request, then checks only the first slot of the
     // existing per-Runtime L1 table. A key mismatch or cleared value returns
     // through the unchanged dispatcher, which performs the complete L1
@@ -253,6 +254,8 @@ private:
     void RecordHotCounter(HotCoalesceCounter counter, u32 amount = 1);
     void RecordHotSpillReload();
     void RecordHotSpillWriteback();
+    [[nodiscard]] bool EmitDirectLink(ir::Location location,
+                                      LinkSiteKind kind);
 
     // --- RegAlloc::MEM (spilled value) support ---------------------------
     // A value the linear scan could not keep in a host register lives in

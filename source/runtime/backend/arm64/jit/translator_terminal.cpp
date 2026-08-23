@@ -22,7 +22,7 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
                       FlagsRegsAuditEdgeKind::Dispatcher);
             context.RecordExecCounter(static_next_loc ? exec_offset_exit_direct
                                                       : exec_offset_exit_indirect);
-            if (!EmitStaticForward() && !EmitIndirectForward()) {
+            if (!EmitStaticForward(direct_link_kind) && !EmitIndirectForward()) {
                 __ Ret();
             }
         } else if constexpr (std::is_same_v<T, ir::terminal::ReturnToDispatch>) {
@@ -32,7 +32,7 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
                     cur_block_is_call ? exec_offset_exit_call
                                       : (static_next_loc ? exec_offset_exit_direct
                                                          : exec_offset_exit_indirect));
-            if (!EmitStaticForward() && !EmitIndirectForward()) {
+            if (!EmitStaticForward(direct_link_kind) && !EmitIndirectForward()) {
                 __ Ret();
             }
         } else if constexpr (std::is_same_v<T, ir::terminal::ReturnToHost>) {
@@ -319,7 +319,7 @@ bool JitTranslator::RecordLocalCondition(ir::Inst* inst, ir::Cond cond) {
 // BlockLink path already branch through, with the same safety property: SMC
 // invalidation (SmcTracker::ClearDispatchSlots) zeroes the slot, so a stale
 // translation degrades to the Cbz fallback rather than to a wild branch.
-bool JitTranslator::EmitStaticForward() {
+bool JitTranslator::EmitStaticForward(LinkSiteKind direct_link_kind) {
     if (!static_next_loc) {
         return false;
     }
@@ -328,7 +328,7 @@ bool JitTranslator::EmitStaticForward() {
     const u32 link_before = context.CurrentBufferSize();
     const auto location = ir::Location{target};
     const bool emitted = context.ForwardStatic(
-            location, GetDirectCycleExit(location));
+            location, GetDirectCycleExit(location), direct_link_kind);
     RecordBoundaryRange(BoundarySubsequence::LinkTail, link_before,
                         context.CurrentBufferSize());
     return emitted;

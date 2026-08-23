@@ -447,8 +447,11 @@ TEST_CASE("direct link keeps structural legacy fallbacks",
 #if defined(__aarch64__)
     ScopedEnvironment disk_cache{"SVM_JIT_CACHE", ""};
     const bool cross_module = GENERATE(false, true);
-    DYNAMIC_SECTION("mode=" << (cross_module ? "cross-module target"
-                                             : "BlockLink disabled")) {
+    const bool static_forward = GENERATE(false, true);
+    DYNAMIC_SECTION("shape=" << (static_forward ? "SetLocation" : "LinkBlock")
+                             << " mode="
+                             << (cross_module ? "cross-module target"
+                                              : "BlockLink disabled")) {
         const size_t page_size = static_cast<size_t>(getpagesize());
         const size_t guest_size = 8 * page_size;
         void* guest_memory = mmap(nullptr,
@@ -489,7 +492,9 @@ TEST_CASE("direct link keeps structural legacy fallbacks",
             REQUIRE(target_code != nullptr);
             space.PushCodeCache(Location{target_guest}, target_code);
 
-            auto source = BuildSource(source_guest, target_guest);
+            auto source = static_forward
+                    ? BuildStaticForwardSource(source_guest, target_guest)
+                    : BuildSource(source_guest, target_guest);
             auto* source_code = static_cast<u8*>(TranslateIR(source_module, source));
             REQUIRE(source_code != nullptr);
             space.PushCodeCache(Location{source_guest}, source_code);
@@ -585,23 +590,19 @@ TEST_CASE("direct SCC descending edge observes a pending interrupt",
                     code_a,
                     static_cast<size_t>(site_a->rx - code_a),
                     kExitRequestLdar));
-            if (static_forward) {
-                REQUIRE(ContainsInsn(code_b, 32, kExitRequestLdar));
-            } else {
-                const auto region_b = module->GetCodeRegion(code_b);
-                REQUIRE(region_b);
-                const auto sites_b = FindProductionSites(space, *region_b, code_b);
-                const auto site_b = std::find_if(
-                        sites_b.begin(), sites_b.end(), [&](const auto& site) {
-                            return site.record.source_owner.allocation == code_b &&
-                                   site.record.guest_target == guest_a;
-                        });
-                REQUIRE(site_b != sites_b.end());
-                REQUIRE(ContainsInsn(
-                        code_b,
-                        static_cast<size_t>(site_b->rx - code_b),
-                        kExitRequestLdar));
-            }
+            const auto region_b = module->GetCodeRegion(code_b);
+            REQUIRE(region_b);
+            const auto sites_b = FindProductionSites(space, *region_b, code_b);
+            const auto site_b = std::find_if(
+                    sites_b.begin(), sites_b.end(), [&](const auto& site) {
+                        return site.record.source_owner.allocation == code_b &&
+                               site.record.guest_target == guest_a;
+                    });
+            REQUIRE(site_b != sites_b.end());
+            REQUIRE(ContainsInsn(
+                    code_b,
+                    static_cast<size_t>(site_b->rx - code_b),
+                    kExitRequestLdar));
 
             Runtime runtime{&space};
             runtime.SetLocation(guest_a);
@@ -613,11 +614,10 @@ TEST_CASE("direct SCC descending edge observes a pending interrupt",
                 runner_done.store(true, std::memory_order_release);
             });
 
-            const size_t expected_links = static_forward ? 1 : 2;
             REQUIRE(WaitUntil(
                     [&] {
                         return space.GetLinkManager().GetStats().linked ==
-                               expected_links;
+                               2;
                     },
                     std::chrono::seconds(2)));
             runtime.SignalInterrupt();
@@ -840,6 +840,8 @@ TEST_CASE("production direct exit repeatedly delinks recompiles and relinks",
           "[direct-link][production][smc]") {
 #if defined(__aarch64__)
     ScopedEnvironment disk_cache{"SVM_JIT_CACHE", ""};
+    const bool static_forward = GENERATE(false, true);
+    CAPTURE(static_forward);
 
     const size_t page_size = static_cast<size_t>(getpagesize());
     const size_t guest_size = 4 * page_size;
@@ -869,7 +871,9 @@ TEST_CASE("production direct exit repeatedly delinks recompiles and relinks",
         AddressSpace space{config};
         auto module = space.GetDefaultModule();
 
-        auto source = BuildSource(source_guest, target_guest);
+        auto source = static_forward
+                ? BuildStaticForwardSource(source_guest, target_guest)
+                : BuildSource(source_guest, target_guest);
         auto* source_code = TranslateIR(module, source);
         REQUIRE(source_code != nullptr);
         space.PushCodeCache(Location{source_guest}, source_code);
@@ -877,15 +881,13 @@ TEST_CASE("production direct exit repeatedly delinks recompiles and relinks",
         const auto source_region = module->GetCodeRegion(static_cast<u8*>(source_code));
         REQUIRE(source_region);
         const auto trampoline = source_region->rx_base + source_region->trampoline_offset;
-        // This source has no body/prologue instructions: its production
-        // terminal is therefore exactly the first and only 4-byte leaf.
-        auto* site = static_cast<u8*>(source_code);
+        const auto sites = FindProductionSites(
+                space, *source_region, static_cast<u8*>(source_code));
+        REQUIRE(sites.size() == 1);
+        auto* site = sites.front().rx;
         REQUIRE(DecodeBranchTarget(site, LoadInsn(site)) ==
                 reinterpret_cast<uintptr_t>(trampoline));
-        const LinkSiteKey key{
-                source_region->id,
-                static_cast<u32>(site - source_region->rx_base),
-        };
+        const LinkSiteKey key = sites.front().key;
         REQUIRE(space.GetLinkManager().QuerySite(key)->state == LinkSiteState::Unlinked);
 
         Runtime runtime{&space};

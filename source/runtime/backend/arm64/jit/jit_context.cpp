@@ -490,7 +490,9 @@ XRegister JitContext::GetSharedTmpX() {
     return XRegister(shared_tmp_gpr);
 }
 
-bool JitContext::ForwardStatic(ir::Location location, Label* cycle_exit) {
+bool JitContext::ForwardStatic(ir::Location location,
+                               Label* cycle_exit,
+                               LinkSiteKind direct_link_kind) {
     // Same-module only, like the BlockLink path in Forward(): a slot filled by
     // another module outlives this module's view of it. The lookup also keeps
     // dispatch slots (a finite shared table) from being reserved for addresses
@@ -507,6 +509,9 @@ bool JitContext::ForwardStatic(ir::Location location, Label* cycle_exit) {
     if (cycle_exit) {
         __ Ldar(ip0, MemOperand(state, state_offset_exit_request));
         __ Cbnz(ip0, cycle_exit);
+    }
+    if (EmitDirectLink(location, direct_link_kind)) {
+        return true;
     }
     const u32 dispatcher_index = target_module->GetDispatchIndex(location);
     Label empty_slot;
@@ -561,26 +566,7 @@ void JitContext::Forward(ir::Location location,
 
         const bool self_module_forward{module == target_module};
         const ModuleConfig& module_config{module->GetModuleConfig()};
-        if (direct_link_active && self_module_forward) {
-            // The final RX address is unknown until TranslateIR allocates its
-            // CodeBuffer. Emit exactly one 4-byte BL placeholder and relocate
-            // it to this allocation's region trampoline in Flush(). The site
-            // record is installed there, before any L2 publication.
-            pending_direct_link_sites.push_back(
-                    {CurrentBufferSize(), location.Value(), direct_link_kind});
-            // The first/unlinked traversal enters a C++ resolver. B0 records
-            // the future NZCV save/restore template here, but its dynamic cost
-            // is weighted by LinkManager::linker_calls rather than block entries.
-            RecordFlagsRegsAudit(FlagsRegsAuditMergeCause::TerminalInternal,
-                                 FlagsRegsAuditEdgeKind::DirectSlow,
-                                 FlagsRegsAuditCost::PackInstructions,
-                                 2,
-                                 true);
-            RecordFlagsRegsAudit(FlagsRegsAuditMergeCause::TerminalInternal,
-                                 FlagsRegsAuditEdgeKind::DirectSlow,
-                                 FlagsRegsAuditCost::UnpackInstructions,
-                                 2);
-            __ dc32(*EncodeBL(0));
+        if (EmitDirectLink(location, direct_link_kind)) {
             return;
         }
 
@@ -629,6 +615,25 @@ void JitContext::Forward(ir::Location location,
             __ Ret();
         }
     }
+}
+
+bool JitContext::EmitDirectLink(ir::Location location, LinkSiteKind kind) {
+    if (!CanEmitDirectLink(location)) {
+        return false;
+    }
+    pending_direct_link_sites.push_back(
+            {CurrentBufferSize(), location.Value(), kind});
+    RecordFlagsRegsAudit(FlagsRegsAuditMergeCause::TerminalInternal,
+                         FlagsRegsAuditEdgeKind::DirectSlow,
+                         FlagsRegsAuditCost::PackInstructions,
+                         2,
+                         true);
+    RecordFlagsRegsAudit(FlagsRegsAuditMergeCause::TerminalInternal,
+                         FlagsRegsAuditEdgeKind::DirectSlow,
+                         FlagsRegsAuditCost::UnpackInstructions,
+                         2);
+    __ dc32(*EncodeBL(0));
+    return true;
 }
 
 bool JitContext::CanBypassDispatcher(ir::Location location) const {
