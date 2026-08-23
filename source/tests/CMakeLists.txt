@@ -4,6 +4,7 @@ add_executable(swift_test
         region_link_trampoline_test.cpp
         region_edges_test.cpp
         direct_link_production_test.cpp
+        flags_merge_test.cpp
         jit_cache_direct_link_test.cpp
         integer_width_elimination_test.cpp
         register_alloc_copy_test.cpp

@@ -144,7 +144,9 @@ void JitTranslator::MergeNZCV(FlagsRegsAuditMergeCause cause,
         u64 keep = ~req;
         __ Mrs(scratch, NZCV);
         __ And(flags, flags, ForceCast<s64>(keep));
-        __ And(scratch, scratch, static_cast<u32>(req));
+        if (req != static_cast<u64>(HostFlags::NZCV)) {
+            __ And(scratch, scratch, static_cast<u32>(req));
+        }
         __ Orr(flags, flags, scratch);
         if (!flags_token_keep) {
             nzcv_dirty = false;
