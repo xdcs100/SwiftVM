@@ -244,10 +244,14 @@ void CoalesceGuestFPRWrites(
         }
         if (!producer || produced.Id() >= use_end.size() ||
             produced.Type() != ValueType::V128 ||
-            use_end[produced.Id()] != store.Id() ||
+            use_end[produced.Id()] < store.Id() ||
             !IsResidentFPRProducer(producer->GetOp(), scalar_insert,
                                    features.sse_scalar_tie) ||
             reg_alloc->ValueType(produced) != backend::RegAlloc::FPR) {
+            continue;
+        }
+        const u32 produced_target = reg_alloc->ValueFPR(produced).id;
+        if (IsResidentFPRTarget(produced_target) && produced_target != target) {
             continue;
         }
         if (IsScalarFPRBinaryProducer(producer->GetOp())) {
@@ -269,14 +273,27 @@ void CoalesceGuestFPRWrites(
         }
 
         bool blocked = false;
+        const u32 produced_end = use_end[produced.Id()];
         for (auto& other : list) {
             if (&other == producer || &other == &store || !other.HasValue() ||
-                other.IsBitCastOperation() || other.Id() >= store.Id()) {
+                other.IsBitCastOperation() || other.Id() > produced_end) {
                 continue;
             }
             Value value{&other};
             if (mapped_to(value, target) && value.Id() < use_end.size() &&
                 use_end[value.Id()] > producer->Id()) {
+                blocked = true;
+                break;
+            }
+        }
+        if (blocked) continue;
+
+        for (auto& scan : list) {
+            if (scan.Id() <= store.Id() || scan.Id() > produced_end) {
+                continue;
+            }
+            if (scan.GetOp() == OpCode::SetHostFPR &&
+                scan.GetArg<Imm>(1).Get() == target) {
                 blocked = true;
                 break;
             }

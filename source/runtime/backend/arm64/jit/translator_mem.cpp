@@ -707,7 +707,8 @@ bool JitTranslator::ReproveCoalescedHostFPRWrite(ir::Inst* inst) const {
         }
         return end;
     };
-    if (last_use(producer) != inst->Id()) {
+    const u32 produced_end = last_use(producer);
+    if (produced_end < inst->Id()) {
         return false;
     }
     if (IsHostScalarFPRBinaryProducer(producer->GetOp())) {
@@ -735,12 +736,21 @@ bool JitTranslator::ReproveCoalescedHostFPRWrite(ir::Inst* inst) const {
     }
     for (auto& other : cur_block->GetInstList()) {
         if (&other == producer || &other == inst || !other.HasValue() ||
-            other.IsBitCastOperation() || other.Id() >= inst->Id()) {
+            other.IsBitCastOperation() || other.Id() > produced_end) {
             continue;
         }
         ir::Value value{&other};
         if (context.SharesFPR(value, produced) &&
             last_use(&other) > producer->Id()) {
+            return false;
+        }
+    }
+    for (auto& scan : cur_block->GetInstList()) {
+        if (scan.Id() <= inst->Id() || scan.Id() > produced_end) {
+            continue;
+        }
+        if (scan.GetOp() == ir::OpCode::SetHostFPR &&
+            scan.GetArg<ir::Imm>(1).Get() == target) {
             return false;
         }
     }
