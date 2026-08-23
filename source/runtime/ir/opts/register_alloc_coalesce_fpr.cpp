@@ -25,7 +25,7 @@ bool IsScalarFPRBinaryProducer(OpCode op) {
     }
 }
 
-bool IsResidentFPRProducer(OpCode op, bool scalar_tie) {
+bool IsResidentFPRProducer(OpCode op, bool scalar_insert, bool scalar_tie) {
     switch (op) {
         // These emitters either write a fresh destination or use a single
         // A64 three-register SIMD instruction. Their source/destination
@@ -45,7 +45,8 @@ bool IsResidentFPRProducer(OpCode op, bool scalar_tie) {
         case OpCode::VecFDiv:
             return true;
         default:
-            return scalar_tie && IsScalarFPRBinaryProducer(op);
+            return IsScalarFPRBinaryProducer(op) &&
+                   (!scalar_insert || scalar_tie);
     }
 }
 
@@ -243,17 +244,21 @@ void CoalesceGuestFPRWrites(
         if (!producer || produced.Id() >= use_end.size() ||
             produced.Type() != ValueType::V128 ||
             use_end[produced.Id()] != store.Id() ||
-            !IsResidentFPRProducer(producer->GetOp(),
-                                   features.sse_scalar_tie && scalar_insert) ||
+            !IsResidentFPRProducer(producer->GetOp(), scalar_insert,
+                                   features.sse_scalar_tie) ||
             reg_alloc->ValueType(produced) != backend::RegAlloc::FPR) {
             continue;
         }
         if (IsScalarFPRBinaryProducer(producer->GetOp())) {
             auto left = ResolveBitCastSource(producer->GetArg<Value>(0));
-            if (!left.Defined() || left.Id() >= use_end.size() ||
-                !reg_alloc->IsHostReadCoalesced(left.Id()) ||
-                !mapped_to(left, target) ||
-                use_end[left.Id()] != producer->Id()) {
+            if (scalar_insert) {
+                if (!left.Defined() || left.Id() >= use_end.size() ||
+                    !reg_alloc->IsHostReadCoalesced(left.Id()) ||
+                    !mapped_to(left, target) ||
+                    use_end[left.Id()] != producer->Id()) {
+                    continue;
+                }
+            } else if (mapped_to(left, target)) {
                 continue;
             }
         }

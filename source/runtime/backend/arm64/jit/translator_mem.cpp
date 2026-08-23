@@ -101,7 +101,8 @@ bool IsHostScalarFPRBinaryProducer(ir::OpCode op) {
     }
 }
 
-bool IsHostFPRCoalesceProducer(ir::OpCode op, bool scalar_tie) {
+bool IsHostFPRCoalesceProducer(ir::OpCode op, bool scalar_insert,
+                              bool scalar_tie) {
     using O = ir::OpCode;
     switch (op) {
         case O::LoadUniform:
@@ -118,7 +119,8 @@ bool IsHostFPRCoalesceProducer(ir::OpCode op, bool scalar_tie) {
         case O::VecFDiv:
             return true;
         default:
-            return scalar_tie && IsHostScalarFPRBinaryProducer(op);
+            return IsHostScalarFPRBinaryProducer(op) &&
+                   (!scalar_insert || scalar_tie);
     }
 }
 
@@ -687,8 +689,8 @@ bool JitTranslator::ReproveCoalescedHostFPRWrite(ir::Inst* inst) const {
         return ReproveAesChainHostWrite(inst);
     }
     if (!producer || produced.Type() != ir::ValueType::V128 ||
-        !IsHostFPRCoalesceProducer(producer->GetOp(),
-                                   sse_scalar_tie && sse_scalar_insert) ||
+        !IsHostFPRCoalesceProducer(producer->GetOp(), sse_scalar_insert,
+                                   sse_scalar_tie) ||
         context.V(produced).GetCode() != target) {
         return false;
     }
@@ -709,13 +711,17 @@ bool JitTranslator::ReproveCoalescedHostFPRWrite(ir::Inst* inst) const {
     }
     if (IsHostScalarFPRBinaryProducer(producer->GetOp())) {
         auto left = ResolveHostCoalesceBitCast(producer->GetArg<ir::Value>(0));
-        if (!left.Defined() || !left.Def() ||
-            left.Def()->GetOp() != ir::OpCode::GetHostFPR ||
-            !context.IsHostReadCoalesced(left.Id()) ||
-            left.Def()->GetArg<ir::Imm>(0).Get() != target ||
-            left.Def()->GetArg<ir::Imm>(1).Get() != 0 ||
-            context.V(left).GetCode() != target ||
-            last_use(left.Def()) != producer->Id()) {
+        if (sse_scalar_insert) {
+            if (!left.Defined() || !left.Def() ||
+                left.Def()->GetOp() != ir::OpCode::GetHostFPR ||
+                !context.IsHostReadCoalesced(left.Id()) ||
+                left.Def()->GetArg<ir::Imm>(0).Get() != target ||
+                left.Def()->GetArg<ir::Imm>(1).Get() != 0 ||
+                context.V(left).GetCode() != target ||
+                last_use(left.Def()) != producer->Id()) {
+                return false;
+            }
+        } else if (left.Defined() && context.SharesFPR(left, produced)) {
             return false;
         }
     }

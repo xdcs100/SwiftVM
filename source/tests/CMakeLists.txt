@@ -7,6 +7,7 @@ add_executable(swift_test
         jit_cache_direct_link_test.cpp
         integer_width_elimination_test.cpp
         register_alloc_copy_test.cpp
+        register_alloc_fpr_test.cpp
         main_case.cpp
         ../translator/linux/guest_memory.cpp
         smc_tracker_test.cpp

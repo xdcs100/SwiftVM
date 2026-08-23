@@ -91,7 +91,7 @@ void CensusPinnedHostResidual(
         const Vector<u32>& use_end);
 bool IsResidentFPRTarget(u32 reg);
 bool IsScalarFPRBinaryProducer(OpCode op);
-bool IsResidentFPRProducer(OpCode op, bool scalar_tie);
+bool IsResidentFPRProducer(OpCode op, bool scalar_insert, bool scalar_tie);
 bool IsAesEncChainProducer(OpCode op);
 Vector<u32> CollectGuestFPRUseEnds(Block* lir_block, u32 instr_count);
 bool GuestFPRMappedTo(Value value, u32 target, backend::RegAlloc* reg_alloc);
