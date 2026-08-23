@@ -32,8 +32,9 @@ boundary 22.116%、uniform 6.522%、flags IR 2.506%；FPR state 为 5.484%，
 
 8 月 23 日静态表中的 smallpt 为 SVM/FEX 2.180×。本轮同 harness、同旧 TSV
 权重的 RE=0 重采从 SVM 3.335622 host/guest 降至 3.267832；加入 RSB 返回目标复用、
-静态出口 direct-link、默认 return-L1 和 cycle successor layout 后，按正式 host 权重折算
-约为 3.024608。以未变的 FEX 1.549 为分母，对应 2.153×→1.953×。旧表与这次重采的
+静态出口 direct-link、默认 return-L1、cycle successor layout 和 indirect-L1 状态成对加载后，
+按正式 host 权重折算约为 3.019810。以未变的 FEX 1.549 为分母，对应 2.153×→1.950×。
+旧表与这次重采的
 unit 形成参数不完全相同，
 因此不直接覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 1.95–1.99×。
 
@@ -153,7 +154,23 @@ FEX `f2e35f3` 的两条 shadow-stack push 依赖 4 MiB call-ret mapping 和 guar
 - 64-spp c-ray 等 entry 减少 328,719，424 个共同 PC 只减不增，IDAT 不变；
 - STREAM 等 entry 减少 1,412，112 个共同 PC 只减不增，`Solution Validates`。
 
-七项合计使正式 smallpt 默认 region host 减少 120,278,947（9.101%）。
+### Paired indirect-L1 state load
+
+提交 `3ec9582` 将 `exit_request` 与 `indirect_l1_code_cache` 放在 `State` 的首个 16-byte
+pair 中。production inline L1 用一条 `LDP` 同时取得请求字和 L1 基址，再用 `TBNZ`
+筛出 signal；命中 signal 时先返回共享 trampoline，由其 offset-zero `LDAR` 确认请求并
+返回 `Signal`。profile 路径保持原来的独立 L1 基址加载，不改变其计数语义。快路径从九条
+降为八条，cache key/value 与 SMC-invalid 检查保持不变。
+
+- smallpt_wh 1,201,372,215→1,199,466,420，减少 1,905,795（0.1586%）；376 个共同
+  PC 各少一条、0 个增长，entries、units 和 PPM 均一致；
+- CoreMark 等 entry 减少 31,825,037，373 个共同 PC 只减不增，CRC final 为 `0x382f`；
+- 64-spp c-ray 等 entry 减少 91,110,798，1,137 个共同 PC 只减不增，IDAT 不变；
+- STREAM 等 entry 减少 879，341 个共同 PC 只减不增，`Solution Validates`；
+- call-dense 等 entry 精确减少 64,000,000，6 个共同 PC 只减不增，checksum 不变；
+  scale-10 十次 wall-time 中位数 1.045108s→1.044901s，未出现 `LDAXP` 原型的退化。
+
+八项合计使正式 smallpt 默认 region host 减少 122,184,742（9.245%）。
 
 ## 否决项
 
@@ -172,19 +189,18 @@ producer 白名单泛化到缺少原子性证明的 opcode。
   `9f52b7d59285dbe5`。
 - helper-fault 38 passed / 0 failed；clone futex/lock 在 FLAGS 0/1 下均 rc=0。
 - function fingerprint 对阶段基线保持 1664 units / 11 guests，自一致且逐项匹配。
-- RSB/indirect 结构测试 26 assertions，覆盖 return-L1 的 signal poll、无 push 和无目标
+- RSB/indirect 结构测试 26 assertions，覆盖八指令 L1 快路径、无 push 和无目标
   dispatcher 路径；显式改写栈返回地址的临时 probe 在默认、L1-off 两种 RSB frame、
   FLAGS-off 和 interpreter 下均 rc=0，probe 已删除。
-- direct-link 默认 production 子集 9 cases / 336 assertions、SMC 子集 5 cases / 268
-  assertions；FLAGS=0 下含 disk-cache 的全标签为 21 cases / 900,718 assertions。静态
+- 新增 production inline-L1 signal 测试 6 assertions；FLAGS=0 下 direct-link production
+  全标签 11 cases / 395 assertions，默认 SMC 子集 5 cases / 268 assertions。静态
   SetLocation 的跨 module/BlockLink-off fallback 为 36 assertions，反复摘链/重编译为
   142 assertions，Mac 与 Orb 均通过。
 - region edge、direct cycle signal 和 region flags 专项分别通过 42、30、46 assertions；
   cycle successor layout 的 function fingerprint 对基线保持 1664 units / 11 guests 一致。
 - 200 轮 `smc_mt_stress` 为 host_fails/guest_lost/timeouts = 0/0/0。
-- `SWIFT_FUZZ_SEED=123456` 仍为 183 passed / 35 个既有 failed cases；44 个既有代码
-  断言之外，默认 FLAGS 下还有已知的 jit-cache/lazy-flags ABI 测试配置失败。没有新增
-  失败类别。
+- `SWIFT_FUZZ_SEED=424242` 为 184 passed / 35 个既有 failed cases；44 个失败断言中
+  包含默认 FLAGS 下已知的 jit-cache/lazy-flags ABI 测试配置失败。没有新增失败类别。
 - smallpt_wh PPM SHA-256 两臂均为
   `fe96f7e48295b27c8df8236294052d138c3ed130b81d022739907fe6b2cde5aa`；
   原 equal-entry c-ray sample 的 IDAT MD5 两臂均为
@@ -194,9 +210,10 @@ producer 白名单泛化到缺少原子性证明的 opcode。
 
 ## 下一步
 
-1. cycle successor layout 后，正式 smallpt 的已覆盖 link 降至约 6.18%。region/cycle
+1. paired L1 state load 后，正式 smallpt 的已覆盖 link 降至约 6.03%。region/cycle
    link tail 仍约 1.90%，其中 acquire poll 与跨本块 cold stub 的目标跳转不可直接删除；
-   十条 return-L1 静态序列约 1.54%，下一步单独审计。公开 host exit 仍仅 139 次。
+   八条 return-L1 静态序列仍约 1.38%，其中 `AND + ADD + LDP + CMP + CSEL + BR` 没有
+   明确的基础 ISA 融合机会。公开 host exit 仍仅 139 次。
 2. 剩余 `SetHostFPR` 约 5%，但完整写仅约 2.3%，其余主要是低/高 64-bit lane 的真实
    architectural publication。继续扩 producer 前先给出单指令完整写与目标别名证明。
 3. CoreMark 的 8/16-bit truncation 仍要求 consumer-specific 物理高位证明，并保留 U16
