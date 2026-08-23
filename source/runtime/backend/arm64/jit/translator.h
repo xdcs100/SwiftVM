@@ -117,6 +117,15 @@ private:
     [[nodiscard]] bool ReproveCoalescedHostFPRRead(ir::Inst* inst) const;
     [[nodiscard]] bool ReproveAesChainTie(ir::Inst* inst) const;
     [[nodiscard]] bool ReproveAesChainHostWrite(ir::Inst* inst) const;
+    struct ScalarLoadFPRFusion {
+        ir::Inst* low_store{};
+        ir::Inst* high_store{};
+        ir::Inst* zero{};
+        u16 target{};
+    };
+    void PrepareScalarLoadFPRFusions(ir::Block* block);
+    [[nodiscard]] bool ReproveScalarLoadFPRFusion(
+            ir::Inst* load, const ScalarLoadFPRFusion& fusion) const;
     [[nodiscard]] bool ReprovePshufd4eExtConstant(ir::Inst* inst) const;
     [[nodiscard]] bool ReprovePshufd4eExtShuffle(ir::Inst* inst) const;
     [[nodiscard]] bool ReproveWidthChainBridge(ir::Inst* inst) const;
@@ -475,6 +484,7 @@ private:
     // Narrow mapped reads whose single audited consumer can use the pinned W
     // register directly (for example CL masking and U32 XOR).
     std::map<ir::Inst*, u16> fused_pin_gpr_reads{};
+    std::map<ir::Inst*, ScalarLoadFPRFusion> scalar_load_fpr_fusions{};
     ir::Flags flags_set{};
     ir::Flags flags_clear{};
     bool save_in_nzcv{true};

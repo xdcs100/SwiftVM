@@ -150,6 +150,7 @@ add_library(swift_runtime STATIC
         backend/arm64/jit/translator_x87.cpp
         backend/arm64/jit/translator_flags.cpp
         backend/arm64/jit/translator_flags_abi.cpp
+        backend/arm64/jit/translator_fpr_publication.cpp
         backend/arm64/jit/translator_mem.cpp
         backend/arm64/jit/translator.h
         backend/arm64/jit/flags.cpp

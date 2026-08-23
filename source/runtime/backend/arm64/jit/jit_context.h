@@ -44,6 +44,10 @@ public:
     [[nodiscard]] bool HasAllocation(const ir::Value& value);
     [[nodiscard]] bool SharesGPR(const ir::Value& left, const ir::Value& right);
     [[nodiscard]] bool SharesFPR(const ir::Value& left, const ir::Value& right);
+    [[nodiscard]] bool IsFPRMappedTo(const ir::Value& value, u16 target) {
+        return reg_alloc.ValueType(value) == RegAlloc::FPR &&
+               reg_alloc.ValueFPR(value).id == target;
+    }
     [[nodiscard]] Register R(const ir::Value& value, bool auto_cast = false);
     [[nodiscard]] XRegister X(const ir::Value& value);
     [[nodiscard]] WRegister W(const ir::Value& value);

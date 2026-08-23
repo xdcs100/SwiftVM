@@ -1442,6 +1442,14 @@ void JitTranslator::EmitLoadMemory(ir::Inst* inst) {
                            q_access && !fold_host_base,
                            !q_access,
                            structured_guest_ea);
+    auto scalar_fpr = scalar_load_fpr_fusions.find(inst);
+    if (scalar_fpr != scalar_load_fpr_fusions.end()) {
+        ASSERT_MSG(ReproveScalarLoadFPRFusion(inst, scalar_fpr->second),
+                   "scalar FPR load fusion proof diverged at IR {}", inst->Id());
+        __ Ldr(VRegister::GetQRegFromCode(scalar_fpr->second.target).D(),
+               vixl_operand);
+        return;
+    }
     switch (type) {
         case ir::ValueType::S8:
         case ir::ValueType::U8:
