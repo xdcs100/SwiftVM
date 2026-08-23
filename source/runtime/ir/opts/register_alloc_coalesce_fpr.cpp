@@ -39,6 +39,7 @@ bool IsResidentFPRProducer(OpCode op, bool scalar_insert, bool scalar_tie) {
         case OpCode::VecAdd:
         case OpCode::VecSub:
         case OpCode::VecMul:
+        case OpCode::VecZip:
         case OpCode::VecFAdd:
         case OpCode::VecFSub:
         case OpCode::VecFMul:
