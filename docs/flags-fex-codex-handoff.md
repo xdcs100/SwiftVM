@@ -1,6 +1,6 @@
 # Codex handoff: Align SVM flags with FEX
 
-Date: 2026-08-23
+Date: 2026-08-24
 Repo: `/Users/swift/CLionProjects/SwiftVM` (macOS). Linux identity runs on Orb: `ubuntu@orb`, tree `/home/swift/svm-phasec/SwiftVM`, build `/home/swift/svm-phasec/build`.
 Author on git: `swift_gan`. **Do not push** until asked. English commits, no task IDs, no AI trailer.
 
@@ -8,8 +8,8 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`ff42917`** `feat: fold safe same-width integer extracts`
-- Dirty tree before the documentation commit: this handoff and `docs/codegen-gap-refresh-2026-08-23.md`, plus the preserved untracked build/images/placement tools.
+- Code tip: **`431be30`** `feat: publish vector zip results in place`
+- Tracked tree is clean before the documentation commit. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
 
@@ -146,6 +146,32 @@ Validation for `ff42917`:
   1,047,523 passed / 45 failed assertions. The unsafe generic prototype had added one U16 helper
   failure; the final consumer whitelist removes it.
 
+Validation for `7110d20` / `7045d3b` / `431be30`:
+
+- Current formal smallpt is `smallpt_wh_x64 8 128 96`; do not substitute the fixed 1024×768
+  `smallpt_x64` when updating the formal FEX ratio.
+- Formal smallpt default-region host: `1,321,651,162 → 1,303,939,990 → 1,297,980,655`;
+  cumulative `-23,670,507` (`-1.791%`), spill 0 throughout. The first arrow is full-NZCV
+  compaction; the second is VecZip resident publication. `7110d20` is neutral on this binary but
+  saves 452,646,984 host instructions on the fixed 1024×768 smallpt.
+- c-ray equal-entry common-PC deltas: full-NZCV `-999,520`, VecZip `-124,308`; no common PC grows.
+  CoreMark after full-NZCV is about `5,973,080,081` host (`-61.19M`, CRC final `0x382f`);
+  VecZip is neutral there.
+- FEX-aligned RE=0 same-harness refresh for formal smallpt: SVM host/guest
+  `3.335622 → 3.267832`; with unchanged FEX `1.549`, ratio `2.153× → 2.110×`. The earlier
+  2.180× table used a different retained unit-formation artifact, so quote the current gap as
+  approximately 2.11–2.14× rather than mixing the two raw tables.
+- PPM SHA-256 remains
+  `fe96f7e48295b27c8df8236294052d138c3ed130b81d022739907fe6b2cde5aa`; c-ray IDAT MD5
+  remains `54256cb4b3c6313a65ea12ebb7b81e30`; STREAM validates.
+- FPR-focused tests: 3 cases / 10 assertions plus resident coalescing 1 case / 794 assertions;
+  full-NZCV structure 1 case / 3 assertions. FLAGS six-grid, helper-fault 38/0, clone four-grid
+  and 1664-unit/11-guest fingerprint all pass.
+- Fixed `SWIFT_FUZZ_SEED=123456`: 183 passed / 35 existing failed cases,
+  1,047,656 passed / 44 failed assertions; no new failure location.
+- Detailed mechanism table, the rejected Linux scalar-insert prototype and exact deltas are in
+  `docs/codegen-fpr-flags-refresh-2026-08-24.md`.
+
 ## Invariants (do not violate)
 
 - Recorded cond is **guest** polarity; PSTATE is **host NZCV** (maybe CFINV). Unproven `b.cs` inverts JC/JNC.
@@ -187,16 +213,21 @@ Validation for `ff42917`:
 | PF/AF dedicated GPR on current CoreMark | saves 0; adds 67,754,766 dispatcher/RSB recovery instructions |
 | SHA census from failing OpenSSL path | PageFatal at `rip=0x62b930` before valid hashing; no performance evidence |
 | Generic same-width fold including U8/U16/CallLambda | fixed-seed U16 popcount helper mismatch; narrowed to U32 W-consumer whitelist |
+| Linux AFP scalar insert | c-ray −1.92%, but smallpt diverges from the exact FEX PPM; tie=0 still diverges, fully reverted |
+| RSB pop reuses dynamic SetLocation | one-instruction ceiling is only 0.076% smallpt / 0.313% c-ray |
 
 ## Next ready (pick one, measure, revert on 124/134)
 
-1. **smallpt/c-ray current mechanism table** — integer width is now minor there. Recut FPR,
-   state publication and boundary categories against the unchanged FEX `f2e35f3` reference.
-2. **CoreMark remaining truncations** — raw BitExtract is no longer a pool. Only reopen 8/16-bit
+1. **smallpt call/return and public-exit boundary** — boundary remains about 23%, link about 13%.
+   Reopen only a specific call/return or public-exit shape with fault, SMC and RSB proof; do not
+   infer a removable pool from the aggregate bucket.
+2. **Remaining FPR publication** — SetHostFPR is about 5%, but full writes are only about 2.3%.
+   Extend the producer set only for a single-instruction complete V128 write with exact alias proof.
+3. **CoreMark remaining truncations** — raw BitExtract is no longer a pool. Only reopen 8/16-bit
    cases with a consumer-specific physical-high proof and the U16 helper regression in the gate.
-3. **SHA valid workload first** — fix or replace the current OpenSSL guest path that PageFatals before hashing, then redo the boundary census. Do not bypass guest fault semantics.
-4. **PF/AF dedicated GPR is closed** until a new canonical park/recovery carrier yields a nonzero mechanical saving; the current audit is strictly negative.
-5. **Do not** grow the default region window again for coremark (64 == 128). Other benches might still want 128 **after** the lazy fix.
+4. **SHA valid workload first** — fix or replace the current OpenSSL guest path that PageFatals before hashing, then redo the boundary census. Do not bypass guest fault semantics.
+5. **PF/AF dedicated GPR is closed** until a new canonical park/recovery carrier yields a nonzero mechanical saving; the current audit is strictly negative.
+6. **Do not** grow the default region window again for coremark (64 == 128). Other benches might still want 128 **after** the lazy fix.
 
 ## Orb loop
 

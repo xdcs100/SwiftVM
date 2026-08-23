@@ -203,3 +203,13 @@ U16 `BitExtract` 向 `CallLambda` 传参时必须清理物理寄存器高位。�
    才能判断 bounded-64、公开入口或 fault map 是否是主因。
 4. PF/AF 专用 GPR 在当前 ABI 下为 NO-GO；只有出现新的 canonical park/recovery 载体，并且
    重新审计得到非零可删下界时才重开。
+
+## 2026-08-24 补充
+
+后续三项代码生成优化已落地：legacy scalar FPR 完整 publication、完整 NZCV merge
+缩短一条、单指令 VecZip 结果直接发布到 resident home。正式 `smallpt_wh` 默认 region
+从 1,321,651,162 降至 1,297,980,655 条 host 指令，累计减少 23,670,507（1.791%），
+spill 仍为 0；PPM 与 FEX 逐字一致。新的同 harness RE=0 对比为 SVM 3.267832、FEX
+1.549，即约 2.110×。由于 8 月 23 日表保留的 unit-formation artifact 与本次重采不同，
+当前差距按 2.11–2.14× 报告，不直接混算两组绝对值。完整机制表、逐项 A/B、NO-GO
+原型和验证见 `docs/codegen-fpr-flags-refresh-2026-08-24.md`。
