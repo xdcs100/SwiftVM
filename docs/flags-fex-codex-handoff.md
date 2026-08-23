@@ -150,15 +150,15 @@ Validation for `ff42917`:
   1,047,523 passed / 45 failed assertions. The unsafe generic prototype had added one U16 helper
   failure; the final consumer whitelist removes it.
 
-Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9d49`:
+Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9d49` / `b3998d5`:
 
 - Current formal smallpt is `smallpt_wh_x64 8 128 96`; do not substitute the fixed 1024×768
   `smallpt_x64` when updating the formal FEX ratio.
 - Formal smallpt default-region host:
-  `1,321,651,162 → 1,303,939,990 → 1,297,980,655 → 1,296,969,640 → 1,246,900,800 → 1,201,575,549`;
-  cumulative `-120,075,613` (`-9.085%`), spill 0 throughout. The arrows are full-NZCV
+  `1,321,651,162 → 1,303,939,990 → 1,297,980,655 → 1,296,969,640 → 1,246,900,800 → 1,201,575,549 → 1,201,372,215`;
+  cumulative `-120,278,947` (`-9.101%`), spill 0 throughout. The arrows are full-NZCV
   compaction, VecZip resident publication, retained RSB target reuse, static-exit direct-link,
-  then default return-L1. `7110d20` is neutral here but saves 452,646,984 on fixed 1024×768
+  default return-L1, then cycle-polled successor layout. `7110d20` is neutral here but saves 452,646,984 on fixed 1024×768
   smallpt.
 - RSB reuse shrinks 328 formal smallpt PCs with no growth. EXEC_PROF records 8,080,989 hits / 248
   misses, so the earlier 0.076% static heuristic was not an execution ceiling. c-ray equal-entry
@@ -176,8 +176,13 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   smallpt `-45,325,251` with 881 PCs smaller / 0 larger and 99.9953% L1 hits. CoreMark equal-entry
   is `-169,232,701`, formal c-ray `-566,348,759`, STREAM `-5,480`, and call-dense
   `-352,000,012`. `SVM_INDIRECT_L1=0` call-dense is byte-identical to the old RSB path.
+- Cycle-polled successor layout removes one redundant conditional-arm branch without crossing the
+  per-block cold stub: formal smallpt `-203,334` with 127 PCs smaller / 0 larger. Static local branch
+  bytes fall `5,732 → 5,140` while 518 cycle edges and 4,144 poll bytes remain exact. CoreMark
+  equal-entry is `-51,081,278`, c-ray `-328,719`, and STREAM `-1,412`; every common-PC set is
+  shrink-only.
 - FEX-aligned RE=0 same-harness refresh for formal smallpt: SVM host/guest
-  `3.335622 → 3.267832`; the landed stages fold this to about `3.025120`. With unchanged FEX
+  `3.335622 → 3.267832`; the landed stages fold this to about `3.024608`. With unchanged FEX
   `1.549`, ratio is `2.153× → 1.953×`. The earlier
   2.180× table used a different retained unit-formation artifact, so quote the current gap as
   approximately 1.95–1.99× rather than mixing the two raw tables.
@@ -194,6 +199,8 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 - Direct-link production/SMC subsets pass 336/268 assertions under defaults; the FLAGS=0 full
   direct-link tag including cache lifecycle passes 21 cases / 900,718 assertions. Static
   SetLocation fallback and repeated delink/recompile paths pass 36/142 assertions on Mac and Orb.
+- Region edge, direct-cycle signal and region-flags focus pass 42/30/46 assertions. The new layout
+  matches the baseline fingerprint for 1664 function units over 11 guests.
 - MT SMC stress passes 200/200 with zero host failure, lost guest or timeout. Fixed-seed remains
   183 passed / 35 existing failed cases; besides 44 existing code assertions, default FLAGS has
   the known jit-cache/lazy-flags ABI test configuration failure. No failure category is added.
@@ -227,6 +234,9 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 - An `indirect_l1` module must not produce RSB frames: retained returns use `ForwardIndirectL1`,
   whose `LDAR/TBNZ` signal poll and SMC-safe invalid value are mandatory; missing retained targets
   return to the dispatcher. Only L1-off modules may pair `EmitRSBPush` with `EmitRSBPop`.
+- A direct cycle edge may use the next region block to choose conditional layout, but it is not a
+  true fallthrough: retain `LDAR/CBNZ`, then branch over the source block's immediately following
+  cold stubs. Falling through after the poll executes the CodeMiss/Signal stub on every iteration.
 
 ## Failed / do not retry
 
@@ -249,12 +259,13 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 | SHA census from failing OpenSSL path | PageFatal at `rip=0x62b930` before valid hashing; no performance evidence |
 | Generic same-width fold including U8/U16/CallLambda | fixed-seed U16 popcount helper mismatch; narrowed to U32 W-consumer whitelist |
 | Linux AFP scalar insert | c-ray −1.92%, but smallpt diverges from the exact FEX PPM; tie=0 still diverges, fully reverted |
+| True fallthrough after a direct cycle poll | falls into the source block's cold stub; CoreMark 1.224s→57.597s despite correct CRC, fully rejected |
 
 ## Next ready (pick one, measure, revert on 124/134)
 
-1. **smallpt remaining link** — covered link is now about 6.20%. Region/cycle tails are about
-   1.92%; return-L1 static sequences are about 1.54%. Audit these separately and retain the signal,
-   SMC and cycle-safepoint contracts; public host exit executes only 139 times.
+1. **smallpt remaining link** — covered link is now about 6.18%. Region/cycle tails are about
+   1.90%; their acquire poll and branch across per-block cold stubs are load-bearing. Audit the
+   roughly 1.54% return-L1 static sequences separately; public host exit executes only 139 times.
 2. **Remaining FPR publication** — SetHostFPR is about 5%, but full writes are only about 2.3%.
    Extend the producer set only for a single-instruction complete V128 write with exact alias proof.
 3. **CoreMark remaining truncations** — raw BitExtract is no longer a pool. Only reopen 8/16-bit
