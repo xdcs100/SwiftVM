@@ -8,8 +8,8 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Tip: **`3641e32`** `feat: coalesce guest loads into pinned homes`
-- Dirty tree: only untracked `build-master/`, images, placement tools. No FLAGS work uncommitted.
+- Code tip: **`a91697b`** `feat: coalesce pinned W views into destructive writes`
+- Dirty tree before the documentation commit: this handoff and `docs/codegen-gap-refresh-2026-08-23.md`, plus the preserved untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
 
@@ -27,6 +27,8 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 | `0535615` / `7397960` | JA → `b.hi`, JBE → `b.ls` |
 | `601185d` / `52b0b6a` | L2 Unpark from **x26**; counted-entry veneer |
 | `3641e32` | Full-width `LoadMemory` publishes directly into a pinned guest GPR home when the existing local last-use, observer, conflict, and width proofs all hold |
+| `df5a54e` | Fail closed before reading non-And/Or carry-test args; reject packed-flags consumers from region transparent/cover proofs |
+| `a91697b` | Hand a pinned W-view bridge directly to a proven destructive U32 result published back to the same fixed home |
 
 Hot files:
 
@@ -53,13 +55,15 @@ timeout 90 env -u SVM_JIT_CACHE -u SVM_EXEC_PROF \
 `$FT=.../func_tests_x86_64`  
 `$BIN=/mnt/mac/Users/swift/CLionProjects/SwiftVM-bench/bin`
 
-Copy touched sources Mac → Orb before cmake.
+Synchronize all tracked sources Mac → Orb before cmake. A touched-files-only copy left Orb's
+`translator_terminal.cpp` stale during this continuation and produced a false c-ray region diagnosis.
 
 | Config | host_dynamic | notes |
 |---|---:|---|
 | FLAGS=0, window 16 (old baseline) | **7.383B** | compare-to |
 | FLAGS=1, window 64 (before `3641e32`) | **6.348B** | **−14%** vs old FLAGS=0/16 |
-| FLAGS=1, window 64 (**current default**) | **6.300B** | `6,347,614,988 → 6,299,957,711` (**−0.751%**) from direct load publication |
+| FLAGS=1, window 64 (after `3641e32`) | **6.300B** | `6,347,614,988 → 6,299,957,711` (**−0.751%**) from direct load publication |
+| FLAGS=1, window 64 (**current default**) | **6.251B** | `6,299,957,565 → 6,250,517,460` (**−0.785%**) from pinned W-view handoff |
 | FLAGS=0, window 64 (**current rollback**) | **6.712B** | CRC `0x382f`; FLAGS remains **−6.1%** at the same window |
 | FLAGS=1, RE=0 | 26.009B | vs FLAGS=0 RE=0 **26.774B (−2.9%)** |
 | FLAGS=1, window 32 | 6.882B | |
@@ -67,7 +71,10 @@ Copy touched sources Mac → Orb before cmake.
 
 After If-skip, `SVM_FLAGS_REGS_AUDIT=1` on window-32: **PStateClobber/RegionInternal ≈ 2.3k entries**. Remaining ~70M “flags audit” is **L2 `ldr` cache-reload** (Dispatcher/RSBHit), not MergeNZCV.
 
-Move bucket is now **35.0%** of host (`move_dynamic = 2,204,881,820` on default). `3641e32` removed 47.657M dynamic host/move instructions, changed 884 common PCs, and increased host instructions at zero common PCs. Remaining move volume is not automatically removable W-α space.
+Move bucket is now **34.484%** of host (`move_dynamic = 2,155,441,690`). `a91697b`
+removes 49.440M dynamic host/move instructions from CoreMark; 129 common PCs shrink and zero
+grow. smallpt and c-ray remove 23.935M and 4.411M at common-PC weights; STREAM is nearly
+neutral. Remaining move volume is not automatically removable W-alpha space.
 
 Validation for `3641e32`:
 
@@ -75,6 +82,15 @@ Validation for `3641e32`:
 - FLAGS `0/1` × function/block/interpreter func_tests all return 101 with checksum `9f52b7d59285dbe5` and identical output SHA-256.
 - Function fingerprint A/B against the exact pre-change binary passes for 1661 units over 11 guests. The checked-in Linux golden predates the region-window changes and is already stale; do not update it as part of this RA change.
 - Full `swift_test` has the same existing 48 assertion failures before and after this change, in the same file sequence; the change adds only passing assertions.
+
+Validation for `df5a54e` / `a91697b`:
+
+- New pinned W-view test: 6 assertions; GPR coalescing 353, width-chain 23 and resident-fault 21 all pass.
+- FLAGS `0/1` × function/block/interpreter func_tests: rc=101 and checksum `9f52b7d59285dbe5` in all six cells.
+- helper-fault 38/0; clone futex/lock under FLAGS `0/1` all rc=0.
+- Function fingerprint A/B against the exact pre-handoff binary: 1664 units over 11 guests, PASS.
+- Orb full suite with fixed RNG has the same 36 existing failed cases before/after; focused new and RA/fault tests pass.
+- Full metrics and the current FEX gap assessment are in `docs/codegen-gap-refresh-2026-08-23.md`.
 
 ## Invariants (do not violate)
 
@@ -105,10 +121,13 @@ Validation for `3641e32`:
 | `SVM_RA_WIDTH_CHAIN=1` | 0 on coremark |
 | `GetHostGPR` 32-bit `Mov W` for callee-saved pins | 0 |
 | `SVM_FUNC_LAZY=128` before `15e5165` | **31.3B** host, RE=0-shaped entries |
+| Require every successor-cover to survive fault and reach AdvancePC | **6.300→6.551B** host; too conservative, reverted |
 
 ## Next ready (pick one, measure, revert on 124/134)
 
-1. **W-α remaining home/width bridges** — full-width `LoadMemory` publication is closed. Do not expand the producer allowlist mechanically. Remaining hot GetHost cases mostly have no same-block publication, and cross-block home SSA first needs a fault-safe recovery fact. `ra_width_chain` remains default OFF; `ra_intwidth_tie` is default ON. Docs: `docs/fex-codegen-gap-plan-2026-08.md` §W-α and `docs/w66-move-attribution-audit.md`.
+1. **W-alpha cross-home W copy census** — measure `BitExtract -> ZeroExtend32To64 -> SetHostGPR`
+   shapes that can become one W move. Do not extend `a91697b` mechanically: a different destination
+   home needs its own publication/fault transaction.
 2. **PF/AF dedicated GPRs** (W-β remainder). NZCV is already host-resident on FLAGS_REGS; PF/AF still live in x26 bitfields when published. High ABI risk; keep `FLAGS_REGS=0` rollback.
 3. **Do not** grow the default region window again for coremark (64 == 128). Other benches might still want 128 **after** the lazy fix.
 4. Wall-clock / dual-entry Unpark is **outside** `host_dynamic`. Don’t use Unpark 2-insn as a density win.
@@ -118,7 +137,7 @@ Validation for `3641e32`:
 ```
 M=/mnt/mac/Users/swift/CLionProjects/SwiftVM
 P=/home/swift/svm-phasec/SwiftVM
-# cp changed files, then:
+git ls-files -z | rsync -a --from0 --files-from=- ./ ubuntu@orb:$P/
 cmake --build /home/swift/svm-phasec/build --target svm_translator_linux -j$(nproc)
 ```
 
