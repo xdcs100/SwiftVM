@@ -175,3 +175,47 @@ TEST_CASE("one live FPR result occupies only one resident home") {
     REQUIRE_FALSE(alloc.IsHostWriteCoalesced(second->Id()));
     REQUIRE(EmitSize(block.get(), alloc) != 0);
 }
+
+TEST_CASE("scalar square root publishes through its resident merge home") {
+    for (bool keep_merge_live : {false, true}) {
+        CAPTURE(keep_merge_live);
+        IntrusivePtr<Block> block{new Block(0, Location{0x8780})};
+        auto source = block->LoadUniform(Uniform{0, ValueType::V128});
+        auto merge = block->GetHostFPR(
+                                  HostRegIndex(kResidentTarget), Imm{0u})
+                             .SetType(ValueType::V128);
+        auto result = block->VecFUnary(
+                                   source, merge, Imm{64u}, Imm{0u}, Imm{1u})
+                              .SetType(ValueType::V128);
+        if (keep_merge_live) {
+            block->StoreUniform(Uniform{16, ValueType::V128}, merge);
+        }
+        auto* publish = block->AppendInst(
+                OpCode::SetHostFPR, result,
+                HostRegIndex(kResidentTarget), Imm{0u});
+        block->SetTerminal(terminal::ReturnToDispatch{});
+        block->ReIdInstr();
+
+        const GPRSMask gprs{~((1u << 8) - 1u)};
+        RegAlloc baseline{
+                block->MaxInstrId(), gprs, ResidentFPRs(), FeatureSet{}};
+        RegisterAllocPass::RunForXmmResidentTest(
+                block.get(), &baseline, false);
+        const auto baseline_size = EmitSize(block.get(), baseline);
+        RegAlloc alloc{
+                block->MaxInstrId(), gprs, ResidentFPRs(), FeatureSet{}};
+        RegisterAllocPass::RunForXmmResidentTest(
+                block.get(), &alloc, true);
+
+        if (keep_merge_live) {
+            REQUIRE(alloc.ValueFPR(result).id != kResidentTarget);
+            REQUIRE_FALSE(alloc.IsHostWriteCoalesced(publish->Id()));
+        } else {
+            REQUIRE(alloc.ValueFPR(result).id == kResidentTarget);
+            REQUIRE(alloc.IsHostReadCoalesced(merge.Id()));
+            REQUIRE(alloc.IsHostWriteCoalesced(publish->Id()));
+            REQUIRE(EmitSize(block.get(), alloc) +
+                    2 * vixl::aarch64::kInstructionSize == baseline_size);
+        }
+    }
+}

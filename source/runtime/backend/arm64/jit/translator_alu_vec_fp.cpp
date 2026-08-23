@@ -1063,7 +1063,9 @@ void JitTranslator::EmitVecFUnary(ir::Inst* inst) {
     if (!scalar) {
         __ Orr(result.V16B(), value.V16B(), value.V16B());
     } else {
-        __ Orr(result.V16B(), merge.V16B(), merge.V16B());
+        if (result.GetCode() != merge.GetCode()) {
+            __ Orr(result.V16B(), merge.V16B(), merge.V16B());
+        }
         if (bits == 32)
             __ Ins(result.V4S(), 0, value.V4S(), 0);
         else

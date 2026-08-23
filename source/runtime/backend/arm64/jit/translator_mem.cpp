@@ -125,6 +125,17 @@ bool IsHostFPRCoalesceProducer(ir::OpCode op, bool scalar_insert,
     }
 }
 
+bool IsHostScalarUnaryProducer(const ir::Inst& inst,
+                               bool scalar_tie) {
+    if (!scalar_tie || inst.GetOp() != ir::OpCode::VecFUnary ||
+        inst.GetArg<ir::Imm>(3).Get() != 0 ||
+        inst.GetArg<ir::Imm>(4).Get() == 0) {
+        return false;
+    }
+    const u32 lane_bits = inst.GetArg<ir::Imm>(2).Get();
+    return lane_bits == 32 || lane_bits == 64;
+}
+
 bool IsHostCoalesceObserver(ir::OpCode op) {
     using O = ir::OpCode;
     switch (op) {
@@ -686,12 +697,15 @@ bool JitTranslator::ReproveCoalescedHostFPRWrite(ir::Inst* inst) const {
     const u32 target = inst->GetArg<ir::Imm>(1).Get();
     auto produced = ResolveHostCoalesceBitCast(inst->GetArg<ir::Value>(0));
     auto* producer = produced.Def();
+    const bool scalar_unary = producer &&
+            IsHostScalarUnaryProducer(*producer, sse_scalar_tie);
     if (producer && context.IsAesChainTied(produced.Id())) {
         return ReproveAesChainHostWrite(inst);
     }
     if (!producer || produced.Type() != ir::ValueType::V128 ||
-        !IsHostFPRCoalesceProducer(producer->GetOp(), sse_scalar_insert,
-                                   sse_scalar_tie) ||
+        (!IsHostFPRCoalesceProducer(producer->GetOp(), sse_scalar_insert,
+                                    sse_scalar_tie) &&
+         !scalar_unary) ||
         context.V(produced).GetCode() != target) {
         return false;
     }
@@ -724,6 +738,18 @@ bool JitTranslator::ReproveCoalescedHostFPRWrite(ir::Inst* inst) const {
                 return false;
             }
         } else if (left.Defined() && context.SharesFPR(left, produced)) {
+            return false;
+        }
+    } else if (scalar_unary) {
+        auto merge = ResolveHostCoalesceBitCast(
+                producer->GetArg<ir::Value>(1));
+        if (!merge.Defined() || !merge.Def() ||
+            merge.Def()->GetOp() != ir::OpCode::GetHostFPR ||
+            merge.Def()->GetArg<ir::Imm>(0).Get() != target ||
+            merge.Def()->GetArg<ir::Imm>(1).Get() != 0 ||
+            !context.IsHostReadCoalesced(merge.Id()) ||
+            context.V(merge).GetCode() != target ||
+            last_use(merge.Def()) != producer->Id()) {
             return false;
         }
     }

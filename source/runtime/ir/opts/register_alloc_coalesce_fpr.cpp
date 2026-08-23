@@ -51,6 +51,16 @@ bool IsResidentFPRProducer(OpCode op, bool scalar_insert, bool scalar_tie) {
     }
 }
 
+bool IsResidentScalarUnaryProducer(const Inst& inst, bool scalar_tie) {
+    if (!scalar_tie || inst.GetOp() != OpCode::VecFUnary ||
+        inst.GetArg<Imm>(3).Get() != 0 ||
+        inst.GetArg<Imm>(4).Get() == 0) {
+        return false;
+    }
+    const u32 lane_bits = inst.GetArg<Imm>(2).Get();
+    return lane_bits == 32 || lane_bits == 64;
+}
+
 bool IsAesEncChainProducer(OpCode op) {
     return op == OpCode::VecAesEncFast || op == OpCode::VecAesEncLastFast;
 }
@@ -245,8 +255,10 @@ void CoalesceGuestFPRWrites(
         if (!producer || produced.Id() >= use_end.size() ||
             produced.Type() != ValueType::V128 ||
             use_end[produced.Id()] < store.Id() ||
-            !IsResidentFPRProducer(producer->GetOp(), scalar_insert,
-                                   features.sse_scalar_tie) ||
+            (!IsResidentFPRProducer(producer->GetOp(), scalar_insert,
+                                    features.sse_scalar_tie) &&
+             !IsResidentScalarUnaryProducer(*producer,
+                                             features.sse_scalar_tie)) ||
             reg_alloc->ValueType(produced) != backend::RegAlloc::FPR) {
             continue;
         }
@@ -264,6 +276,18 @@ void CoalesceGuestFPRWrites(
                     continue;
                 }
             } else if (mapped_to(left, target)) {
+                continue;
+            }
+        } else if (IsResidentScalarUnaryProducer(
+                           *producer, features.sse_scalar_tie)) {
+            auto merge = ResolveBitCastSource(producer->GetArg<Value>(1));
+            if (!merge.Defined() || !merge.Def() ||
+                merge.Def()->GetOp() != OpCode::GetHostFPR ||
+                merge.Def()->GetArg<Imm>(0).Get() != target ||
+                merge.Def()->GetArg<Imm>(1).Get() != 0 ||
+                !reg_alloc->IsHostReadCoalesced(merge.Id()) ||
+                !mapped_to(merge, target) || merge.Id() >= use_end.size() ||
+                use_end[merge.Id()] != producer->Id()) {
                 continue;
             }
         }
