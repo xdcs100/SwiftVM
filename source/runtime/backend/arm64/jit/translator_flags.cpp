@@ -726,17 +726,17 @@ void JitTranslator::EmitPublishFCmpFlags(ir::Inst* inst) {
         //   less/unordered -> C=0, equal/greater -> C=1  (inverted x86 CF)
         //   equal/unordered -> Z=1                       (x86 ZF)
         //   N=V=0                                           (x86 SF/OF)
-        // Keep those four bits lazy in host NZCV, update the two non-NZCV
-        // fields in x26, and leave the representation otherwise unchanged.
+        // Keep those four bits lazy in host NZCV. The only live x26 fields
+        // below AF are the raw parity byte and AF itself, so one bitfield
+        // insert writes parity, clears AF, and discards stale carrier bits.
         flags_token_valid = false;
         flags_token_af = false;
         auto ordered = context.R(packed);
-        u32 begin = context.CurrentBufferSize();
-        __ Bfi(flags, ordered, HostFlagsBit::ParityByte, 8);
-        RecordPFAFDensity(PFAFDensityKind::PFWrite, begin);
-        begin = context.CurrentBufferSize();
-        __ Bfc(flags, HostFlagsBit::AuxiliaryCarry, 1);
-        RecordPFAFDensity(PFAFDensityKind::AFWrite, begin);
+        const u32 begin = context.CurrentBufferSize();
+        constexpr u32 non_nzcv_width =
+                HostFlagsBit::AuxiliaryCarry - HostFlagsBit::ParityByte + 1;
+        __ Bfi(flags, ordered, HostFlagsBit::ParityByte, non_nzcv_width);
+        RecordPFAFDensity(PFAFDensityKind::SharedPack, begin);
         {
             vixl::CPUFeaturesScope flagm2(&masm, vixl::CPUFeatures::kAXFlag);
             __ Axflag();
