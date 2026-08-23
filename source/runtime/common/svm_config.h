@@ -33,7 +33,7 @@ namespace swift::runtime {
     X(sse_scalar_v_operands, true) \
     X(mem_narrow_fuse, true) \
     X(addr_ea_tie, true) \
-    X(abs_const_mat, false) \
+    X(abs_const_mat, true) \
     X(shift_imm_fast, true) \
     X(narrow_rotate_compact, true) \
     X(xmm_ssa_fwd2, true) \
@@ -159,7 +159,7 @@ struct FeatureOverrides {
     X(bool, sse_scalar_v_operands, "SVM_SSE_SCALAR_V_OPERANDS", DefaultOn, true, "scalar SSE V operand；缺省 ON，=0 回退；原 decoder.cc:203") \
     X(bool, mem_narrow_fuse, "SVM_MEM_NARROW_FUSE", DefaultOn, true, "窄内存融合；缺省 ON，=0 回退；原 translator.cpp:320/register_alloc_pass.cpp:69") \
     X(bool, addr_ea_tie, "SVM_ADDR_EA_TIE", DefaultOn, true, "EA tie/composite 保留；缺省 ON，=0 回退；原 decoder.cc:270 等") \
-    X(bool, abs_const_mat, "SVM_ABS_CONST_MAT", NonZero, false, "绝对常量物化优化；非 0 开，缺省 OFF；原 translator.cpp:326") \
+    X(bool, abs_const_mat, "SVM_ABS_CONST_MAT", DefaultOn, true, "绝对常量直接向结果寄存器物化；缺省 ON，=0 回退；原 translator_control.cpp") \
     X(bool, shift_imm_fast, "SVM_SHIFT_IMM_FAST", DefaultOn, true, "shift immediate 快路；缺省 ON，=0 回退；原 decoder_alu.cc:789 等") \
     X(bool, narrow_rotate_compact, "SVM_NARROW_ROTATE_COMPACT", DefaultOn, true, "U16 立即数 8 rotate 紧凑 lowering；缺省 ON，=0 回退；原 decoder_alu.cc:1335") \
     X(bool, xmm_ssa_fwd2, "SVM_XMM_SSA_FWD2", DefaultOn, true, "XMM load-load SSA 转发；缺省 ON，=0 回退；原 uniform_elimination_pass.cpp:90") \

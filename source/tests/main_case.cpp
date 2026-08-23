@@ -591,9 +591,9 @@ TEST_CASE("JIT cache environment hash separates absolute constant materializatio
     if (had_old) swift::runtime::SetSvmConfigEnvForTest("SVM_ABS_CONST_MAT", old_value.c_str(), 1);
     else swift::runtime::UnsetSvmConfigEnvForTest("SVM_ABS_CONST_MAT");
 
-    REQUIRE(missing == disabled);
+    REQUIRE(missing == enabled);
     REQUIRE(disabled != enabled);
-    REQUIRE(missing != enabled);
+    REQUIRE(missing != disabled);
 }
 
 TEST_CASE("config hash includes independent code-shape policies") {
