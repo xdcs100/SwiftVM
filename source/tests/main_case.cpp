@@ -3846,6 +3846,53 @@ TEST_CASE("integer width ties require exact last-use and a proven W write") {
     }
 }
 
+TEST_CASE("pinned W-view inputs hand off only to a published destructive result") {
+    using namespace swift::runtime;
+    using namespace swift::runtime::backend;
+    using namespace swift::runtime::ir;
+
+    auto make_gprs = [] {
+        GPRSMask result{swift::u32{0}};
+        for (swift::u32 code :
+             {0u, 1u, 2u, 3u, 4u, 5u, 19u, 20u, 21u, 22u, 23u, 25u, 26u, 27u, 28u, 29u, 30u, 31u}) {
+            result.Mark(code);
+        }
+        return result;
+    };
+    const FPRSMask fprs{~((1u << 8) - 1u)};
+    auto allocate = [&](bool keep_source_live) {
+        IntrusivePtr<Block> block{new Block(0, Location{0x8678})};
+        auto seed = block->LoadImm(Imm{swift::u32{7}}).SetType(ValueType::U32);
+        auto source = block->ZeroExtend32To64(seed).SetType(ValueType::U64);
+        block->SetHostGPR(source, HostRegIndex(22), Imm{0u});
+        block->AdvancePC(Imm{1u});
+        auto bridge = block->BitExtract(source, Imm{0u}, Imm{32u}).SetType(ValueType::U32);
+        auto right = block->LoadImm(Imm{swift::u32{3}}).SetType(ValueType::U32);
+        auto product = block->Mul(bridge, Operand{right}).SetType(ValueType::U32);
+        auto published = block->ZeroExtend32To64(product).SetType(ValueType::U64);
+        block->SetHostGPR(published, HostRegIndex(22), Imm{0u});
+        if (keep_source_live) {
+            block->StoreUniform(Uniform{8, ValueType::U64}, source);
+        }
+        block->SetTerminal(terminal::ReturnToDispatch{});
+        block->ReIdInstr();
+
+        auto features = FeatureSet{};
+        REQUIRE_FALSE(features.ra_width_chain);
+        auto alloc = std::make_unique<RegAlloc>(block->MaxInstrId(), make_gprs(), fprs, features);
+        RegisterAllocPass::Run(block.get(), alloc.get(), false, features);
+        return std::tuple{std::move(block), std::move(alloc), bridge, product};
+    };
+
+    auto [accepted_block, accepted, accepted_bridge, accepted_product] = allocate(false);
+    REQUIRE(accepted->IsWidthChainCoalesced(accepted_bridge.Id()));
+    REQUIRE(accepted->ValueGPR(accepted_bridge).id == 22);
+    REQUIRE(accepted->ValueGPR(accepted_product).id == 22);
+
+    auto [rejected_block, rejected, rejected_bridge, rejected_product] = allocate(true);
+    REQUIRE_FALSE(rejected->IsWidthChainCoalesced(rejected_bridge.Id()));
+}
+
 TEST_CASE("unit-local width chains share only proven W-clean identity components") {
     using namespace swift::runtime;
     using namespace swift::runtime::backend;

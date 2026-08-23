@@ -1173,6 +1173,114 @@ void CoalesceGuestGPRWrites(
 
 namespace {
 
+bool IsPinnedWViewProducer(OpCode op) {
+    switch (op) {
+        case OpCode::Add:
+        case OpCode::Sub:
+        case OpCode::And:
+        case OpCode::AndNot:
+        case OpCode::Or:
+        case OpCode::Xor:
+        case OpCode::Mul:
+            return true;
+        default:
+            return false;
+    }
+}
+
+Inst* PublishedPinnedWViewConsumer(Block* lir_block,
+                                   backend::RegAlloc* reg_alloc,
+                                   Inst& bridge,
+                                   u32 target) {
+    Inst* consumer = nullptr;
+    u32 uses = 0;
+    for (auto& candidate : lir_block->GetInstList()) {
+        for (auto value : candidate.GetValues()) {
+            if (ResolveBitCastSource(value).Def() != &bridge) {
+                continue;
+            }
+            ++uses;
+            consumer = &candidate;
+        }
+    }
+    if (uses != 1 || !consumer || !IsPinnedWViewProducer(consumer->GetOp()) ||
+        GetValueSizeByte(consumer->ReturnType()) != sizeof(u32) ||
+        reg_alloc->ValueType(Value{consumer}) != backend::RegAlloc::GPR ||
+        reg_alloc->ValueGPR(Value{consumer}).id != target) {
+        return nullptr;
+    }
+
+    for (auto& store : lir_block->GetInstList()) {
+        if (store.Id() <= consumer->Id() || store.GetOp() != OpCode::SetHostGPR ||
+            store.GetArg<Imm>(1).Get() != target || store.GetArg<Imm>(2).Get() != 0 ||
+            !reg_alloc->IsHostWriteCoalesced(store.Id())) {
+            continue;
+        }
+        auto published = ResolveBitCastSource(store.GetArg<Value>(0));
+        if (published.Def() && published.Def()->GetOp() == OpCode::ZeroExtend32To64) {
+            published = ResolveBitCastSource(published.Def()->GetArg<Value>(0));
+        }
+        if (published.Def() == consumer) {
+            return consumer;
+        }
+    }
+    return nullptr;
+}
+
+}  // namespace
+
+void CoalescePinnedWViewInputs(Block* lir_block,
+                               backend::RegAlloc* reg_alloc,
+                               const Vector<u32>& use_end,
+                               const RegisterAllocFamilyCallbacks& callbacks) {
+    auto CheckInstr = [&](Inst* inst) {
+        return callbacks.check_instr(callbacks.context, inst, 0, 0);
+    };
+    for (auto& bridge : lir_block->GetInstList()) {
+        if (bridge.GetOp() != OpCode::BitExtract || bridge.GetUses() != 1 ||
+            reg_alloc->IsWidthChainCoalesced(bridge.Id()) ||
+            GetValueSizeByte(bridge.ReturnType()) != sizeof(u32) ||
+            bridge.GetArg<Imm>(1).Get() != 0 || bridge.GetArg<Imm>(2).Get() != 32 ||
+            bridge.Id() >= use_end.size()) {
+            continue;
+        }
+        auto source = ResolveBitCastSource(bridge.GetArg<Value>(0));
+        if (!source.Defined() || source.Id() >= use_end.size() ||
+            use_end[source.Id()] != bridge.Id() ||
+            reg_alloc->ValueType(source) != backend::RegAlloc::GPR) {
+            continue;
+        }
+        const u32 target = reg_alloc->ValueGPR(source).id;
+        if (!IsPinnedCoalesceTarget(target) || !reg_alloc->GetGprs().Get(target)) {
+            continue;
+        }
+        auto* consumer = PublishedPinnedWViewConsumer(lir_block, reg_alloc, bridge, target);
+        if (!consumer || use_end[bridge.Id()] != consumer->Id()) {
+            continue;
+        }
+
+        const auto old = reg_alloc->Mapping(bridge.Id());
+        if (old.type != backend::RegAlloc::GPR) {
+            continue;
+        }
+        MapGuestFixedGPR(reg_alloc, bridge.Id(), target);
+        if (!CheckInstr(&bridge) || !CheckInstr(consumer)) {
+            if (old.fixed_gpr) {
+                reg_alloc->MapFixedRegister(bridge.Id(), HostGPR{static_cast<u16>(old.slot)});
+            } else {
+                reg_alloc->MapRegister(bridge.Id(), HostGPR{static_cast<u16>(old.slot)});
+            }
+            continue;
+        }
+        const u32 anchor = reg_alloc->IsWidthChainCoalesced(source.Id())
+                                   ? reg_alloc->WidthChainAnchor(source.Id())
+                                   : source.Id();
+        reg_alloc->MarkWidthChainCoalesced(bridge.Id(), anchor);
+    }
+}
+
+namespace {
+
 enum class SetHostResidual : u32 {
     Coalesced = 0,
     AlreadyHome,

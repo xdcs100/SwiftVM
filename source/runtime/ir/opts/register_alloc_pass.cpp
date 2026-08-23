@@ -910,6 +910,7 @@ private:
             CoalesceGuestGPRWrites(
                     lir_block, reg_alloc, features, use_end, fixed_gpr_clobbers,
                     callbacks);
+            CoalescePinnedWViewInputs(lir_block, reg_alloc, use_end, callbacks);
             CoalesceGuestGPRReads(lir_block, reg_alloc, use_end);
             CensusPinnedHostResidual(lir_block, reg_alloc, use_end);
         };
@@ -949,6 +950,7 @@ private:
                 CoalesceGuestGPRWrites(
                         lir_block, reg_alloc, baseline_features, use_end,
                         fixed_gpr_clobbers, callbacks);
+                CoalescePinnedWViewInputs(lir_block, reg_alloc, use_end, callbacks);
                 CoalesceGuestGPRReads(lir_block, reg_alloc, use_end);
             }
             auto baseline_long = CollectLongWidthChainBridges(
@@ -968,6 +970,7 @@ private:
                 CoalesceGuestGPRWrites(
                         lir_block, reg_alloc, features, use_end,
                         fixed_gpr_clobbers, callbacks);
+                CoalescePinnedWViewInputs(lir_block, reg_alloc, use_end, callbacks);
             }
 
             auto long_bridge = CollectLongWidthChainBridges(

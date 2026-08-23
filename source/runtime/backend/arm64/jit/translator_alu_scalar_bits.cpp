@@ -73,6 +73,21 @@ bool TerminalUsesWidthChainValue(const ir::Terminal& terminal_value,
     });
 }
 
+bool IsPinnedWViewProducer(ir::OpCode op) {
+    switch (op) {
+        case ir::OpCode::Add:
+        case ir::OpCode::Sub:
+        case ir::OpCode::And:
+        case ir::OpCode::AndNot:
+        case ir::OpCode::Or:
+        case ir::OpCode::Xor:
+        case ir::OpCode::Mul:
+            return true;
+        default:
+            return false;
+    }
+}
+
 }  // namespace
 
 void JitTranslator::EmitAsrValue(ir::Inst* inst) {
@@ -203,7 +218,6 @@ bool JitTranslator::ReproveWidthChainBridge(ir::Inst* inst) const {
         long_u32_snapshot &= consumers == 1;
     }
     if (!source.Defined() ||
-        (!IsKnownWidthChainWWrite(source, context) && !long_u32_snapshot) ||
         !context.SharesGPR(source, ir::Value{inst})) {
         return false;
     }
@@ -240,12 +254,49 @@ bool JitTranslator::ReproveWidthChainBridge(ir::Inst* inst) const {
         return end;
     };
 
-    const u32 end = last_use(inst);
     const u32 target = context.X(source).GetCode();
+    ir::Inst* pinned_consumer = nullptr;
+    u32 pinned_uses = 0;
+    for (auto& scan : cur_block->GetInstList()) {
+        for (auto input : scan.GetValues()) {
+            if (ResolveWidthChainBitCast(input).Def() != inst) {
+                continue;
+            }
+            ++pinned_uses;
+            pinned_consumer = &scan;
+        }
+    }
+    bool pinned_w_handoff = pinned_uses == 1 && pinned_consumer &&
+                            IsPinnedWViewProducer(pinned_consumer->GetOp()) &&
+                            ir::GetValueSizeByte(pinned_consumer->ReturnType()) == sizeof(u32) &&
+                            last_use(source.Def()) == inst->Id() &&
+                            last_use(inst) == pinned_consumer->Id() &&
+                            context.SharesGPR(ir::Value{pinned_consumer}, source);
+    if (pinned_w_handoff) {
+        bool published = false;
+        for (auto& scan : cur_block->GetInstList()) {
+            if (scan.Id() <= pinned_consumer->Id() || scan.GetOp() != ir::OpCode::SetHostGPR ||
+                scan.GetArg<ir::Imm>(1).Get() != target || scan.GetArg<ir::Imm>(2).Get() != 0 ||
+                !context.IsHostWriteCoalesced(scan.Id())) {
+                continue;
+            }
+            auto value = ResolveWidthChainBitCast(scan.GetArg<ir::Value>(0));
+            if (value.Def() && value.Def()->GetOp() == ir::OpCode::ZeroExtend32To64) {
+                value = ResolveWidthChainBitCast(value.Def()->GetArg<ir::Value>(0));
+            }
+            published |= value.Def() == pinned_consumer;
+        }
+        pinned_w_handoff = published;
+    }
+    if (!IsKnownWidthChainWWrite(source, context) && !long_u32_snapshot && !pinned_w_handoff) {
+        return false;
+    }
+
+    const u32 end = last_use(inst);
     if (context.HasWidthComponentOwner(anchor) &&
         (!context.WidthComponentOwnerCommitted(anchor) ||
          context.WidthComponentOwnerTarget(anchor) != target ||
-         !context.WidthComponentOwnerHighZero(anchor))) {
+         (!pinned_w_handoff && !context.WidthComponentOwnerHighZero(anchor)))) {
         return false;
     }
     const u32 last_id = cur_block->GetInstList().begin() ==
