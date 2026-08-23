@@ -32,11 +32,12 @@ boundary 22.116%、uniform 6.522%、flags IR 2.506%；FPR state 为 5.484%，
 
 8 月 23 日静态表中的 smallpt 为 SVM/FEX 2.180×。本轮同 harness、同旧 TSV
 权重的 RE=0 重采从 SVM 3.335622 host/guest 降至 3.267832；加入 RSB 返回目标复用、
-静态出口 direct-link、默认 return-L1、cycle successor layout 和 indirect-L1 状态成对加载后，
-按正式 host 权重折算约为 3.019810。以未变的 FEX 1.549 为分母，对应 2.153×→1.950×。
+静态出口 direct-link、默认 return-L1、cycle successor layout、indirect-L1 状态成对加载和
+live resident-FPR publication 后，按正式 host 权重折算约为 2.989612。以未变的 FEX
+1.549 为分母，对应 2.153×→1.930×。
 旧表与这次重采的
 unit 形成参数不完全相同，
-因此不直接覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 1.95–1.99×。
+因此不直接覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 1.93–1.97×。
 
 ## 已落地
 
@@ -170,7 +171,25 @@ pair 中。production inline L1 用一条 `LDP` 同时取得请求字和 L1 基�
 - call-dense 等 entry 精确减少 64,000,000，6 个共同 PC 只减不增，checksum 不变；
   scale-10 十次 wall-time 中位数 1.045108s→1.044901s，未出现 `LDAXP` 原型的退化。
 
-八项合计使正式 smallpt 默认 region host 减少 122,184,742（9.245%）。
+### Live resident-FPR publication
+
+提交 `e74e734` 允许完整 V128 producer 在 `SetHostFPR` 后仍有普通 SSA use 时继续占用
+目标 resident home。publication 前仍拒绝 fault/helper observer、固定家读写和重叠 live
+interval；publication 后若同一目标在 producer 最后 use 前再次写入也拒绝。一个 SSA 一旦
+占用 resident home，不能再被后续 publication 改绑到另一个 home。emitter 独立复算同一
+窗口，`SetHostFPR` 只在两侧证明一致时消失。
+
+- smallpt_wh 1,199,466,420→1,187,471,711，减少 11,994,709（1.0000%）；79 个共同
+  PC 缩短、0 个增长，entries、units、spill 和 PPM 均一致；
+- 删除量主要来自完整 `LoadMemory` 4,704,551、`VecFMul` 1,550,057、`VecFAdd`
+  1,390,954、scalar FP 1,661,934、`VecXor` 851,875、`VecZip` 833,261 和
+  `LoadUniform` 696,744；
+- 320×240、64-spp c-ray 等 entry 减少 136,043,687，174 个共同 PC 缩短、0 个增长，
+  IDAT MD5 保持 `d0c71130abf3544a86b64417bc488c21`；
+- STREAM 等 entry 减少 199，26 个共同 PC 缩短、0 个增长，`Solution Validates`；
+  CoreMark 在当前口径基本中性，CRC final 保持 `0x382f`。
+
+九项合计使正式 smallpt 默认 region host 减少 134,179,451（10.152%）。
 
 ## 否决项
 
@@ -183,8 +202,9 @@ producer 白名单泛化到缺少原子性证明的 opcode。
 
 ## 验证
 
-- 新 FPR 责任测试 3 cases / 10 assertions；resident XMM coalescing 1 case / 794
-  assertions；完整 NZCV 结构测试 1 case / 3 assertions，全部通过。
+- 新 live-publication 窗口测试 3 cases / 9 assertions；既有 FPR 责任测试 3 cases / 10
+  assertions、resident XMM coalescing 794 assertions、scalar fixed-home tie 90 assertions、
+  resident fault/snapshot 27 assertions，Mac 与 Orb 全部通过。
 - func_tests：FLAGS 0/1 × function/block/interpreter 六格均 rc=101，checksum
   `9f52b7d59285dbe5`。
 - helper-fault 38 passed / 0 failed；clone futex/lock 在 FLAGS 0/1 下均 rc=0。
@@ -199,23 +219,26 @@ producer 白名单泛化到缺少原子性证明的 opcode。
 - region edge、direct cycle signal 和 region flags 专项分别通过 42、30、46 assertions；
   cycle successor layout 的 function fingerprint 对基线保持 1664 units / 11 guests 一致。
 - 200 轮 `smc_mt_stress` 为 host_fails/guest_lost/timeouts = 0/0/0。
-- `SWIFT_FUZZ_SEED=424242` 为 184 passed / 35 个既有 failed cases；44 个失败断言中
-  包含默认 FLAGS 下已知的 jit-cache/lazy-flags ABI 测试配置失败。没有新增失败类别。
+- Catch 与 fuzz seed 同为 424242 时，候选为 187 passed / 35 个既有 failed cases、45 个
+  失败断言，仍是既有 VIXL 尾部反汇编自一致性和 jit-cache/lazy-flags 配置类别。同一
+  222-case 注册表上的旧实现为 185 / 37、47 个失败断言，其中两个正是新增窗口测试；
+  候选没有新增失败类别。
 - smallpt_wh PPM SHA-256 两臂均为
   `fe96f7e48295b27c8df8236294052d138c3ed130b81d022739907fe6b2cde5aa`；
   原 equal-entry c-ray sample 的 IDAT MD5 两臂均为
   `54256cb4b3c6313a65ea12ebb7b81e30`，64-spp 正式 harness 两臂均为
   `d0c71130abf3544a86b64417bc488c21`；STREAM `Solution Validates`。
-- Mac `swift_runtime` 与 Orb 全目标构建通过。
+- Mac `swift_test` target 与 Orb 全目标构建通过。
 
 ## 下一步
 
-1. paired L1 state load 后，正式 smallpt 的已覆盖 link 降至约 6.03%。region/cycle
-   link tail 仍约 1.90%，其中 acquire poll 与跨本块 cold stub 的目标跳转不可直接删除；
-   八条 return-L1 静态序列仍约 1.38%，其中 `AND + ADD + LDP + CMP + CSEL + BR` 没有
+1. live FPR publication 后，正式 smallpt 的已覆盖 link 约 6.09%。region/cycle
+   link tail 约 1.92%，其中 acquire poll 与跨本块 cold stub 的目标跳转不可直接删除；
+   八条 return-L1 静态序列约 1.39%，其中 `AND + ADD + LDP + CMP + CSEL + BR` 没有
    明确的基础 ISA 融合机会。公开 host exit 仍仅 139 次。
-2. 剩余 `SetHostFPR` 约 5%，但完整写仅约 2.3%，其余主要是低/高 64-bit lane 的真实
-   architectural publication。继续扩 producer 前先给出单指令完整写与目标别名证明。
+2. 剩余 `SetHostFPR` 为 46,803,103（3.941%），其中完整写仅 12,355,778（1.041%）。
+   最大两桶是 low-64 `LoadMemory` 16,927,380 和 high-64 zero 16,379,255；下一步先确认
+   它们是否为同目标 scalar-load/zero-high pair，再审计能否由一条写 D 寄存器的 load 覆盖。
 3. CoreMark 的 8/16-bit truncation 仍要求 consumer-specific 物理高位证明，并保留 U16
    CallLambda 回归门。
 4. SHA 必须先换成能真正进入 hashing 的合法 workload；不使用当前 PageFatal 前的路径计数。

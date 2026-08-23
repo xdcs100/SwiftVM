@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`3ec9582`** `perf: pair indirect L1 state loads`
+- Code tip: **`e74e734`** `perf: extend resident FPR publication lifetimes`
 - Tracked tree is clean before the documentation commit. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -38,6 +38,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 | `24f9d49` | Skip RSB pushes in indirect-L1 modules and route retained return targets through the signal-safe inline L1; L1-off modules keep the exact RSB path |
 | `b3998d5` | Use the next region block for cycle-polled conditional layout without falling through into per-block cold stubs |
 | `3ec9582` | Pair the production indirect-L1 request and cache-base loads; confirm observed signals through the shared acquire-checking trampoline |
+| `e74e734` | Keep a complete V128 producer in its resident home through safe post-publication SSA uses; reject later home writes and multi-home remaps |
 
 Hot files:
 
@@ -48,6 +49,8 @@ Hot files:
 - `register_alloc_coalesce_gpr.cpp` — pinned guest GPR read/write coalescing and full-width load publication
 - `register_alloc_coalesce_copy.cpp` — exact adjacent low32 copy-chain ownership
 - `integer_width_elimination_pass.cpp` — local zero-extend/low32-extract round-trip elimination
+- `register_alloc_coalesce_fpr.cpp` — resident-home interval proof and publication ownership
+- `translator_mem.cpp` — independent host-FPR publication proof and final bridge emission
 - `svm_config.h` — `flags_regs` default true; `region_edges` bounded64
 
 ## Honest density (coremark `0x0 0x0 0x66 20000 7 1 2000`)
@@ -152,15 +155,16 @@ Validation for `ff42917`:
   1,047,523 passed / 45 failed assertions. The unsafe generic prototype had added one U16 helper
   failure; the final consumer whitelist removes it.
 
-Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9d49` / `b3998d5` / `3ec9582`:
+Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9d49` / `b3998d5` / `3ec9582` / `e74e734`:
 
 - Current formal smallpt is `smallpt_wh_x64 8 128 96`; do not substitute the fixed 1024×768
   `smallpt_x64` when updating the formal FEX ratio.
 - Formal smallpt default-region host:
-  `1,321,651,162 → 1,303,939,990 → 1,297,980,655 → 1,296,969,640 → 1,246,900,800 → 1,201,575,549 → 1,201,372,215 → 1,199,466,420`;
-  cumulative `-122,184,742` (`-9.245%`), spill 0 throughout. The arrows are full-NZCV
+  `1,321,651,162 → 1,303,939,990 → 1,297,980,655 → 1,296,969,640 → 1,246,900,800 → 1,201,575,549 → 1,201,372,215 → 1,199,466,420 → 1,187,471,711`;
+  cumulative `-134,179,451` (`-10.152%`), spill 0 throughout. The arrows are full-NZCV
   compaction, VecZip resident publication, retained RSB target reuse, static-exit direct-link,
-  default return-L1, cycle-polled successor layout, then paired indirect-L1 state loading. `7110d20` is neutral here but saves 452,646,984 on fixed 1024×768
+  default return-L1, cycle-polled successor layout, paired indirect-L1 state loading, then live
+  resident-FPR publication. `7110d20` is neutral here but saves 452,646,984 on fixed 1024×768
   smallpt.
 - RSB reuse shrinks 328 formal smallpt PCs with no growth. EXEC_PROF records 8,080,989 hits / 248
   misses, so the earlier 0.076% static heuristic was not an execution ceiling. c-ray equal-entry
@@ -188,18 +192,23 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   `-31,825,037`, formal c-ray `-91,110,798`, STREAM `-879`, and call-dense `-64,000,000`;
   every common-PC set is shrink-only. The scale-10 call-dense wall-time median is neutral
   (`1.045108s → 1.044901s`), unlike the rejected exclusive-pair prototype.
+- Live resident-FPR publication removes a full-home copy even when the producer has safe SSA uses
+  after the publication: formal smallpt `-11,994,709` with 79 PCs smaller / 0 larger. Formal c-ray
+  equal-entry is `-136,043,687` with 174 PCs smaller / 0 larger; STREAM is `-199` with 26 PCs
+  smaller / 0 larger, while CoreMark is effectively neutral. PPM, c-ray IDAT and STREAM validation
+  remain exact.
 - FEX-aligned RE=0 same-harness refresh for formal smallpt: SVM host/guest
-  `3.335622 → 3.267832`; the landed stages fold this to about `3.019810`. With unchanged FEX
-  `1.549`, ratio is `2.153× → 1.950×`. The earlier
+  `3.335622 → 3.267832`; the landed stages fold this to about `2.989612`. With unchanged FEX
+  `1.549`, ratio is `2.153× → 1.930×`. The earlier
   2.180× table used a different retained unit-formation artifact, so quote the current gap as
-  approximately 1.95–1.99× rather than mixing the two raw tables.
+  approximately 1.93–1.97× rather than mixing the two raw tables.
 - PPM SHA-256 remains
   `fe96f7e48295b27c8df8236294052d138c3ed130b81d022739907fe6b2cde5aa`; prior equal-entry
   c-ray IDAT remains `54256cb4b3c6313a65ea12ebb7b81e30`, 64-spp formal c-ray is
   `d0c71130abf3544a86b64417bc488c21`, and STREAM validates.
-- FPR-focused tests: 3 cases / 10 assertions plus resident coalescing 1 case / 794 assertions;
-  full-NZCV structure 1 case / 3 assertions. FLAGS six-grid, helper-fault 38/0, clone four-grid
-  and 1664-unit/11-guest fingerprint all pass.
+- Live-publication tests pass 3 cases / 9 assertions on Mac and Orb. Existing FPR focus passes
+  10 + 794 + 90 + 27 assertions. FLAGS six-grid, helper-fault 38/0, clone four-grid and the
+  1664-unit/11-guest fingerprint all pass.
 - RSB/indirect structure focus passes 26 assertions, including the paired state/cache load and
   no-target dispatcher path. A temporary mismatched-return probe passes default, both L1-off RSB
   frames, FLAGS-off and interpreter paths and was deleted. Mac and Orb builds pass.
@@ -208,9 +217,10 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   SetLocation fallback and repeated delink/recompile paths pass 36/142 assertions on Mac and Orb.
 - Region edge, direct-cycle signal and region-flags focus pass 42/30/46 assertions. The new layout
   matches the baseline fingerprint for 1664 function units over 11 guests.
-- MT SMC stress passes 200/200 with zero host failure, lost guest or timeout. Fixed-seed 424242 is
-  184 passed / 35 existing failed cases; its 44 failed assertions include the known default-FLAGS
-  jit-cache/lazy-flags ABI test configuration failure. No failure category is added.
+- MT SMC stress passes 200/200 with zero host failure, lost guest or timeout. Catch/fuzz seed
+  424242 gives 187 passed / 35 existing failed cases and 45 failed assertions, all in the known
+  VIXL-tail and default-FLAGS jit-cache/lazy-flags configuration classes. The old mechanism with
+  the same 222-case registry gives 185 / 37 and 47 because two new window tests fail as intended.
 - Detailed mechanism table, the rejected Linux scalar-insert prototype and exact deltas are in
   `docs/codegen-fpr-flags-refresh-2026-08-24.md`.
 
@@ -247,6 +257,10 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 - A direct cycle edge may use the next region block to choose conditional layout, but it is not a
   true fallthrough: retain `LDAR/CBNZ`, then branch over the source block's immediately following
   cold stubs. Falling through after the poll executes the CodeMiss/Signal stub on every iteration.
+- A complete V128 producer may remain in a resident FPR home after `SetHostFPR` only when its full
+  interval has no other value mapped to that home, the pre-publication observer checks pass, and no
+  later write to that home precedes the producer's last use. The producer cannot be rebound to a
+  second resident home; the emitter must independently reproduce all of these checks.
 
 ## Failed / do not retry
 
@@ -275,12 +289,13 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 
 ## Next ready (pick one, measure, revert on 124/134)
 
-1. **smallpt remaining link** — covered link is now about 6.03%. Region/cycle tails are about
-   1.90%; their acquire poll and branch across per-block cold stubs are load-bearing. Audit the
-   roughly 1.38% remaining return-L1 static sequences separately; `AND + ADD + LDP + CMP + CSEL + BR`
+1. **smallpt remaining link** — covered link is now about 6.09%. Region/cycle tails are about
+   1.92%; their acquire poll and branch across per-block cold stubs are load-bearing. Audit the
+   roughly 1.39% remaining return-L1 static sequences separately; `AND + ADD + LDP + CMP + CSEL + BR`
    has no obvious base-ISA fusion. Public host exit executes only 139 times.
-2. **Remaining FPR publication** — SetHostFPR is about 5%, but full writes are only about 2.3%.
-   Extend the producer set only for a single-instruction complete V128 write with exact alias proof.
+2. **Remaining FPR publication** — SetHostFPR is 46,803,103 (`3.941%`), with only 12,355,778
+   (`1.041%`) full writes. First determine whether the dominant low-64 `LoadMemory` 16,927,380 and
+   high-64 zero 16,379,255 buckets are same-home pairs that one D-register load can replace.
 3. **CoreMark remaining truncations** — raw BitExtract is no longer a pool. Only reopen 8/16-bit
    cases with a consumer-specific physical-high proof and the U16 helper regression in the gate.
 4. **SHA valid workload first** — fix or replace the current OpenSSL guest path that PageFatals before hashing, then redo the boundary census. Do not bypass guest fault semantics.
