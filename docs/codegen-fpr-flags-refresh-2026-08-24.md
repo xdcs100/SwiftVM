@@ -1,4 +1,4 @@
-# FPR publication、NZCV 与静态出口密度优化
+# FPR publication、NZCV 与边界密度优化
 
 日期：2026-08-24
 
@@ -31,10 +31,10 @@ boundary 22.116%、uniform 6.522%、flags IR 2.506%；FPR state 为 5.484%，
 `SetHostFPR` 为 5.055%。
 
 8 月 23 日静态表中的 smallpt 为 SVM/FEX 2.180×。本轮同 harness、同旧 TSV
-权重的 RE=0 重采从 SVM 3.335622 host/guest 降至 3.267832；加入 RSB 返回目标复用和
-静态出口 direct-link 后，按正式 host 权重折算约为 3.139232。以未变的 FEX 1.549
-为分母，对应 2.153×→2.027×。旧表与这次重采的 unit 形成参数不完全相同，因此不直接
-覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 2.03–2.06×。
+权重的 RE=0 重采从 SVM 3.335622 host/guest 降至 3.267832；加入 RSB 返回目标复用、
+静态出口 direct-link 和默认 return-L1 后，按正式 host 权重折算约为 3.025120。以未变的
+FEX 1.549 为分母，对应 2.153×→1.953×。旧表与这次重采的 unit 形成参数不完全相同，
+因此不直接覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 1.95–1.99×。
 
 ## 已落地
 
@@ -112,7 +112,31 @@ BlockLink 关闭、自环或跨 module 时，仍走原 inline L2 或 dispatcher 
 - call-dense 3,344,000,774→3,104,000,764，减少 240,000,010，checksum 仍为
   `0xee79813b94536693`。
 
-五项合计使正式 smallpt 默认 region host 减少 74,750,362（5.656%）。
+### Default returns through inline L1
+
+提交 `24f9d49` 让 `indirect_l1` 模块的 call 不再生成 RSB frame，`ret` 直接复用已保留的
+真实目标并走现有 inline L1。L1 快路径自带 `LDAR/TBNZ` signal safepoint，key mismatch
+与 SMC-invalid value 仍退回 dispatcher/L2。若目标寄存器不可保留则直接 `Ret`；只有显式
+`SVM_INDIRECT_L1=0` 的模块继续生成并消费 RSB frame，避免跨 module 留下 stale frame。
+
+FEX `f2e35f3` 的两条 shadow-stack push 依赖 4 MiB call-ret mapping 和 guard-page fault
+恢复；SwiftVM 当前只有 64-frame 普通数组，不能安全照抄删边界检查。默认 return-L1 则在
+不引入异常恢复和 host-PC frame 的前提下移除整段 push，并缩短 pop。
+
+- smallpt_wh 1,246,900,800→1,201,575,549，减少 45,325,251（3.635%）；881 个
+  共同 PC 只减不增，entries 与 units 完全一致，PPM 不变；
+- return 与普通间接出口合计 L1 profile 为 8,978,713 hit / 420 miss（99.9953%）；生产
+  EXEC 中 RSB 8,080,989/248→0/0，仅增加 100 次 L2 hit/dispatcher，其他 exit、region 和
+  guest-state 计数逐项不变；
+- CoreMark 等 entry 减少 169,232,701（总量减少 169,232,746），892 个共同 PC
+  只减不增，CRC final 为 `0x382f`；
+- 64-spp c-ray 等 entry 减少 566,348,759（总量减少 566,459,798），3450 个共同 PC
+  只减不增，IDAT 不变；
+- STREAM 等 entry 减少 5,480、823 个共同 PC 只减不增，`Solution Validates`；
+- call-dense 3,104,000,764→2,752,000,752，减少 352,000,012（11.340%），checksum
+  不变；`SVM_INDIRECT_L1=0` 两臂均为 3,104,000,764，逐指令一致。
+
+六项合计使正式 smallpt 默认 region host 减少 120,075,613（9.085%）。
 
 ## 否决项
 
@@ -131,14 +155,17 @@ producer 白名单泛化到缺少原子性证明的 opcode。
   `9f52b7d59285dbe5`。
 - helper-fault 38 passed / 0 failed；clone futex/lock 在 FLAGS 0/1 下均 rc=0。
 - function fingerprint 对阶段基线保持 1664 units / 11 guests，自一致且逐项匹配。
-- RSB/indirect 结构测试 21 assertions；显式改写栈返回地址的临时 probe 在默认、
-  `SVM_SHADOW_LEAN=0` 和 `SVM_FLAGS_REGS=0` 下均 rc=0，probe 已删除。
-- direct-link 默认 production 子集 9 cases / 245 assertions、SMC 子集 5 cases / 193
-  assertions；FLAGS=0 下含 disk-cache 的全标签为 21 cases / 900,721 assertions。静态
+- RSB/indirect 结构测试 26 assertions，覆盖 return-L1 的 signal poll、无 push 和无目标
+  dispatcher 路径；显式改写栈返回地址的临时 probe 在默认、L1-off 两种 RSB frame、
+  FLAGS-off 和 interpreter 下均 rc=0，probe 已删除。
+- direct-link 默认 production 子集 9 cases / 336 assertions、SMC 子集 5 cases / 268
+  assertions；FLAGS=0 下含 disk-cache 的全标签为 21 cases / 900,718 assertions。静态
   SetLocation 的跨 module/BlockLink-off fallback 为 36 assertions，反复摘链/重编译为
   142 assertions，Mac 与 Orb 均通过。
-- `SWIFT_FUZZ_SEED=123456` 全套件最终为 183 passed / 35 个既有 failed cases；
-  1,047,738 passed / 44 failed assertions。新增断言全部通过，没有新增失败类别。
+- 200 轮 `smc_mt_stress` 为 host_fails/guest_lost/timeouts = 0/0/0。
+- `SWIFT_FUZZ_SEED=123456` 仍为 183 passed / 35 个既有 failed cases；44 个既有代码
+  断言之外，默认 FLAGS 下还有已知的 jit-cache/lazy-flags ABI 测试配置失败。没有新增
+  失败类别。
 - smallpt_wh PPM SHA-256 两臂均为
   `fe96f7e48295b27c8df8236294052d138c3ed130b81d022739907fe6b2cde5aa`；
   原 equal-entry c-ray sample 的 IDAT MD5 两臂均为
@@ -148,10 +175,9 @@ producer 白名单泛化到缺少原子性证明的 opcode。
 
 ## 下一步
 
-1. 静态出口 direct-link 后，正式 smallpt 的已覆盖 link 降至约 9.60%。最大单形状是
-   6 条 lean RSB push 加 1 条 direct branch，占 host 约 3.52%；下一步只在能消除真实
-   push 指令且保持 overflow/SMC/RSB 契约时立项。公开 host exit 仅 139 次，不是热轴。
-   region 扩窗与跨边 state forwarding 的历史 NO-GO 结论不因剩余总桶较大而自动重开。
+1. 默认 return-L1 后，正式 smallpt 的已覆盖 link 降至约 6.20%。最大两类是 region/cycle
+   link tail 约 1.92% 和十条 return-L1 静态序列约 1.54%；下一步分别审计，不能把总桶
+   当作可删空间。公开 host exit 仍仅 139 次，不是热轴。
 2. 剩余 `SetHostFPR` 约 5%，但完整写仅约 2.3%，其余主要是低/高 64-bit lane 的真实
    architectural publication。继续扩 producer 前先给出单指令完整写与目标别名证明。
 3. CoreMark 的 8/16-bit truncation 仍要求 consumer-specific 物理高位证明，并保留 U16

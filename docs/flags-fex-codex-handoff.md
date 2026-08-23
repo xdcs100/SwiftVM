@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`729b826`** `feat: direct-link static dispatch exits`
+- Code tip: **`24f9d49`** `feat: route returns through inline L1`
 - Tracked tree is clean before the documentation commit. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -35,6 +35,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 | `7110d20` / `7045d3b` / `431be30` | Coalesce complete legacy scalar FPR results, compact full-NZCV publication, and publish VecZip results in place |
 | `fa1768a` | Reuse the retained dynamic return target in both RSB pop formats instead of reloading `State::current_loc` |
 | `729b826` | Route same-module static `SetLocation + ReturnToDispatch` exits through tracked direct-link sites, with the prior L2/dispatcher fallbacks retained |
+| `24f9d49` | Skip RSB pushes in indirect-L1 modules and route retained return targets through the signal-safe inline L1; L1-off modules keep the exact RSB path |
 
 Hot files:
 
@@ -149,16 +150,16 @@ Validation for `ff42917`:
   1,047,523 passed / 45 failed assertions. The unsafe generic prototype had added one U16 helper
   failure; the final consumer whitelist removes it.
 
-Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826`:
+Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9d49`:
 
 - Current formal smallpt is `smallpt_wh_x64 8 128 96`; do not substitute the fixed 1024×768
   `smallpt_x64` when updating the formal FEX ratio.
 - Formal smallpt default-region host:
-  `1,321,651,162 → 1,303,939,990 → 1,297,980,655 → 1,296,969,640 → 1,246,900,800`;
-  cumulative `-74,750,362` (`-5.656%`), spill 0 throughout. The arrows are full-NZCV
-  compaction, VecZip resident publication, retained RSB return-target reuse, then static-exit
-  direct-link. `7110d20` is neutral on this binary but saves 452,646,984 host instructions on
-  fixed 1024×768 smallpt.
+  `1,321,651,162 → 1,303,939,990 → 1,297,980,655 → 1,296,969,640 → 1,246,900,800 → 1,201,575,549`;
+  cumulative `-120,075,613` (`-9.085%`), spill 0 throughout. The arrows are full-NZCV
+  compaction, VecZip resident publication, retained RSB target reuse, static-exit direct-link,
+  then default return-L1. `7110d20` is neutral here but saves 452,646,984 on fixed 1024×768
+  smallpt.
 - RSB reuse shrinks 328 formal smallpt PCs with no growth. EXEC_PROF records 8,080,989 hits / 248
   misses, so the earlier 0.076% static heuristic was not an execution ceiling. c-ray equal-entry
   delta is `-414,747` with 967 PCs smaller and none larger; CoreMark equal-entry delta is
@@ -171,11 +172,15 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826`:
   `12,191,734 → 31,816` while every exit/RSB/dispatcher/region counter remains equal. CoreMark
   equal-entry is `-210,324,020`, formal c-ray is `-574,050,830`, STREAM total is `-18,740`, and
   call-dense is `-240,000,010`; every common-PC set is shrink-only.
+- Default return-L1 removes RSB production/consumption when `indirect_l1` is enabled: formal
+  smallpt `-45,325,251` with 881 PCs smaller / 0 larger and 99.9953% L1 hits. CoreMark equal-entry
+  is `-169,232,701`, formal c-ray `-566,348,759`, STREAM `-5,480`, and call-dense
+  `-352,000,012`. `SVM_INDIRECT_L1=0` call-dense is byte-identical to the old RSB path.
 - FEX-aligned RE=0 same-harness refresh for formal smallpt: SVM host/guest
-  `3.335622 → 3.267832`; retained-RSB and static-exit direct-link fold this to about `3.139232`.
-  With unchanged FEX `1.549`, ratio is `2.153× → 2.027×`. The earlier
+  `3.335622 → 3.267832`; the landed stages fold this to about `3.025120`. With unchanged FEX
+  `1.549`, ratio is `2.153× → 1.953×`. The earlier
   2.180× table used a different retained unit-formation artifact, so quote the current gap as
-  approximately 2.03–2.06× rather than mixing the two raw tables.
+  approximately 1.95–1.99× rather than mixing the two raw tables.
 - PPM SHA-256 remains
   `fe96f7e48295b27c8df8236294052d138c3ed130b81d022739907fe6b2cde5aa`; prior equal-entry
   c-ray IDAT remains `54256cb4b3c6313a65ea12ebb7b81e30`, 64-spp formal c-ray is
@@ -183,15 +188,15 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826`:
 - FPR-focused tests: 3 cases / 10 assertions plus resident coalescing 1 case / 794 assertions;
   full-NZCV structure 1 case / 3 assertions. FLAGS six-grid, helper-fault 38/0, clone four-grid
   and 1664-unit/11-guest fingerprint all pass.
-- RSB/indirect structure focus passes 21 assertions. A temporary mismatched-return probe passes
-  default, `SVM_SHADOW_LEAN=0` and `SVM_FLAGS_REGS=0` paths and was deleted. Mac `swift_runtime`
-  and the Orb all-target build pass.
-- Direct-link production/SMC subsets pass 245/193 assertions under defaults; the FLAGS=0 full
-  direct-link tag including cache lifecycle passes 21 cases / 900,721 assertions. Static
+- RSB/indirect structure focus passes 26 assertions, including the return-L1 signal poll and
+  no-target dispatcher path. A temporary mismatched-return probe passes default, both L1-off RSB
+  frames, FLAGS-off and interpreter paths and was deleted. Mac and Orb builds pass.
+- Direct-link production/SMC subsets pass 336/268 assertions under defaults; the FLAGS=0 full
+  direct-link tag including cache lifecycle passes 21 cases / 900,718 assertions. Static
   SetLocation fallback and repeated delink/recompile paths pass 36/142 assertions on Mac and Orb.
-- Fixed `SWIFT_FUZZ_SEED=123456`: 183 passed / 35 existing failed cases,
-  1,047,738 passed / 44 failed assertions; all newly added assertions pass and no failure category
-  is added.
+- MT SMC stress passes 200/200 with zero host failure, lost guest or timeout. Fixed-seed remains
+  183 passed / 35 existing failed cases; besides 44 existing code assertions, default FLAGS has
+  the known jit-cache/lazy-flags ABI test configuration failure. No failure category is added.
 - Detailed mechanism table, the rejected Linux scalar-insert prototype and exact deltas are in
   `docs/codegen-fpr-flags-refresh-2026-08-24.md`.
 
@@ -219,6 +224,9 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826`:
   non-self, BlockLink-enabled region contract. The cycle poll remains before the site; unavailable
   regions, cross-module targets and disabled BlockLink keep the inline L2/dispatcher fallback.
   The site must stay registered with LinkManager so SMC can restore its trampoline branch.
+- An `indirect_l1` module must not produce RSB frames: retained returns use `ForwardIndirectL1`,
+  whose `LDAR/TBNZ` signal poll and SMC-safe invalid value are mandatory; missing retained targets
+  return to the dispatcher. Only L1-off modules may pair `EmitRSBPush` with `EmitRSBPop`.
 
 ## Failed / do not retry
 
@@ -244,9 +252,9 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826`:
 
 ## Next ready (pick one, measure, revert on 124/134)
 
-1. **smallpt RSB push** — covered link is now about 9.60%. Its largest shape is six lean-push
-   instructions plus one direct branch (3.52% of host). Reopen only with an overflow-safe frame
-   representation and complete SMC/RSB proof; public host exit executes only 139 times.
+1. **smallpt remaining link** — covered link is now about 6.20%. Region/cycle tails are about
+   1.92%; return-L1 static sequences are about 1.54%. Audit these separately and retain the signal,
+   SMC and cycle-safepoint contracts; public host exit executes only 139 times.
 2. **Remaining FPR publication** — SetHostFPR is about 5%, but full writes are only about 2.3%.
    Extend the producer set only for a single-instruction complete V128 write with exact alias proof.
 3. **CoreMark remaining truncations** — raw BitExtract is no longer a pool. Only reopen 8/16-bit
