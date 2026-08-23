@@ -279,7 +279,7 @@ private:
     [[nodiscard]] bool HasRegionCycleEdgeFromCurrent() const;
     [[nodiscard]] bool IsDirectCycleCutEdge(ir::Location target) const;
     [[nodiscard]] Label* GetDirectCycleExit(ir::Location target);
-    [[nodiscard]] bool CanRegionFallThrough(ir::Location target) const;
+    [[nodiscard]] bool CanUseRegionSuccessorLayout(ir::Location target) const;
     void EmitRegionEdge(ir::Location target,
                         bool fallthrough = false,
                         bool record_edge_counters = true,

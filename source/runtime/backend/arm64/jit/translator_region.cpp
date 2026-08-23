@@ -198,10 +198,9 @@ Label* JitTranslator::GetDirectCycleExit(ir::Location target) {
     return label.get();
 }
 
-bool JitTranslator::CanRegionFallThrough(ir::Location target) const {
+bool JitTranslator::CanUseRegionSuccessorLayout(ir::Location target) const {
     return next_region_block && *next_region_block == target.Value() &&
            !backedge_exit_label && !backedge_flags_plan &&
-           !IsDirectCycleCutEdge(target) &&
            vec_nan_cold_sites.empty();
 }
 
@@ -381,19 +380,19 @@ bool JitTranslator::EmitRegionIf(const ir::terminal::If& terminal,
     context.RecordExecCounter(exec_offset_exit_direct);
     context.RecordExecCounter(exec_offset_region_edges);
 
-    const bool then_fallthrough = allow_fallthrough &&
-                                  CanRegionFallThrough(*then_target) &&
-                                  !needs_stub(*else_target);
-    const bool else_fallthrough = allow_fallthrough &&
-                                  CanRegionFallThrough(*else_target) &&
-                                  !needs_stub(*then_target);
-    if (then_fallthrough || else_fallthrough) {
-        const auto fall = then_fallthrough ? *then_target : *else_target;
-        const auto taken = then_fallthrough ? *else_target : *then_target;
+    const bool then_layout = allow_fallthrough &&
+                             CanUseRegionSuccessorLayout(*then_target) &&
+                             !needs_stub(*else_target);
+    const bool else_layout = allow_fallthrough &&
+                             CanUseRegionSuccessorLayout(*else_target) &&
+                             !needs_stub(*then_target);
+    if (then_layout || else_layout) {
+        const auto fall = then_layout ? *then_target : *else_target;
+        const auto taken = then_layout ? *else_target : *then_target;
         ASSERT(!needs_stub(taken));
-        branch(LocalBranchTarget(taken), !then_fallthrough);
+        branch(LocalBranchTarget(taken), !then_layout);
         ++region_block_edges;
-        EmitRegionEdge(fall, true, false);
+        EmitRegionEdge(fall, !needs_stub(fall), false);
         return true;
     }
 
@@ -456,19 +455,19 @@ bool JitTranslator::EmitRegionCondition(
     context.RecordExecCounter(exec_offset_exit_direct);
     context.RecordExecCounter(exec_offset_region_edges);
 
-    const bool then_fallthrough = allow_fallthrough &&
-                                  CanRegionFallThrough(*then_target) &&
-                                  !needs_stub(*else_target);
-    const bool else_fallthrough = allow_fallthrough &&
-                                  CanRegionFallThrough(*else_target) &&
-                                  !needs_stub(*then_target);
-    if (then_fallthrough || else_fallthrough) {
-        const auto fall = then_fallthrough ? *then_target : *else_target;
-        const auto taken = then_fallthrough ? *else_target : *then_target;
+    const bool then_layout = allow_fallthrough &&
+                             CanUseRegionSuccessorLayout(*then_target) &&
+                             !needs_stub(*else_target);
+    const bool else_layout = allow_fallthrough &&
+                             CanUseRegionSuccessorLayout(*else_target) &&
+                             !needs_stub(*then_target);
+    if (then_layout || else_layout) {
+        const auto fall = then_layout ? *then_target : *else_target;
+        const auto taken = then_layout ? *else_target : *then_target;
         ASSERT(!needs_stub(taken));
-        branch(LocalBranchTarget(taken), !then_fallthrough);
+        branch(LocalBranchTarget(taken), !then_layout);
         ++region_block_edges;
-        EmitRegionEdge(fall, true, false);
+        EmitRegionEdge(fall, !needs_stub(fall), false);
         return true;
     }
 
