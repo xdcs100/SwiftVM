@@ -34,11 +34,12 @@ boundary 22.116%、uniform 6.522%、flags IR 2.506%；FPR state 为 5.484%，
 权重的 RE=0 重采从 SVM 3.335622 host/guest 降至 3.267832；加入 RSB 返回目标复用、
 静态出口 direct-link、默认 return-L1、cycle successor layout、indirect-L1 状态成对加载、
 live resident-FPR publication、scalar-load FPR fusion、scalar-sqrt resident publication、
-legacy scalar-binary resident publication 和 direct absolute-address materialization 后，按正式
-host 权重折算约为 2.873287。以未变的 FEX 1.549 为分母，对应 2.153×→1.855×。
+legacy scalar-binary resident publication、direct absolute-address materialization 和 compact
+FCMP PF/AF publication 后，按正式 host 权重折算约为 2.835788。以未变的 FEX 1.549
+为分母，对应 2.153×→1.831×。
 旧表与这次重采的
 unit 形成参数不完全相同，
-因此不直接覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 1.85–1.91×。
+因此不直接覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 1.83–1.89×。
 
 ## 已落地
 
@@ -254,7 +255,22 @@ scalar 临时值完成修复后直接插回 lane0；64-bit lowering 不能原地
 - STREAM 与 CoreMark 等 entry 分别减少 1,137 / 673，652 / 659 个共同 PC 缩短、0 个
   增长，分别保持 `Solution Validates` 与 CRC final `0x382f`。
 
-十三项合计使正式 smallpt 默认 region host 减少 180,384,089（13.648%）。
+### Compact FCMP non-NZCV publication
+
+提交 `c15a712` 把 compact `PublishFCmpFlags` 的 parity-byte 写入和 AF 清零合为一条
+27-bit `BFI`。`VecFCmp` 的 `CSET VC` 结果严格为 0/1；x26 bit0–7 是 raw parity byte、
+bit26 是 AF，bit8–25 没有读者且本 opcode 已使 flags token 失效，因此合并不改变任何
+可观察状态。原 `AXFLAG` 与 lazy host NZCV 契约保持不变，density 记为 shared PF/AF pack。
+
+- 正式 smallpt 的 14,894,552 次 publication 各精确删除一条；
+- smallpt_wh 1,141,267,073→1,126,372,521，减少 14,894,552（1.3051%）；144 个共同
+  PC 缩短、0 个增长，entries、units、spill 和 PPM 均一致；
+- 320×240、64-spp c-ray 等 entry 减少 88,615,708，118 个共同 PC 缩短、0 个增长，
+  IDAT MD5 保持 `d0c71130abf3544a86b64417bc488c21`；
+- STREAM 与 CoreMark 等 entry 分别减少 23 / 4，11 / 4 个共同 PC 缩短、0 个增长，
+  分别保持 `Solution Validates` 与 CRC final `0x382f`。
+
+十四项合计使正式 smallpt 默认 region host 减少 195,278,641（14.775%）。
 
 ## 否决项
 
@@ -290,6 +306,9 @@ smallpt 两臂均为 1,168,614,398，证明现有 successor layout 已吸收所�
 - absolute-address 三项定向门在 Mac/Orb 均通过 3 + 1 + 10 assertions；ON/OFF
   function fingerprint 为 1664 units / 11 guests 且逐项一致，func_tests 的 ON/OFF ×
   function/block/interpreter 六格均 rc=101、checksum `9f52b7d59285dbe5`、stdout hash 相同。
+- COMIS compact flags 全消费者 JIT/interpreter 差分在 Mac/Orb 均通过 3,482 assertions；
+  FLAGS 0/1 × function/block/interpreter 六格逐字一致，阶段 fingerprint 仍为
+  1664 units / 11 guests。
 - RSB/indirect 结构测试 26 assertions，覆盖八指令 L1 快路径、无 push 和无目标
   dispatcher 路径；显式改写栈返回地址的临时 probe 在默认、L1-off 两种 RSB frame、
   FLAGS-off 和 interpreter 下均 rc=0，probe 已删除。
@@ -311,11 +330,11 @@ smallpt 两臂均为 1,168,614,398，证明现有 successor layout 已吸收所�
 
 ## 下一步
 
-1. scalar-load fusion 后，正式 smallpt 的已覆盖 link 约 6.19%。region/cycle
-   link tail 约 1.95%，其中 acquire poll 与跨本块 cold stub 的目标跳转不可直接删除；
+1. 当前正式 smallpt 的已覆盖 link 约 6.4%。region/cycle link tail 约 2.0%，其中
+   acquire poll 与跨本块 cold stub 的目标跳转不可直接删除；
    八条 return-L1 静态序列约 1.42%，其中 `AND + ADD + LDP + CMP + CSEL + BR` 没有
    明确的基础 ISA 融合机会。公开 host exit 仍仅 139 次。
-2. 剩余 `SetHostFPR` 约为 30,193,587（2.646%），其中完整写约 8,317,804（0.729%）。
+2. 剩余 `SetHostFPR` 约为 30,193,587（2.681%），其中完整写约 8,317,804（0.738%）。
    low-64 `LoadMemory` 与 high-64 zero 分别余 10,641,609 / 10,093,484；相邻池中约
    8.29M 次因 fault/alias/fixed-home 门拒绝，不为继续扩池放宽精确状态边界。
 3. CoreMark 的 8/16-bit truncation 仍要求 consumer-specific 物理高位证明，并保留 U16

@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`b692fca`** `perf: enable direct absolute address materialization`
+- Code tip: **`c15a712`** `perf: combine compact FCMP flag publication`
 - Tracked tree is clean before the documentation commit. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -43,6 +43,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 | `97009a3` | Publish legacy scalar sqrt results through a dead resident merge home; independently reprove the fixed read, last use, and publication window |
 | `f99eabf` | Reuse a dead fixed left home for legacy scalar FP binaries while preserving the high lane through a reserved temporary |
 | `b692fca` | Make direct absolute `GetOperand` materialization the default; retain `=0` as the code-shape rollback |
+| `c15a712` | Combine compact FCMP parity publication and AF clearing into one proof-backed bitfield insert |
 
 Hot files:
 
@@ -161,17 +162,18 @@ Validation for `ff42917`:
   1,047,523 passed / 45 failed assertions. The unsafe generic prototype had added one U16 helper
   failure; the final consumer whitelist removes it.
 
-Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9d49` / `b3998d5` / `3ec9582` / `e74e734` / `030f52d` / `97009a3` / `f99eabf` / `b692fca`:
+Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9d49` / `b3998d5` / `3ec9582` / `e74e734` / `030f52d` / `97009a3` / `f99eabf` / `b692fca` / `c15a712`:
 
 - Current formal smallpt is `smallpt_wh_x64 8 128 96`; do not substitute the fixed 1024×768
   `smallpt_x64` when updating the formal FEX ratio.
 - Formal smallpt default-region host:
-  `1,321,651,162 → 1,303,939,990 → 1,297,980,655 → 1,296,969,640 → 1,246,900,800 → 1,201,575,549 → 1,201,372,215 → 1,199,466,420 → 1,187,471,711 → 1,168,614,398 → 1,165,502,656 → 1,163,020,553 → 1,141,267,073`;
-  cumulative `-180,384,089` (`-13.648%`), spill 0 throughout. The arrows are full-NZCV
+  `1,321,651,162 → 1,303,939,990 → 1,297,980,655 → 1,296,969,640 → 1,246,900,800 → 1,201,575,549 → 1,201,372,215 → 1,199,466,420 → 1,187,471,711 → 1,168,614,398 → 1,165,502,656 → 1,163,020,553 → 1,141,267,073 → 1,126,372,521`;
+  cumulative `-195,278,641` (`-14.775%`), spill 0 throughout. The arrows are full-NZCV
   compaction, VecZip resident publication, retained RSB target reuse, static-exit direct-link,
   default return-L1, cycle-polled successor layout, paired indirect-L1 state loading, then live
   resident-FPR publication, scalar-load FPR fusion, scalar-sqrt resident publication, then
-  legacy scalar-binary resident publication, then direct absolute-address materialization.
+  legacy scalar-binary resident publication, direct absolute-address materialization, then compact
+  FCMP non-NZCV publication.
   `7110d20` is neutral here but saves
   452,646,984 on fixed 1024×768
   smallpt.
@@ -226,11 +228,16 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   0 larger. Formal c-ray equal-entry is `-243,851,552` with 1,924 PCs smaller and 0 larger;
   STREAM/CoreMark are `-1,137` / `-673`, also shrink-only. All oracles and spill counts remain
   exact. The feature is now default ON; `SVM_ABS_CONST_MAT=0` selects the prior code shape.
+- Compact FCMP publication combines the raw parity-byte write and AF clear into one 27-bit BFI;
+  AXFLAG and lazy host NZCV remain unchanged. Formal smallpt is `-14,894,552` (`-1.3051%`)
+  with 144 PCs smaller and 0 larger. Formal c-ray equal-entry is `-88,615,708` with 118 PCs
+  smaller and 0 larger; STREAM/CoreMark are `-23` / `-4`, also shrink-only. All oracles and
+  spill counts remain exact.
 - FEX-aligned RE=0 same-harness refresh for formal smallpt: SVM host/guest
-  `3.335622 → 3.267832`; the landed stages fold this to about `2.873287`. With unchanged FEX
-  `1.549`, ratio is `2.153× → 1.855×`. The earlier
+  `3.335622 → 3.267832`; the landed stages fold this to about `2.835788`. With unchanged FEX
+  `1.549`, ratio is `2.153× → 1.831×`. The earlier
   2.180× table used a different retained unit-formation artifact, so quote the current gap as
-  approximately 1.85–1.91× rather than mixing the two raw tables.
+  approximately 1.83–1.89× rather than mixing the two raw tables.
 - PPM SHA-256 remains
   `fe96f7e48295b27c8df8236294052d138c3ed130b81d022739907fe6b2cde5aa`; prior equal-entry
   c-ray IDAT remains `54256cb4b3c6313a65ea12ebb7b81e30`, 64-spp formal c-ray is
@@ -245,6 +252,9 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 - Absolute-address ON/OFF fingerprint matches for 1664 units / 11 guests. Its three focused gates
   pass 3 + 1 + 10 assertions on Mac and Orb; the ON/OFF × function/block/interpreter six-grid is
   byte-identical with rc=101 and checksum `9f52b7d59285dbe5`.
+- COMIS compact flags all-consumer differential passes 3,482 assertions on Mac and Orb. FLAGS
+  0/1 × function/block/interpreter is byte-identical; the stage fingerprint remains
+  1664 units / 11 guests.
 - RSB/indirect structure focus passes 26 assertions, including the paired state/cache load and
   no-target dispatcher path. A temporary mismatched-return probe passes default, both L1-off RSB
   frames, FLAGS-off and interpreter paths and was deleted. Mac and Orb builds pass.
@@ -329,12 +339,12 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 
 ## Next ready (pick one, measure, revert on 124/134)
 
-1. **smallpt remaining link** — covered link is now about 6.19%. Region/cycle tails are about
-   1.95%; their acquire poll and branch across per-block cold stubs are load-bearing. Audit the
-   roughly 1.42% remaining return-L1 static sequences separately; `AND + ADD + LDP + CMP + CSEL + BR`
+1. **smallpt remaining link** — covered link is now about 6.4%. Region/cycle tails are about
+   2.0%; their acquire poll and branch across per-block cold stubs are load-bearing. Audit the
+   roughly 1.5% remaining return-L1 static sequences separately; `AND + ADD + LDP + CMP + CSEL + BR`
    has no obvious base-ISA fusion. Public host exit executes only 139 times.
-2. **Remaining FPR publication** — SetHostFPR is about 30,193,587 (`2.646%`), with about
-   8,317,804 (`0.729%`) full writes. Low-load/high-zero remain 10,641,609 / 10,093,484; about 8.29M adjacent
+2. **Remaining FPR publication** — SetHostFPR is about 30,193,587 (`2.681%`), with about
+   8,317,804 (`0.738%`) full writes. Low-load/high-zero remain 10,641,609 / 10,093,484; about 8.29M adjacent
    candidates were rejected by exact fault/alias/home gates and must not be recovered heuristically.
 3. **CoreMark remaining truncations** — raw BitExtract is no longer a pool. Only reopen 8/16-bit
    cases with a consumer-specific physical-high proof and the U16 helper regression in the gate.
