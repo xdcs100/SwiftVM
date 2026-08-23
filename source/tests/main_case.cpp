@@ -4358,6 +4358,7 @@ TEST_CASE("guest GPR coalescing keeps publication and snapshot proofs local") {
         const char* name;
     };
     constexpr std::array expanded_producers{
+            ExpandedProducer{OpCode::LoadMemory, "LoadMemory"},
             ExpandedProducer{OpCode::Adc, "Adc"},
             ExpandedProducer{OpCode::Sbb, "Sbb"},
             ExpandedProducer{OpCode::Mul, "Mul"},
@@ -4393,6 +4394,9 @@ TEST_CASE("guest GPR coalescing keeps publication and snapshot proofs local") {
             return emit(left, right).SetType(type);
         };
         switch (op) {
+            case OpCode::LoadMemory:
+                return block->LoadMemory(Operand{load_scalar(0x1000)})
+                        .SetType(type);
             case OpCode::Adc:
                 return binary([&](Value left, Value right) {
                     return block->Adc(left, Operand{right});
@@ -6156,7 +6160,7 @@ TEST_CASE("SHUFPS hot immediates tie only an exact last-use destination") {
     }
 }
 
-TEST_CASE("resident XMM homes survive a guest page fault") {
+TEST_CASE("resident register homes survive a guest page fault") {
     using namespace swift::runtime;
     using namespace swift::translator::x86;
 
@@ -6184,6 +6188,8 @@ TEST_CASE("resident XMM homes survive a guest page fault") {
     auto& state = core->GetContext();
     state.rip.qword = reinterpret_cast<swift::u64>(code);
     state.rax.qword = reinterpret_cast<swift::u64>(data);
+    constexpr swift::u64 expected_rbx = 0x123456789abcdef0ull;
+    state.rbx.qword = expected_rbx;
     std::array<std::array<swift::u8, 16>, 16> expected{};
     for (swift::u32 index = 0; index < expected.size(); ++index) {
         for (swift::u32 byte = 0; byte < expected[index].size(); ++byte) {
@@ -6192,6 +6198,7 @@ TEST_CASE("resident XMM homes survive a guest page fault") {
         std::memcpy(&state.xmms[index], expected[index].data(), expected[index].size());
     }
     REQUIRE(core->Run() == swift::translator::ExitReason::PageFatal);
+    REQUIRE(state.rbx.qword == expected_rbx);
     for (swift::u32 index = 0; index < expected.size(); ++index) {
         CAPTURE(index);
         REQUIRE(std::memcmp(&state.xmms[index], expected[index].data(),

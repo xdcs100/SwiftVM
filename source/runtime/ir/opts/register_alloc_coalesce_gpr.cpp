@@ -28,6 +28,7 @@ bool IsPinnedCoalesceTarget(u32 reg) {
 bool IsPinnedCoalesceProducer(OpCode op) {
     switch (op) {
         case OpCode::LoadImm:
+        case OpCode::LoadMemory:
         case OpCode::LoadUniform:
         case OpCode::Zero:
         case OpCode::Add:
