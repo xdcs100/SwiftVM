@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`c15a712`** `perf: combine compact FCMP flag publication`
+- Code tip: **`2f2fb88`** `perf: defer terminal location publication`
 - Tracked tree is clean before the documentation commit. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -44,6 +44,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 | `f99eabf` | Reuse a dead fixed left home for legacy scalar FP binaries while preserving the high lane through a reserved temporary |
 | `b692fca` | Make direct absolute `GetOperand` materialization the default; retain `=0` as the code-shape rollback |
 | `c15a712` | Combine compact FCMP parity publication and AF clearing into one proof-backed bitfield insert |
+| `2f2fb88` | Defer trailing constant `SetLocation` publication to dispatcher misses while preserving mid-block and dynamic observers |
 
 Hot files:
 
@@ -162,18 +163,18 @@ Validation for `ff42917`:
   1,047,523 passed / 45 failed assertions. The unsafe generic prototype had added one U16 helper
   failure; the final consumer whitelist removes it.
 
-Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9d49` / `b3998d5` / `3ec9582` / `e74e734` / `030f52d` / `97009a3` / `f99eabf` / `b692fca` / `c15a712`:
+Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9d49` / `b3998d5` / `3ec9582` / `e74e734` / `030f52d` / `97009a3` / `f99eabf` / `b692fca` / `c15a712` / `2f2fb88`:
 
 - Current formal smallpt is `smallpt_wh_x64 8 128 96`; do not substitute the fixed 1024×768
   `smallpt_x64` when updating the formal FEX ratio.
 - Formal smallpt default-region host:
-  `1,321,651,162 → 1,303,939,990 → 1,297,980,655 → 1,296,969,640 → 1,246,900,800 → 1,201,575,549 → 1,201,372,215 → 1,199,466,420 → 1,187,471,711 → 1,168,614,398 → 1,165,502,656 → 1,163,020,553 → 1,141,267,073 → 1,126,372,521`;
-  cumulative `-195,278,641` (`-14.775%`), spill 0 throughout. The arrows are full-NZCV
+  `1,321,651,162 → 1,303,939,990 → 1,297,980,655 → 1,296,969,640 → 1,246,900,800 → 1,201,575,549 → 1,201,372,215 → 1,199,466,420 → 1,187,471,711 → 1,168,614,398 → 1,165,502,656 → 1,163,020,553 → 1,141,267,073 → 1,126,372,521 → 1,096,331,217`;
+  cumulative `-225,319,945` (`-17.048%`), spill 0 throughout. The arrows are full-NZCV
   compaction, VecZip resident publication, retained RSB target reuse, static-exit direct-link,
   default return-L1, cycle-polled successor layout, paired indirect-L1 state loading, then live
   resident-FPR publication, scalar-load FPR fusion, scalar-sqrt resident publication, then
-  legacy scalar-binary resident publication, direct absolute-address materialization, then compact
-  FCMP non-NZCV publication.
+  legacy scalar-binary resident publication, direct absolute-address materialization, compact
+  FCMP non-NZCV publication, then trailing static-location cold publication.
   `7110d20` is neutral here but saves
   452,646,984 on fixed 1024×768
   smallpt.
@@ -233,11 +234,17 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   with 144 PCs smaller and 0 larger. Formal c-ray equal-entry is `-88,615,708` with 118 PCs
   smaller and 0 larger; STREAM/CoreMark are `-23` / `-4`, also shrink-only. All oracles and
   spill counts remain exact.
+- Trailing constant `SetLocation` publication is deferred only when it is the final enabled IR
+  instruction. Formal smallpt is `-30,041,304` (`-2.6671%`): 998 PCs each shrink by exactly three
+  instructions and none grow. Formal c-ray equal-entry is `-344,393,514` with 4,151 PCs smaller
+  and none larger; STREAM/CoreMark equal-entry are `-9,702` / `-126,194,385`. CoreMark has one
+  entries=0 layout-only version grow by nine instructions and no dynamic growth. All four oracles
+  and spill counts remain exact.
 - FEX-aligned RE=0 same-harness refresh for formal smallpt: SVM host/guest
-  `3.335622 → 3.267832`; the landed stages fold this to about `2.835788`. With unchanged FEX
-  `1.549`, ratio is `2.153× → 1.831×`. The earlier
+  `3.335622 → 3.267832`; the landed stages fold this to about `2.760155`. With unchanged FEX
+  `1.549`, ratio is `2.153× → 1.782×`. The earlier
   2.180× table used a different retained unit-formation artifact, so quote the current gap as
-  approximately 1.83–1.89× rather than mixing the two raw tables.
+  approximately 1.78–1.84× rather than mixing the two raw tables.
 - PPM SHA-256 remains
   `fe96f7e48295b27c8df8236294052d138c3ed130b81d022739907fe6b2cde5aa`; prior equal-entry
   c-ray IDAT remains `54256cb4b3c6313a65ea12ebb7b81e30`, 64-spp formal c-ray is
@@ -254,6 +261,11 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   byte-identical with rc=101 and checksum `9f52b7d59285dbe5`.
 - COMIS compact flags all-consumer differential passes 3,482 assertions on Mac and Orb. FLAGS
   0/1 × function/block/interpreter is byte-identical; the stage fingerprint remains
+  1664 units / 11 guests.
+- Trailing static-location fallback focus passes 39 assertions on Mac and Orb; cycle signal and
+  repeated delink/relink pass 30 / 142 assertions on Orb. Fixed-seed full suite keeps the same
+  191 passed / 35 existing failed cases and the same 45 failure sites. Baseline/candidate FLAGS
+  0/1 × function/block/interpreter twelve-grid is byte-identical, and the fingerprint remains
   1664 units / 11 guests.
 - RSB/indirect structure focus passes 26 assertions, including the paired state/cache load and
   no-target dispatcher path. A temporary mismatched-return probe passes default, both L1-off RSB
@@ -339,12 +351,13 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 
 ## Next ready (pick one, measure, revert on 124/134)
 
-1. **smallpt remaining link** — covered link is now about 6.4%. Region/cycle tails are about
-   2.0%; their acquire poll and branch across per-block cold stubs are load-bearing. Audit the
+1. **smallpt remaining link** — covered link is now about 6.6%. Region/cycle tails are about
+   2.1%; their acquire poll and branch across per-block cold stubs are load-bearing. Audit the
    roughly 1.5% remaining return-L1 static sequences separately; `AND + ADD + LDP + CMP + CSEL + BR`
-   has no obvious base-ISA fusion. Public host exit executes only 139 times.
-2. **Remaining FPR publication** — SetHostFPR is about 30,193,587 (`2.681%`), with about
-   8,317,804 (`0.738%`) full writes. Low-load/high-zero remain 10,641,609 / 10,093,484; about 8.29M adjacent
+   has no obvious base-ISA fusion. Public host exit executes only 139 times. The remaining
+   `SetLocation` tail is dynamic or has a later observer and must not inherit the trailing-constant proof.
+2. **Remaining FPR publication** — SetHostFPR is about 30,193,587 (`2.754%`), with about
+   8,317,804 (`0.759%`) full writes. Low-load/high-zero remain 10,641,609 / 10,093,484; about 8.29M adjacent
    candidates were rejected by exact fault/alias/home gates and must not be recovered heuristically.
 3. **CoreMark remaining truncations** — raw BitExtract is no longer a pool. Only reopen 8/16-bit
    cases with a consumer-specific physical-high proof and the U16 helper regression in the gate.
