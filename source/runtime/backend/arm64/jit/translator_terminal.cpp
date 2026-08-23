@@ -91,15 +91,26 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
             RecordBoundaryRange(BoundarySubsequence::LinkTail, link_before,
                                 context.CurrentBufferSize());
         } else if constexpr (std::is_same_v<T, ir::terminal::PopRSBHint>) {
-            // Return Stack Buffer: this is the real pop+predict site. It must
-            // run here (not at the PopRSB instruction) because guest flags have
-            // just been committed by FlushFlags/MergeNZCV — the hit path
-            // branches directly to the return target, which expects the flags
-            // register to be current. EmitRSBPop ends in Br (hit) or Ret (miss/
-            // underflow), so it fully terminates the block.
-            MergeNZCV(FlagsRegsAuditMergeCause::TerminalInternal,
-                      FlagsRegsAuditEdgeKind::RSBMiss);
+            // A retained return target uses the inline L1 path. Without that
+            // target an L1 module returns to the dispatcher; only modules that
+            // disable L1 consume RSB frames.
+            const bool l1_enabled = context.GetFeatures().indirect_l1;
+            const bool inline_l1_return = l1_enabled && dynamic_next_loc.has_value();
+            MergeNZCV(l1_enabled && !inline_l1_return
+                              ? FlagsRegsAuditMergeCause::TerminalDispatcher
+                              : FlagsRegsAuditMergeCause::TerminalInternal,
+                      l1_enabled ? FlagsRegsAuditEdgeKind::Dispatcher
+                                 : FlagsRegsAuditEdgeKind::RSBMiss);
             context.RecordExecCounter(exec_offset_exit_ret);
+            if (l1_enabled) {
+                if (inline_l1_return) {
+                    const bool emitted = EmitIndirectForward();
+                    ASSERT(emitted);
+                } else {
+                    __ Ret();
+                }
+                return;
+            }
             if (True(context.GetConfig().global_opts & Optimizations::ReturnStackBuffer)) {
                 const u32 link_before = context.CurrentBufferSize();
                 const auto actual_target = dynamic_next_loc

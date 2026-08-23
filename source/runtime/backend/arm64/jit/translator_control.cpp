@@ -104,7 +104,10 @@ void JitTranslator::EmitPushRSB(ir::Inst* inst) {
     // When RSB is disabled rsb_ptr (x25) is neither reserved in the register
     // mask nor loaded at runtime entry, so emitting any push would clobber an
     // allocated guest register — bail out entirely.
-    if (False(context.GetConfig().global_opts & Optimizations::ReturnStackBuffer)) {
+    // An inline-L1 return does not consume an RSB frame, so its calls must not
+    // leave stale frames behind for modules that retain the RSB fallback.
+    if (context.GetFeatures().indirect_l1 ||
+        False(context.GetConfig().global_opts & Optimizations::ReturnStackBuffer)) {
         return;
     }
     // The argument is the guest return address: Lambda(Imm{pc}) for a call.

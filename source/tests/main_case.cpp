@@ -8568,7 +8568,7 @@ TEST_CASE("unit-local absolute addresses reuse only verified idle GPR windows") 
     }
 }
 
-TEST_CASE("indirect L1 and lean shadow stack are independent and composable") {
+TEST_CASE("indirect L1 and lean shadow stack select compatible return paths") {
     using namespace swift::runtime;
     using namespace swift::runtime::backend;
     using namespace swift::runtime::ir;
@@ -8684,27 +8684,32 @@ TEST_CASE("indirect L1 and lean shadow stack are independent and composable") {
     const auto call_shadow = run(false, true, Shape::Call, false, false);
     const auto call_both = run(true, true, Shape::Call, false, false);
     REQUIRE(call_l1.bytes ==
-            call_off.bytes + 9 * vixl::aarch64::kInstructionSize);
+            call_off.bytes + vixl::aarch64::kInstructionSize);
     REQUIRE(call_shadow.bytes ==
             call_off.bytes - 2 * vixl::aarch64::kInstructionSize);
-    REQUIRE(call_both.bytes ==
-            call_off.bytes + 7 * vixl::aarch64::kInstructionSize);
-    REQUIRE(call_both.bytes ==
-            call_l1.bytes - 2 * vixl::aarch64::kInstructionSize);
+    REQUIRE(call_both.bytes == call_l1.bytes);
+    REQUIRE(count(call_l1, "stp") + 1 == count(call_off, "stp"));
 
     const auto ret_off = run(false, false, Shape::Return, false, false);
     const auto ret_l1 = run(true, false, Shape::Return, false, false);
     const auto ret_shadow = run(false, true, Shape::Return, false, false);
     const auto ret_both = run(true, true, Shape::Return, false, false);
-    REQUIRE(ret_l1.bytes == ret_off.bytes);
+    REQUIRE(ret_l1.bytes ==
+            ret_off.bytes - 3 * vixl::aarch64::kInstructionSize);
     REQUIRE(ret_shadow.bytes ==
             ret_off.bytes - 2 * vixl::aarch64::kInstructionSize);
-    REQUIRE(ret_both.bytes == ret_shadow.bytes);
+    REQUIRE(ret_both.bytes == ret_l1.bytes);
+    REQUIRE(count(ret_l1, "ldar") == count(ret_off, "ldar") + 1);
+    REQUIRE(count(ret_l1, "tbnz") == count(ret_off, "tbnz") + 1);
 
     const auto ret_trailing = run(false, true, Shape::Return, true, false);
     REQUIRE(ret_trailing.bytes ==
             ret_shadow.bytes + 2 * vixl::aarch64::kInstructionSize);
     REQUIRE(count(ret_trailing, "ldr") == count(ret_shadow, "ldr") + 1);
+    const auto ret_l1_trailing = run(true, true, Shape::Return, true, false);
+    REQUIRE(ret_l1_trailing.bytes < ret_trailing.bytes);
+    REQUIRE(count(ret_l1_trailing, "br") == 0);
+    REQUIRE(count(ret_l1_trailing, "ret") == 1);
 
     // Any instruction after SetLocation clears the retained SSA register;
     // the feature must then emit the byte-identical dispatcher fallback.
