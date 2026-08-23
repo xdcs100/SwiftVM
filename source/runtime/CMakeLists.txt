@@ -91,6 +91,8 @@ add_library(swift_runtime STATIC
         ir/opts/uniform_store_sink_pass.h
         ir/opts/flags_elimination_pass.cpp
         ir/opts/flags_elimination_pass.h
+        ir/opts/integer_width_elimination_pass.cpp
+        ir/opts/integer_width_elimination_pass.h
         ir/opts/loop_invariant_hoist_pass.cpp
         ir/opts/loop_invariant_hoist_pass.h
         ir/opts/deadcode_elimination_pass.cpp

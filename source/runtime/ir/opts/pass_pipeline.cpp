@@ -6,6 +6,7 @@
 #include "runtime/ir/opts/const_folding_pass.h"
 #include "runtime/ir/opts/deadcode_elimination_pass.h"
 #include "runtime/ir/opts/flags_elimination_pass.h"
+#include "runtime/ir/opts/integer_width_elimination_pass.h"
 #include "runtime/ir/opts/uniform_elimination_pass.h"
 #include "runtime/ir/opts/uniform_store_sink_pass.h"
 
@@ -67,6 +68,14 @@ PassPipeline PassPipeline::BuildDefault(const UniformInfo* uniform_info) {
                              [](HIRFunction* function, const FeatureSet& features) {
         ConstFoldingPass::Run(function, features);
     });
+
+    pipeline.AddBlockPass(Optimizations::ConstantFolding, [](Block* block, const FeatureSet&) {
+        IntegerWidthEliminationPass::Run(block);
+    });
+    pipeline.AddFunctionPass(Optimizations::ConstantFolding,
+                             [](HIRFunction* function, const FeatureSet&) {
+                                 IntegerWidthEliminationPass::Run(function);
+                             });
 
     pipeline.AddBlockPass(Optimizations::DeadCodeRemove, [](Block* block, const FeatureSet&) {
         DeadCodeEliminationPass::Run(block);
