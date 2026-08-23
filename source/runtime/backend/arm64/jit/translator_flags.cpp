@@ -721,22 +721,24 @@ void JitTranslator::EmitPublishFCmpFlags(ir::Inst* inst) {
     ASSERT(compact == IsCompactFCmp(packed));
 
     if (compact) {
-        // VecFCmp left ARM FP NZCV live and materialized ordered (VC) as the
-        // result GPR.  AXFLAG transforms it as follows:
+        // VecFCmp left ARM FP NZCV live and materialized ordered (VC) in its
+        // result or directly in the flags carrier. AXFLAG transforms it as follows:
         //   less/unordered -> C=0, equal/greater -> C=1  (inverted x86 CF)
         //   equal/unordered -> Z=1                       (x86 ZF)
         //   N=V=0                                           (x86 SF/OF)
-        // Keep those four bits lazy in host NZCV. The only live x26 fields
-        // below AF are the raw parity byte and AF itself, so one bitfield
-        // insert writes parity, clears AF, and discards stale carrier bits.
+        // Keep those four bits lazy in host NZCV. A consumer-proven VecFCmp
+        // writes ordered directly to x26 and clears AF with its CSET; the
+        // generic result path folds both updates into one bitfield insert.
         flags_token_valid = false;
         flags_token_af = false;
-        auto ordered = context.R(packed);
-        const u32 begin = context.CurrentBufferSize();
-        constexpr u32 non_nzcv_width =
-                HostFlagsBit::AuxiliaryCarry - HostFlagsBit::ParityByte + 1;
-        __ Bfi(flags, ordered, HostFlagsBit::ParityByte, non_nzcv_width);
-        RecordPFAFDensity(PFAFDensityKind::SharedPack, begin);
+        if (!CanUseCompactFCmpCarrier(packed.Def())) {
+            auto ordered = context.R(packed);
+            const u32 begin = context.CurrentBufferSize();
+            constexpr u32 non_nzcv_width =
+                    HostFlagsBit::AuxiliaryCarry - HostFlagsBit::ParityByte + 1;
+            __ Bfi(flags, ordered, HostFlagsBit::ParityByte, non_nzcv_width);
+            RecordPFAFDensity(PFAFDensityKind::SharedPack, begin);
+        }
         {
             vixl::CPUFeaturesScope flagm2(&masm, vixl::CPUFeatures::kAXFlag);
             __ Axflag();
@@ -778,6 +780,57 @@ void JitTranslator::EmitPublishFCmpFlags(ir::Inst* inst) {
     __ Eor(bit, bit, 1);
     __ Bfi(flags, bit, HostFlagsBit::ParityByte, 8);
     RecordPFAFDensity(PFAFDensityKind::PFWrite, begin);
+}
+
+bool JitTranslator::CanUseCompactFCmpCarrier(ir::Inst* fcmp) const {
+    if (!fcmp || !IsCompactFCmp(ir::Value{fcmp}) || !cur_block) {
+        return false;
+    }
+
+    auto& list = cur_block->GetInstList();
+    auto publish = list.iterator_to(*fcmp);
+    if (++publish == list.end() ||
+        publish->GetOp() != ir::OpCode::PublishFCmpFlags ||
+        publish->GetArg<ir::Value>(0).Def() != fcmp ||
+        publish->GetArg<ir::Imm>(1).Get() == 0) {
+        return false;
+    }
+
+    u32 consumers = 0;
+    bool saw_condition = false;
+    for (auto& user : list) {
+        bool consumes = false;
+        for (auto value : user.GetValues()) {
+            consumes |= value.Def() == fcmp;
+        }
+        if (!consumes) {
+            continue;
+        }
+        ++consumers;
+        if (&user == &*publish) {
+            continue;
+        }
+        if (saw_condition || user.GetOp() != ir::OpCode::FCmpCondSet) {
+            return false;
+        }
+        saw_condition = true;
+        auto scan = publish;
+        for (++scan; scan != list.end() && &*scan != &user; ++scan) {
+            switch (scan->GetOp()) {
+                case ir::OpCode::LoadImm:
+                case ir::OpCode::StoreUniform:
+                case ir::OpCode::AdvancePC:
+                case ir::OpCode::BitCast:
+                    break;
+                default:
+                    return false;
+            }
+        }
+        if (scan == list.end()) {
+            return false;
+        }
+    }
+    return consumers != 0 && consumers == fcmp->GetUses();
 }
 
 void JitTranslator::FlushFlags() {

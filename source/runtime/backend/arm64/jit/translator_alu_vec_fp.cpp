@@ -1076,7 +1076,6 @@ void JitTranslator::EmitVecFCmp(ir::Inst* inst) {
                                     inst->GetArg<ir::Imm>(2).Get());
     auto right = GetVecScalarOperand(inst->GetArg<ir::Value>(1),
                                      inst->GetArg<ir::Imm>(2).Get());
-    auto result = context.X(ir::Value{inst});
     const u32 bits = inst->GetArg<ir::Imm>(2).Get();
     const bool compact = inst->GetArg<ir::Imm>(3).Get() != 0;
     // FCMP overwrites host NZCV.  Guest decoding normally puts an AdvancePC
@@ -1093,9 +1092,17 @@ void JitTranslator::EmitVecFCmp(ir::Inst* inst) {
         // Preserve the one relation AXFLAG discards.  VC is ordered, which is
         // also the raw parity byte representation: 1 has odd parity (PF=0),
         // while unordered produces 0 (PF=1).
-        __ Cset(result, vc);
+        if (CanUseCompactFCmpCarrier(inst)) {
+            const u32 begin = context.CurrentBufferSize();
+            __ Cset(flags.W(), vc);
+            RecordPFAFDensity(PFAFDensityKind::SharedPack, begin);
+        } else {
+            __ Cset(context.X(ir::Value{inst}), vc);
+        }
         return;
     }
+
+    auto result = context.X(ir::Value{inst});
 
     // ARM FPCompare NZCV: less=N, equal=Z, greater=C, unordered=C|V.
     // x86 UCOMIS flags are CF=less|unordered, PF=unordered,

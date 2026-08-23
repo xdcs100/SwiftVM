@@ -874,11 +874,13 @@ void JitTranslator::EmitFCmpCondSet(ir::Inst* inst) {
         }
 
         auto result = context.R(ir::Value{inst});
-        auto ordered = context.R(fcmp);
+        Register ordered = CanUseCompactFCmpCarrier(fcmp.Def())
+                ? flags.W()
+                : context.R(fcmp).W();
         if (cond == ir::Cond::VS) {
-            __ Eor(result.W(), ordered.W(), 1);
+            __ Eor(result.W(), ordered, 1);
         } else if (result.GetCode() != ordered.GetCode()) {
-            __ Mov(result.W(), ordered.W());
+            __ Mov(result.W(), ordered);
         }
         return;
     }
