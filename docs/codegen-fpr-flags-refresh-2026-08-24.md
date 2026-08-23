@@ -1,4 +1,4 @@
-# FPR publication 与 NZCV 密度优化
+# FPR publication、NZCV 与静态出口密度优化
 
 日期：2026-08-24
 
@@ -31,10 +31,10 @@ boundary 22.116%、uniform 6.522%、flags IR 2.506%；FPR state 为 5.484%，
 `SetHostFPR` 为 5.055%。
 
 8 月 23 日静态表中的 smallpt 为 SVM/FEX 2.180×。本轮同 harness、同旧 TSV
-权重的 RE=0 重采从 SVM 3.335622 host/guest 降至 3.267832；加入 RSB 返回目标复用后
-按正式 host 权重折算约为 3.265287。以未变的 FEX 1.549 为分母，对应
-2.153×→2.108×。旧表与这次重采的 unit 形成参数不完全相同，因此不直接覆盖原表；
-按两种口径合看，当前正式 smallpt 距离 FEX 仍约 2.11–2.14×。
+权重的 RE=0 重采从 SVM 3.335622 host/guest 降至 3.267832；加入 RSB 返回目标复用和
+静态出口 direct-link 后，按正式 host 权重折算约为 3.139232。以未变的 FEX 1.549
+为分母，对应 2.153×→2.027×。旧表与这次重采的 unit 形成参数不完全相同，因此不直接
+覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 2.03–2.06×。
 
 ## 已落地
 
@@ -94,7 +94,25 @@ dispatcher；终结段在 flags 合并前保留目标寄存器，避免 scratch 
   checksum 均为 `0xee79813b94536693`；
 - c-ray 等 entry 口径减少 414,747，967 个共同 PC 只减不增，IDAT 不变。
 
-四项合计使正式 smallpt 默认 region host 减少 24,681,522（1.867%）。
+### Static SetLocation direct link
+
+提交 `729b826` 把 `SetLocation(imm) + ReturnToDispatch` 的同 module 静态出口接入现有
+tracked direct-link。`JitContext` 只保留一份 site 发射与 flags-audit 逻辑；终结段继续在
+成环边的 site 前发 acquire poll，并传递条件臂 `LinkSiteKind`。direct-link region 不可用、
+BlockLink 关闭、自环或跨 module 时，仍走原 inline L2 或 dispatcher 路径。
+
+- smallpt_wh 1,296,969,640→1,246,900,800，减少 50,068,840（3.860%）；998 个
+  共同 PC 只减不增，entries 与 units 完全一致，PPM SHA-256 不变；
+- smallpt 的 inline L2 `link_hit` 12,191,734→31,816、`link_miss` 227→0；direct、
+  indirect、call、ret、RSB、dispatcher 和 region-edge 执行计数逐项不变；
+- CoreMark 等 entry 减少 210,324,020，966 个共同 PC 只减不增，CRC final 为 `0x382f`；
+- c-ray `scene.json -j 1 -s 64 -d 320x240` 等 entry 减少 574,050,830，4017 个
+  共同 PC 只减不增，IDAT MD5 为 `d0c71130abf3544a86b64417bc488c21`；
+- STREAM 总量减少 18,740，859 个共同 PC 只减不增，`Solution Validates`；
+- call-dense 3,344,000,774→3,104,000,764，减少 240,000,010，checksum 仍为
+  `0xee79813b94536693`。
+
+五项合计使正式 smallpt 默认 region host 减少 74,750,362（5.656%）。
 
 ## 否决项
 
@@ -115,19 +133,25 @@ producer 白名单泛化到缺少原子性证明的 opcode。
 - function fingerprint 对阶段基线保持 1664 units / 11 guests，自一致且逐项匹配。
 - RSB/indirect 结构测试 21 assertions；显式改写栈返回地址的临时 probe 在默认、
   `SVM_SHADOW_LEAN=0` 和 `SVM_FLAGS_REGS=0` 下均 rc=0，probe 已删除。
+- direct-link 默认 production 子集 9 cases / 245 assertions、SMC 子集 5 cases / 193
+  assertions；FLAGS=0 下含 disk-cache 的全标签为 21 cases / 900,721 assertions。静态
+  SetLocation 的跨 module/BlockLink-off fallback 为 36 assertions，反复摘链/重编译为
+  142 assertions，Mac 与 Orb 均通过。
 - `SWIFT_FUZZ_SEED=123456` 全套件最终为 183 passed / 35 个既有 failed cases；
-  1,047,651 passed / 44 failed assertions。与前臂相比没有新增失败类别。
+  1,047,738 passed / 44 failed assertions。新增断言全部通过，没有新增失败类别。
 - smallpt_wh PPM SHA-256 两臂均为
   `fe96f7e48295b27c8df8236294052d138c3ed130b81d022739907fe6b2cde5aa`；
-  c-ray IDAT MD5 两臂均为 `54256cb4b3c6313a65ea12ebb7b81e30`；STREAM
-  `Solution Validates`。
+  原 equal-entry c-ray sample 的 IDAT MD5 两臂均为
+  `54256cb4b3c6313a65ea12ebb7b81e30`，64-spp 正式 harness 两臂均为
+  `d0c71130abf3544a86b64417bc488c21`；STREAM `Solution Validates`。
 - Mac `swift_runtime` 与 Orb 全目标构建通过。
 
 ## 下一步
 
-1. 正式 smallpt 的 boundary 仍约 23%，其中 link 约 13%。返回目标回读已经移除；下一步
-   分别审计 call push 与公开出口的具体子路径，只接受具有独立 fault/SMC/RSB 证明的形状。
-   direct-link、region 扩窗与跨边 state forwarding 的历史 NO-GO 结论不因总桶较大而自动重开。
+1. 静态出口 direct-link 后，正式 smallpt 的已覆盖 link 降至约 9.60%。最大单形状是
+   6 条 lean RSB push 加 1 条 direct branch，占 host 约 3.52%；下一步只在能消除真实
+   push 指令且保持 overflow/SMC/RSB 契约时立项。公开 host exit 仅 139 次，不是热轴。
+   region 扩窗与跨边 state forwarding 的历史 NO-GO 结论不因剩余总桶较大而自动重开。
 2. 剩余 `SetHostFPR` 约 5%，但完整写仅约 2.3%，其余主要是低/高 64-bit lane 的真实
    architectural publication。继续扩 producer 前先给出单指令完整写与目标别名证明。
 3. CoreMark 的 8/16-bit truncation 仍要求 consumer-specific 物理高位证明，并保留 U16
