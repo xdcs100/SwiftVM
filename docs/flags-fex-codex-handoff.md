@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`f99eabf`** `perf: reuse resident FPR homes for legacy scalar math`
+- Code tip: **`b692fca`** `perf: enable direct absolute address materialization`
 - Tracked tree is clean before the documentation commit. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -42,6 +42,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 | `030f52d` | Replace an adjacent low-load/high-zero resident publication with one fault-exact D-register load after a full observer and alias proof |
 | `97009a3` | Publish legacy scalar sqrt results through a dead resident merge home; independently reprove the fixed read, last use, and publication window |
 | `f99eabf` | Reuse a dead fixed left home for legacy scalar FP binaries while preserving the high lane through a reserved temporary |
+| `b692fca` | Make direct absolute `GetOperand` materialization the default; retain `=0` as the code-shape rollback |
 
 Hot files:
 
@@ -160,17 +161,17 @@ Validation for `ff42917`:
   1,047,523 passed / 45 failed assertions. The unsafe generic prototype had added one U16 helper
   failure; the final consumer whitelist removes it.
 
-Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9d49` / `b3998d5` / `3ec9582` / `e74e734` / `030f52d` / `97009a3` / `f99eabf`:
+Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9d49` / `b3998d5` / `3ec9582` / `e74e734` / `030f52d` / `97009a3` / `f99eabf` / `b692fca`:
 
 - Current formal smallpt is `smallpt_wh_x64 8 128 96`; do not substitute the fixed 1024×768
   `smallpt_x64` when updating the formal FEX ratio.
 - Formal smallpt default-region host:
-  `1,321,651,162 → 1,303,939,990 → 1,297,980,655 → 1,296,969,640 → 1,246,900,800 → 1,201,575,549 → 1,201,372,215 → 1,199,466,420 → 1,187,471,711 → 1,168,614,398 → 1,165,502,656 → 1,163,020,553`;
-  cumulative `-158,630,609` (`-12.002%`), spill 0 throughout. The arrows are full-NZCV
+  `1,321,651,162 → 1,303,939,990 → 1,297,980,655 → 1,296,969,640 → 1,246,900,800 → 1,201,575,549 → 1,201,372,215 → 1,199,466,420 → 1,187,471,711 → 1,168,614,398 → 1,165,502,656 → 1,163,020,553 → 1,141,267,073`;
+  cumulative `-180,384,089` (`-13.648%`), spill 0 throughout. The arrows are full-NZCV
   compaction, VecZip resident publication, retained RSB target reuse, static-exit direct-link,
   default return-L1, cycle-polled successor layout, paired indirect-L1 state loading, then live
   resident-FPR publication, scalar-load FPR fusion, scalar-sqrt resident publication, then
-  legacy scalar-binary resident publication.
+  legacy scalar-binary resident publication, then direct absolute-address materialization.
   `7110d20` is neutral here but saves
   452,646,984 on fixed 1024×768
   smallpt.
@@ -220,11 +221,16 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   `-107,640,218` with 83 PCs smaller and 0 larger; STREAM is `-1` and CoreMark is equal-entry
   neutral. The 64-bit legacy lowering computes in a reserved temporary before inserting lane0,
   so the resident high lane is never overwritten. All four oracles remain exact.
+- Direct absolute-address materialization removes the scratch-to-result transport for every
+  absolute `GetOperand`. Formal smallpt is `-21,753,480` (`-1.8704%`) with 794 PCs smaller and
+  0 larger. Formal c-ray equal-entry is `-243,851,552` with 1,924 PCs smaller and 0 larger;
+  STREAM/CoreMark are `-1,137` / `-673`, also shrink-only. All oracles and spill counts remain
+  exact. The feature is now default ON; `SVM_ABS_CONST_MAT=0` selects the prior code shape.
 - FEX-aligned RE=0 same-harness refresh for formal smallpt: SVM host/guest
-  `3.335622 → 3.267832`; the landed stages fold this to about `2.928054`. With unchanged FEX
-  `1.549`, ratio is `2.153× → 1.890×`. The earlier
+  `3.335622 → 3.267832`; the landed stages fold this to about `2.873287`. With unchanged FEX
+  `1.549`, ratio is `2.153× → 1.855×`. The earlier
   2.180× table used a different retained unit-formation artifact, so quote the current gap as
-  approximately 1.89–1.94× rather than mixing the two raw tables.
+  approximately 1.85–1.91× rather than mixing the two raw tables.
 - PPM SHA-256 remains
   `fe96f7e48295b27c8df8236294052d138c3ed130b81d022739907fe6b2cde5aa`; prior equal-entry
   c-ray IDAT remains `54256cb4b3c6313a65ea12ebb7b81e30`, 64-spp formal c-ray is
@@ -236,6 +242,9 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   The 64-case NaN truth matrix passes Mac/Orb with AFP disabled and cold path 0/1. FLAGS six-grid, helper-fault 38/0,
   clone four-grid and the
   1664-unit/11-guest fingerprint all pass.
+- Absolute-address ON/OFF fingerprint matches for 1664 units / 11 guests. Its three focused gates
+  pass 3 + 1 + 10 assertions on Mac and Orb; the ON/OFF × function/block/interpreter six-grid is
+  byte-identical with rc=101 and checksum `9f52b7d59285dbe5`.
 - RSB/indirect structure focus passes 26 assertions, including the paired state/cache load and
   no-target dispatcher path. A temporary mismatched-return probe passes default, both L1-off RSB
   frames, FLAGS-off and interpreter paths and was deleted. Mac and Orb builds pass.
@@ -245,9 +254,8 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 - Region edge, direct-cycle signal and region-flags focus pass 42/30/46 assertions. The new layout
   matches the baseline fingerprint for 1664 function units over 11 guests.
 - MT SMC stress passes 200/200 with zero host failure, lost guest or timeout. Catch/fuzz seed
-  424242 gives the latest Orb tree 191 passed / 35 existing failed cases / 46 failed assertions;
-  the failed case count and categories are unchanged. Two extra assertions are pre-existing
-  operand-copy configuration sections that also fail in isolation.
+  424242 gives the latest Orb tree 191 passed / 35 existing failed cases / 45 failed assertions;
+  the failed case count and categories are unchanged.
 - Detailed mechanism table, the rejected Linux scalar-insert prototype and exact deltas are in
   `docs/codegen-fpr-flags-refresh-2026-08-24.md`.
 
@@ -325,8 +333,8 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
    1.95%; their acquire poll and branch across per-block cold stubs are load-bearing. Audit the
    roughly 1.42% remaining return-L1 static sequences separately; `AND + ADD + LDP + CMP + CSEL + BR`
    has no obvious base-ISA fusion. Public host exit executes only 139 times.
-2. **Remaining FPR publication** — SetHostFPR is about 30,193,587 (`2.596%`), with about
-   8,317,804 (`0.715%`) full writes. Low-load/high-zero remain 10,641,609 / 10,093,484; about 8.29M adjacent
+2. **Remaining FPR publication** — SetHostFPR is about 30,193,587 (`2.646%`), with about
+   8,317,804 (`0.729%`) full writes. Low-load/high-zero remain 10,641,609 / 10,093,484; about 8.29M adjacent
    candidates were rejected by exact fault/alias/home gates and must not be recovered heuristically.
 3. **CoreMark remaining truncations** — raw BitExtract is no longer a pool. Only reopen 8/16-bit
    cases with a consumer-specific physical-high proof and the U16 helper regression in the gate.

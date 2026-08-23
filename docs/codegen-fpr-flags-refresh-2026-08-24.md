@@ -33,12 +33,12 @@ boundary 22.116%、uniform 6.522%、flags IR 2.506%；FPR state 为 5.484%，
 8 月 23 日静态表中的 smallpt 为 SVM/FEX 2.180×。本轮同 harness、同旧 TSV
 权重的 RE=0 重采从 SVM 3.335622 host/guest 降至 3.267832；加入 RSB 返回目标复用、
 静态出口 direct-link、默认 return-L1、cycle successor layout、indirect-L1 状态成对加载、
-live resident-FPR publication、scalar-load FPR fusion、scalar-sqrt resident publication 和
-legacy scalar-binary resident publication 后，按正式 host 权重折算约为 2.928054。以未变的
-FEX 1.549 为分母，对应 2.153×→1.890×。
+live resident-FPR publication、scalar-load FPR fusion、scalar-sqrt resident publication、
+legacy scalar-binary resident publication 和 direct absolute-address materialization 后，按正式
+host 权重折算约为 2.873287。以未变的 FEX 1.549 为分母，对应 2.153×→1.855×。
 旧表与这次重采的
 unit 形成参数不完全相同，
-因此不直接覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 1.89–1.94×。
+因此不直接覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 1.85–1.91×。
 
 ## 已落地
 
@@ -240,7 +240,21 @@ scalar 临时值完成修复后直接插回 lane0；64-bit lowering 不能原地
 - STREAM 等 entry 仅减少 1，3 个静态 PC 缩短、0 个增长并保持 `Solution Validates`；
   CoreMark 等 entry 为 0，CRC final 保持 `0x382f`。
 
-十二项合计使正式 smallpt 默认 region host 减少 158,630,609（12.002%）。
+### Direct absolute-address materialization
+
+提交 `b692fca` 把既有 `abs_const_mat` 机制翻为默认 ON：绝对 guest address 直接向
+`GetOperand` 的分配结果物化，不再先占 scratch 再做一次 transport。语义、IR、fault site、
+寄存器存活窗口和 cache feature hash 均不变；`SVM_ABS_CONST_MAT=0` 仍可回退旧代码形状。
+
+- 当前 smallpt 中 21,753,480 次三指令 `GetOperand` 各删一条；
+- smallpt_wh 1,163,020,553→1,141,267,073，减少 21,753,480（1.8704%）；794 个共同
+  PC 缩短、0 个增长，entries、units、spill 和 PPM 均一致；
+- 320×240、64-spp c-ray 等 entry 减少 243,851,552，1,924 个共同 PC 缩短、0 个增长，
+  IDAT MD5 保持 `d0c71130abf3544a86b64417bc488c21`；
+- STREAM 与 CoreMark 等 entry 分别减少 1,137 / 673，652 / 659 个共同 PC 缩短、0 个
+  增长，分别保持 `Solution Validates` 与 CRC final `0x382f`。
+
+十三项合计使正式 smallpt 默认 region host 减少 180,384,089（13.648%）。
 
 ## 否决项
 
@@ -273,6 +287,9 @@ smallpt 两臂均为 1,168,614,398，证明现有 successor layout 已吸收所�
 - legacy scalar-binary resident-publication 将 FPR focus 扩为 9 cases / 125 assertions；
   64-case x86 NaN 真值矩阵在 Mac/Orb、`SVM_SSE_AFP_NAN=0`、cold path 0/1 四格均通过，
   覆盖新 64-bit 保高 lane 路径及两种精确 NaN 修复。
+- absolute-address 三项定向门在 Mac/Orb 均通过 3 + 1 + 10 assertions；ON/OFF
+  function fingerprint 为 1664 units / 11 guests 且逐项一致，func_tests 的 ON/OFF ×
+  function/block/interpreter 六格均 rc=101、checksum `9f52b7d59285dbe5`、stdout hash 相同。
 - RSB/indirect 结构测试 26 assertions，覆盖八指令 L1 快路径、无 push 和无目标
   dispatcher 路径；显式改写栈返回地址的临时 probe 在默认、L1-off 两种 RSB frame、
   FLAGS-off 和 interpreter 下均 rc=0，probe 已删除。
@@ -284,8 +301,7 @@ smallpt 两臂均为 1,168,614,398，证明现有 successor layout 已吸收所�
   cycle successor layout 的 function fingerprint 对基线保持 1664 units / 11 guests 一致。
 - 200 轮 `smc_mt_stress` 为 host_fails/guest_lost/timeouts = 0/0/0。
 - Catch 与 fuzz seed 同为 424242 时，最新 Orb tree 为 191 passed / 35 个既有 failed
-  cases / 46 个失败断言；失败 case 数和类别不变。两个新增断言来自既有 operand-copy
-  配置敏感 sections，隔离运行也复现原失败，与 FPR 改动无关。
+  cases / 45 个失败断言；失败 case 数和类别不变，仍是既有配置敏感与 fuzz 类别。
 - smallpt_wh PPM SHA-256 两臂均为
   `fe96f7e48295b27c8df8236294052d138c3ed130b81d022739907fe6b2cde5aa`；
   原 equal-entry c-ray sample 的 IDAT MD5 两臂均为
@@ -299,7 +315,7 @@ smallpt 两臂均为 1,168,614,398，证明现有 successor layout 已吸收所�
    link tail 约 1.95%，其中 acquire poll 与跨本块 cold stub 的目标跳转不可直接删除；
    八条 return-L1 静态序列约 1.42%，其中 `AND + ADD + LDP + CMP + CSEL + BR` 没有
    明确的基础 ISA 融合机会。公开 host exit 仍仅 139 次。
-2. 剩余 `SetHostFPR` 约为 30,193,587（2.596%），其中完整写约 8,317,804（0.715%）。
+2. 剩余 `SetHostFPR` 约为 30,193,587（2.646%），其中完整写约 8,317,804（0.729%）。
    low-64 `LoadMemory` 与 high-64 zero 分别余 10,641,609 / 10,093,484；相邻池中约
    8.29M 次因 fault/alias/fixed-home 门拒绝，不为继续扩池放宽精确状态边界。
 3. CoreMark 的 8/16-bit truncation 仍要求 consumer-specific 物理高位证明，并保留 U16
