@@ -27,29 +27,46 @@ fixed-home 发布开销，但与 FEX 的剩余差距仍然主要来自三种结�
 本次续轮在 Orb Linux 默认配置下禁用 JIT disk cache 和 `SVM_EXEC_PROF`，CoreMark 使用
 `0x0 0x0 0x66 20000 7 1 2000`：
 
-| 指标 | 相邻 low32 合并前 | 相邻合并后 | round-trip 消除后 |
-|---|---:|---:|---:|
-| host dynamic | 6,250,517,196 | 6,210,114,929 | 6,087,169,784 |
-| move dynamic | 2,155,441,643 | 2,115,039,274 | 1,992,094,068 |
-| move 占比 | 34.484% | 34.058% | 32.726% |
-| spill dynamic | 0 | 0 | 0 |
+| 指标 | 相邻 low32 合并前 | 相邻合并后 | round-trip 后 | 同宽提取后 |
+|---|---:|---:|---:|---:|
+| host dynamic | 6,250,517,196 | 6,210,114,929 | 6,087,169,543 | 6,034,267,121 |
+| move dynamic | 2,155,441,643 | 2,115,039,274 | 1,992,094,038 | 1,939,191,376 |
+| move 占比 | 34.484% | 34.058% | 32.726% | 32.136% |
+| spill dynamic | 0 | 0 | 0 | 0 |
 
 相邻合并相对前一臂精确减少 40,402,351 条 host/move。新的 round-trip 消除再按共同
 PC 的较小 entries 重算，125 个 PC 变小、5 个冷 PC 各增一条，host 净减 122,945,220，
 move 净减 122,945,213；raw host 降 1.980%，spill 始终为零。两轮相对最初基线累计减少
-约 163.35M host 指令。
+约 163.35M host 指令。同宽 U32 提取消除再净减 52,902,689 条 common-PC host/move，
+相对最初基线累计减少约 216.25M（3.46%）。
 
 其他确定性语料的共同 PC 结果：
 
-| workload | 共同 PC 减少 | 增长 PC | 动态 host/move 变化 |
+| workload | round-trip host | 同宽提取 host | 同宽提取变小/变大 PC |
 |---|---:|---:|---:|
-| STREAM | 90 | 6 | -5,854 (-1.59%) |
-| smallpt | 100 | 7 | -868,884 (-0.0649%) |
-| c-ray | 372 | 9 | -1,283,611 (-0.94%) |
+| STREAM | -5,854 | -512 | 86 / 2 |
+| smallpt | -868,884 | -2,540,061 | 89 / 2 |
+| c-ray | -1,283,611 | -402,107 | 467 / 6 |
 
 smallpt 两臂 PPM 逐字一致，c-ray 两臂 PNG 的 IDAT 哈希一致。OpenSSL SHA 在进入有效
 hashing 前于 `rip=0x62b930` 触发既有 PageFatal，因此没有拿失败路径的计数充当 SHA 性能
 证据。当前 SQLite speedtest 二进制拒绝文档中的 `--size` 参数，亦不计入。
+
+## 当前 SVM/FEX 静态比值
+
+FEX 参照仍是同一份 `f2e35f3`、`disableavx` blockstats，因此 FEX 侧无需重编；SVM 侧在
+`SVM_REGION_EDGES=0` 下重新采集，并按 W67 旧 TSV 的同 guest PC、guest instruction 数和
+entries 重算。旧 PC 权重覆盖均超过 99.99997%：
+
+| workload | 当前 SVM host/guest | FEX host/guest | 当前 SVM/FEX | 8 月 14 日 |
+|---|---:|---:|---:|---:|
+| CoreMark | 3.613 | 1.807 | 2.000× | 2.305× |
+| STREAM | 2.161 | 3.336 | 0.648× | 0.925× |
+| smallpt | 3.377 | 1.549 | 2.180× | 2.223× |
+
+c-ray 当前运行只覆盖旧表 entries 的 74.47%，不把局部交集外推成全语料新比值。结果表明
+CoreMark 的宽度桥连续优化有效地把静态差距压到约 2×，但 smallpt 基本仍是 2.18×；下一步
+不应再把两者当成同一个整数宽度问题。
 
 ## 本轮优化
 
@@ -121,6 +138,19 @@ smallpt、c-ray 的采样中没有更远的有效热候选。
 该职责位于独立 pass 文件，并同时接入 block/function pipeline；没有新增环境开关、日志或
 旧路径兜底。
 
+## 同宽 U32 提取消除
+
+第二轮把同一 pass 扩展到 `BitExtract(v32, 0, 32)`。输入可能是 U32 或 S32，但低 32 位
+bit pattern 与 U32 结果完全相同；只要 consumer 明确以 W 宽读取，就可以直接改读原 SSA。
+允许的 consumer 限于已复核的 U32 算术/shift/select、显式 extend、32 位 store/publication，
+以及 `src_bits=32` 的 `VecFCvtIntToFloat`。
+
+初始原型曾把相同规则泛化到 U8/U16 和 opaque consumer。固定种子全套件立即命中真实反例：
+U16 `BitExtract` 向 `CallLambda` 传参时必须清理物理寄存器高位。最终实现因此拒绝所有非 U32
+结果、pseudo、opaque call 和未列入白名单的 consumer；专项同时加入 U32 opaque-call 负例，
+并保留既有 U16 helper 回归。收紧后失败计数恢复到前一阶段同集，CoreMark 的 52.90M 收益
+全部保留。
+
 ## PF/AF 与 SHA 审计结论
 
 - CoreMark 的 PF write 为 11,840,084 条动态指令，AF write 为 130,302,325 条；读侧接近零。
@@ -143,8 +173,9 @@ smallpt、c-ray 的采样中没有更远的有效热候选。
 ## 验证
 
 - Orb 全量构建通过。
-- 新 round-trip pass：2 cases / 8 assertions；与既有 low32、int-width、width-chain、GPR
-  coalescing、resident-fault、W/X high-half 合跑为 8 cases / 474 assertions，全部通过。
+- integer-width pass：2 cases / 14 assertions；连同 U16 CallLambda、low32、int-width、
+  width-chain、GPR coalescing、resident-fault、W/X high-half 合跑为 9 cases / 482
+  assertions，全部通过。
 - 新 low32 copy 测试 6 assertions；GPR coalescing 353、width-chain 23、resident fault 21、
   W/X 高半部 17，全部通过。
 - func_tests：FLAGS 0/1 × function/block/interpreter 六格均为 rc=101，checksum
@@ -153,17 +184,22 @@ smallpt、c-ray 的采样中没有更远的有效热候选。
 - 本轮 smallpt 两臂 PPM SHA-256 均为
   `fe96f7e48295b27c8df8236294052d138c3ed130b81d022739907fe6b2cde5aa`；c-ray 两臂
   PNG IDAT MD5 均为 `54256cb4b3c6313a65ea12ebb7b81e30`。
-- function fingerprint 自一致性为 1664 units / 11 guests。相对精确旧二进制，1648 个唯一
-  `(guest, pc)` 全部保留，400 个 unit 的 IR 减少、0 个增加，总 IR -2,025。
+- function fingerprint 自一致性为 1664 units / 11 guests。相对本阶段精确旧二进制，
+  各 guest 的 unit/decoded-block 数不变，汇总 IR 减少 1,046。
 - 固定 `SWIFT_FUZZ_SEED=123456` 的 Orb 全套件：基线为 40 failed cases / 53 assertions，
   候选为 39 / 52，并新增 1 个通过的 test case。两条既有 width-chain 断言随临时容器 UB
   修复转绿；剩余差异仍是同类 VIXL 尾部反汇编自一致性抖动，没有新增语义失败类别。
+- 同宽提取最终臂为 179 passed / 35 个既有 failed cases、1,047,523 / 45 assertions；与
+  round-trip 阶段失败 case/assertion 数相同。泛化原型新增的 U16 helper 失败已被白名单收紧
+  消除。
 
 ## 下一阶段
 
-1. 用当前 FEX/SwiftVM 重新生成同 guest PC 的静态 blow-up 表，替换 8 月 14 日历史比值，
-   以新的 6.087B CoreMark 基线重新排序差距。
-2. SHA 必须先修复或绕开当前 guest 自身的合法 PageFatal 触发点，得到有效 hashing 热账后，
+1. smallpt 当前仍约为 FEX 的 2.18×，而本轮整数宽度优化只减少 0.19% 左右的动态 host；
+   下一轮应重做 smallpt/c-ray 的 FPR、state publication 与边界责任分解。
+2. CoreMark 已降到约 FEX 2.00×；剩余 BitExtract 主要是 8/16 位真截断，不再把 raw
+   BitExtract 数量当可删池，下一刀必须有 consumer 级物理高位证明。
+3. SHA 必须先修复或绕开当前 guest 自身的合法 PageFatal 触发点，得到有效 hashing 热账后，
    才能判断 bounded-64、公开入口或 fault map 是否是主因。
-3. PF/AF 专用 GPR 在当前 ABI 下为 NO-GO；只有出现新的 canonical park/recovery 载体，并且
+4. PF/AF 专用 GPR 在当前 ABI 下为 NO-GO；只有出现新的 canonical park/recovery 载体，并且
    重新审计得到非零可删下界时才重开。
