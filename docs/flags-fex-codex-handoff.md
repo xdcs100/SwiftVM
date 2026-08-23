@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Tip: **`15e5165`** `fix: keep the 128-block region cap on the lazy decode path`
+- Tip: **`3641e32`** `feat: coalesce guest loads into pinned homes`
 - Dirty tree: only untracked `build-master/`, images, placement tools. No FLAGS work uncommitted.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -26,6 +26,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 | `15e5165` | `lazy = budget <= kMaxFuncBlocks` (128). **`SVM_FUNC_LAZY=128` with `<` was eager and re-decoded L2 → 31B host** |
 | `0535615` / `7397960` | JA → `b.hi`, JBE → `b.ls` |
 | `601185d` / `52b0b6a` | L2 Unpark from **x26**; counted-entry veneer |
+| `3641e32` | Full-width `LoadMemory` publishes directly into a pinned guest GPR home when the existing local last-use, observer, conflict, and width proofs all hold |
 
 Hot files:
 
@@ -33,6 +34,7 @@ Hot files:
 - `translator_flags.cpp` — `MergeNZCV`, `force_ret_pstate`
 - `translator_terminal.cpp` — generic If / LinkBlock / RSB
 - `translator/x86/translator.cpp` — `RegionFuncBudget`, `kMaxFuncBlocks=128`, lazy skip of published L2
+- `register_alloc_coalesce_gpr.cpp` — pinned guest GPR read/write coalescing and full-width load publication
 - `svm_config.h` — `flags_regs` default true; `region_edges` bounded64
 
 ## Honest density (coremark `0x0 0x0 0x66 20000 7 1 2000`)
@@ -56,15 +58,23 @@ Copy touched sources Mac → Orb before cmake.
 | Config | host_dynamic | notes |
 |---|---:|---|
 | FLAGS=0, window 16 (old baseline) | **7.383B** | compare-to |
-| FLAGS=1, window 64 (**current default**) | **6.348B** | **−14%** vs old FLAGS=0/16 |
-| FLAGS=0, window 64 | 6.760B | FLAGS still **−6.1%** at same window |
+| FLAGS=1, window 64 (before `3641e32`) | **6.348B** | **−14%** vs old FLAGS=0/16 |
+| FLAGS=1, window 64 (**current default**) | **6.300B** | `6,347,614,988 → 6,299,957,711` (**−0.751%**) from direct load publication |
+| FLAGS=0, window 64 (**current rollback**) | **6.712B** | CRC `0x382f`; FLAGS remains **−6.1%** at the same window |
 | FLAGS=1, RE=0 | 26.009B | vs FLAGS=0 RE=0 **26.774B (−2.9%)** |
 | FLAGS=1, window 32 | 6.882B | |
 | FLAGS=1, window 128 (after lazy fix) | 6.348B | same as 64; coremark hot funcs fit 64 |
 
 After If-skip, `SVM_FLAGS_REGS_AUDIT=1` on window-32: **PStateClobber/RegionInternal ≈ 2.3k entries**. Remaining ~70M “flags audit” is **L2 `ldr` cache-reload** (Dispatcher/RSBHit), not MergeNZCV.
 
-Move bucket still **~35%** of host (`move_dynamic ≈ 2.25B` on default). That is W-α, not more If-skip.
+Move bucket is now **35.0%** of host (`move_dynamic = 2,204,881,820` on default). `3641e32` removed 47.657M dynamic host/move instructions, changed 884 common PCs, and increased host instructions at zero common PCs. Remaining move volume is not automatically removable W-α space.
+
+Validation for `3641e32`:
+
+- Mac and Orb targeted RA/fault tests pass: 353 and 21 assertions.
+- FLAGS `0/1` × function/block/interpreter func_tests all return 101 with checksum `9f52b7d59285dbe5` and identical output SHA-256.
+- Function fingerprint A/B against the exact pre-change binary passes for 1661 units over 11 guests. The checked-in Linux golden predates the region-window changes and is already stale; do not update it as part of this RA change.
+- Full `swift_test` has the same existing 48 assertion failures before and after this change, in the same file sequence; the change adds only passing assertions.
 
 ## Invariants (do not violate)
 
@@ -77,6 +87,7 @@ Move bucket still **~35%** of host (`move_dynamic ≈ 2.25B` on default). That i
 - `BranchOnlyFlags` producers must **not** set `nzcv_requested/dirty` (SIGABRT). Covering them in `SuccessorCovers` is the opposite: they **overwrite PSTATE**, so the **pred** If can skip pack.
 - INC leftover C is live; do not treat INC as covering CF; do not copy C at INC entry (halt reason 2).
 - `kMaxFuncBlocks=128`. `lazy_budget < 128` used to make **128 eager**. Keep `<=`. Never raise default window past 128 without raising the cap **and** keeping published-L2 skip.
+- A faulting full-width `LoadMemory` may publish directly into its pinned home because the fault does not commit the destination. Partial/narrow writes and any path rejected by the existing local observer, conflict, or liveness proof must keep the real publication instruction.
 
 ## Failed / do not retry
 
@@ -97,7 +108,7 @@ Move bucket still **~35%** of host (`move_dynamic ≈ 2.25B` on default). That i
 
 ## Next ready (pick one, measure, revert on 124/134)
 
-1. **W-α RA / width bridges** — 35% host. FEX LoadRegister/StoreRegister merge. `ra_width_chain` default OFF (probe was 0 on coremark). `ra_intwidth_tie` already default ON. Look at remaining `mov w,w` / `ubfx #0,#32` / pin Get/SetHostGPR that RA did not tie. Docs: `docs/fex-codegen-gap-plan-2026-08.md` §W-α.
+1. **W-α remaining home/width bridges** — full-width `LoadMemory` publication is closed. Do not expand the producer allowlist mechanically. Remaining hot GetHost cases mostly have no same-block publication, and cross-block home SSA first needs a fault-safe recovery fact. `ra_width_chain` remains default OFF; `ra_intwidth_tie` is default ON. Docs: `docs/fex-codegen-gap-plan-2026-08.md` §W-α and `docs/w66-move-attribution-audit.md`.
 2. **PF/AF dedicated GPRs** (W-β remainder). NZCV is already host-resident on FLAGS_REGS; PF/AF still live in x26 bitfields when published. High ABI risk; keep `FLAGS_REGS=0` rollback.
 3. **Do not** grow the default region window again for coremark (64 == 128). Other benches might still want 128 **after** the lazy fix.
 4. Wall-clock / dual-entry Unpark is **outside** `host_dynamic`. Don’t use Unpark 2-insn as a density win.
