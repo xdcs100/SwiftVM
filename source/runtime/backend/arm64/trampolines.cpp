@@ -406,7 +406,10 @@ void TrampolinesArm64::BuildRuntimeEntry(MacroAssembler& assembler) {
     __ Bind(&label_fault_return_host);
     // load exception
     __ Ldr(halt_reg, MemOperand(state, state_offset_halt_reason));
-    __ Cbz(halt_reg, &code_dispatcher);
+    __ Cbnz(halt_reg, &label_return_host);
+    __ Ldar(ip0, MemOperand(state, state_offset_exit_request));
+    __ Tbz(ip0, 63, &code_dispatcher);
+    __ Mov(halt_reg, static_cast<u32>(HaltReason::Signal));
     __ Bind(&label_return_host);
     EmitFlagsPark(assembler);
     // clear execption

@@ -149,6 +149,22 @@ u64 RingTargetProbe() {
     return 0;
 }
 
+IntrusivePtr<Block> BuildIndirectRingBlock(VAddr guest) {
+    IntrusivePtr<Block> block{new Block(0, Location{guest})};
+    block->SetEndLocation(Location{guest + 1});
+    const auto entries =
+            block->LoadUniform(Uniform{0, ValueType::U64}).SetType(ValueType::U64);
+    const auto one = block->LoadImm(Imm{u64{1}}).SetType(ValueType::U64);
+    const auto next = block->Add(entries, Operand{one}).SetType(ValueType::U64);
+    block->StoreUniform(Uniform{0, ValueType::U64}, next);
+    const auto target =
+            block->LoadUniform(Uniform{8, ValueType::U64}).SetType(ValueType::U64);
+    block->SetLocation(Lambda{target});
+    block->SetTerminal(terminal::ReturnToDispatch{});
+    block->ReIdInstr();
+    return block;
+}
+
 u64 ConditionalRingSelect() {
     return g_conditional_selector.fetch_add(1, std::memory_order_seq_cst) & 1u;
 }
@@ -639,6 +655,66 @@ TEST_CASE("direct SCC descending edge observes a pending interrupt",
     }
 #else
     SUCCEED("direct SCC signal coverage requires an AArch64 host");
+#endif
+}
+
+TEST_CASE("inline indirect L1 loop observes a pending interrupt",
+          "[direct-link][production][signal][indirect-l1]") {
+#if defined(__aarch64__)
+    ScopedEnvironment disk_cache{"SVM_JIT_CACHE", ""};
+    constexpr VAddr guest = 0x2100;
+    Config config{
+            .loc_start = 0,
+            .loc_end = 1ull << 48,
+            .enable_jit = true,
+            .enable_asm_interp = false,
+            .has_local_operation = false,
+            .backend_isa = kArm64,
+            .uniform_buffer_size = 16,
+            .global_opts = Optimizations::BlockLink,
+    };
+    AddressSpace space{config};
+    ModuleConfig module_config{.read_only = true};
+    module_config.feature_overrides.Set(FeatureId::indirect_l1, true);
+    auto module = space.MapModule(guest, guest + 0x100, module_config);
+    REQUIRE(module != nullptr);
+    auto block = BuildIndirectRingBlock(guest);
+    auto* code = TranslateIR(module, block);
+    REQUIRE(code != nullptr);
+    space.PushCodeCache(Location{guest}, code);
+
+    Runtime runtime{&space};
+    SetSelector(runtime, guest);
+    runtime.SetLocation(guest);
+    auto uniform = runtime.GetUniformBuffer();
+    auto* entries = reinterpret_cast<volatile u64*>(uniform.data());
+    std::atomic_bool runner_done{};
+    std::atomic<u32> runner_halt{};
+    std::thread runner([&] {
+        runner_halt.store(static_cast<u32>(runtime.Run()),
+                          std::memory_order_release);
+        runner_done.store(true, std::memory_order_release);
+    });
+
+    const bool entered = WaitUntil([entries] { return *entries > 32; },
+                                   std::chrono::seconds(2));
+    runtime.SignalInterrupt();
+    const bool bounded = WaitUntil(
+            [&] { return runner_done.load(std::memory_order_acquire); },
+            std::chrono::seconds(2));
+    if (!bounded) {
+        space.InvalidateCodeRange(guest, guest + 1);
+        REQUIRE(WaitUntil(
+                [&] { return runner_done.load(std::memory_order_acquire); },
+                std::chrono::seconds(2)));
+    }
+    runner.join();
+    REQUIRE(bounded);
+    REQUIRE(entered);
+    REQUIRE(runner_halt.load(std::memory_order_acquire) ==
+            static_cast<u32>(HaltReason::Signal));
+#else
+    SUCCEED("inline indirect L1 signal coverage requires an AArch64 host");
 #endif
 }
 

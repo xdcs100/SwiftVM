@@ -683,19 +683,14 @@ void JitContext::ForwardIndirectL1(const Register& location) {
     Label signal;
 
     if (!indirect_l1_prof_enabled) {
-        // SignalInterrupt publishes halt_reason before setting bit 63 with a
-        // release operation. Reuse the existing index temporary for the
-        // acquire poll, so the production fast path gains no scratch pressure.
-        // If a signal races after this load, the next inline indirect exit sees
-        // it; a pure L1-hit loop therefore has a one-edge bounded safepoint.
-        __ Ldar(index, MemOperand(state, state_offset_exit_request));
+        // The request and stable L1 base occupy one aligned pair. The shared
+        // trampoline acquire-checks the request before returning Signal.
+        __ Ldp(index, entry, MemOperand(state));
         __ Tbnz(index, 63, &signal);
+    } else {
+        __ Ldr(entry, MemOperand(state, state_offset_indirect_l1_code_cache));
     }
 
-    // L1 is direct-low-bit hashed; L2 retains the folded hash. The Runtime
-    // publishes this stable per-thread base in an otherwise frozen State slot,
-    // avoiding the latch/profile pointer chase without changing State size.
-    __ Ldr(entry, MemOperand(state, state_offset_indirect_l1_code_cache));
     __ And(index, location, L1_CODE_CACHE_HASH);
     __ Add(entry, entry, Operand(index, LSL, 4));
     __ Ldp(index, entry, MemOperand(entry));
@@ -718,13 +713,11 @@ void JitContext::ForwardIndirectL1(const Register& location) {
     // equivalent to Ret. On an SMC-invalidated key hit, entry is the safe L2
     // continuation installed by TranslateTable::Zero. No stale/zero pointer
     // can reach Br. With the two-instruction signal poll the production hot
-    // path is exactly nine instructions and still rents only two temporaries.
+    // path is exactly eight instructions and still rents only two temporaries.
     __ Csel(entry, entry, x30, eq);
     __ Br(entry);
     __ Bind(&signal);
-    // halt_reason was release-published before the request bit. Ret enters the
-    // normal trampoline epilogue, which snapshots all architectural state and
-    // returns HaltReason::Signal to the driver.
+    // The trampoline verifies the release-published request before returning.
     __ Ret();
 }
 

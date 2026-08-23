@@ -8664,10 +8664,8 @@ TEST_CASE("indirect L1 and lean shadow stack select compatible return paths") {
         auto it = result.mnemonics.find(std::string{mnemonic});
         return it == result.mnemonics.end() ? 0u : it->second;
     };
-    // The production fast path is the seven-instruction L1 probe plus an
-    // LDAR/TBNZ signal safepoint. Its cold signal Ret adds one more static
-    // instruction, so replacing the original terminal Ret costs nine.
-    REQUIRE(l1.bytes == off.bytes + 9 * vixl::aarch64::kInstructionSize);
+    // The production fast path reads the signal request and L1 base together.
+    REQUIRE(l1.bytes == off.bytes + 8 * vixl::aarch64::kInstructionSize);
     REQUIRE(shadow.bytes == off.bytes);
     REQUIRE(count(off, "br") == 0);
     REQUIRE(count(l1, "br") == 1);
@@ -8675,7 +8673,7 @@ TEST_CASE("indirect L1 and lean shadow stack select compatible return paths") {
     REQUIRE(count(l1, "ret") == 1);
     REQUIRE(count(l1, "csel") == 1);
     REQUIRE(count(l1, "and") == count(off, "and") + 1);
-    REQUIRE(count(l1, "ldar") == count(off, "ldar") + 1);
+    REQUIRE(count(l1, "ldp") == count(off, "ldp") + 2);
     REQUIRE(count(l1, "tbnz") == count(off, "tbnz") + 1);
     REQUIRE(l1.host_write_coalesced);
 
@@ -8683,8 +8681,7 @@ TEST_CASE("indirect L1 and lean shadow stack select compatible return paths") {
     const auto call_l1 = run(true, false, Shape::Call, false, false);
     const auto call_shadow = run(false, true, Shape::Call, false, false);
     const auto call_both = run(true, true, Shape::Call, false, false);
-    REQUIRE(call_l1.bytes ==
-            call_off.bytes + vixl::aarch64::kInstructionSize);
+    REQUIRE(call_l1.bytes == call_off.bytes);
     REQUIRE(call_shadow.bytes ==
             call_off.bytes - 2 * vixl::aarch64::kInstructionSize);
     REQUIRE(call_both.bytes == call_l1.bytes);
@@ -8695,11 +8692,11 @@ TEST_CASE("indirect L1 and lean shadow stack select compatible return paths") {
     const auto ret_shadow = run(false, true, Shape::Return, false, false);
     const auto ret_both = run(true, true, Shape::Return, false, false);
     REQUIRE(ret_l1.bytes ==
-            ret_off.bytes - 3 * vixl::aarch64::kInstructionSize);
+            ret_off.bytes - 4 * vixl::aarch64::kInstructionSize);
     REQUIRE(ret_shadow.bytes ==
             ret_off.bytes - 2 * vixl::aarch64::kInstructionSize);
     REQUIRE(ret_both.bytes == ret_l1.bytes);
-    REQUIRE(count(ret_l1, "ldar") == count(ret_off, "ldar") + 1);
+    REQUIRE(count(ret_l1, "ldp") == count(ret_off, "ldp") + 2);
     REQUIRE(count(ret_l1, "tbnz") == count(ret_off, "tbnz") + 1);
 
     const auto ret_trailing = run(false, true, Shape::Return, true, false);

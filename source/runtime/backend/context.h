@@ -96,8 +96,8 @@ union CPUFlags {
 constexpr s32 state_offset_named_vector_constants = -16;
 
 struct State {
-    // Preserve the legacy State layout exactly. The first word is now always
-    // the atomic exit request: Signal occupies bit 63 and the optional SMC
+    // Keep the legacy first word at offset zero. It is now always the atomic
+    // exit request: Signal occupies bit 63 and the optional SMC
     // latch uses the low bits. The historical L1 pointer name remains as a
     // layout alias, while all ARM64 dispatch paths use the dedicated
     // indirect_l1_code_cache slot below. Keeping the request at offset zero
@@ -107,7 +107,9 @@ struct State {
         void* l1_code_cache{};
         alignas(8) u64 exit_request;
     };
-    void* l2_code_cache{};
+    // Adjacent to exit_request so inline indirect exits can read the request
+    // and stable per-Runtime L1 base as one pair.
+    void* indirect_l1_code_cache{};
     void* interface{};
     HaltReason halt_reason{HaltReason::None};
     RSBFrame* rsb_pointer{};
@@ -126,11 +128,7 @@ struct State {
     void* pt{};
     void* local_buffer{};
     u64 host_cpu_flags{};
-    // Runtime-private direct L1 base used by block-inline indirect exits.
-    // This reuses the frozen linkage slot: no State/uniform offset moves.
-    // TranslateTable storage is stable for the Runtime lifetime; SMC changes
-    // entries, never this pointer.
-    void* indirect_l1_code_cache{};
+    void* l2_code_cache{};
     // Guest address space upper bound (== Config::loc_end). The interpreter
     // checks every LoadMemory/StoreMemory guest address against this limit
     // before dereferencing, converting a wild guest pointer into a clean
@@ -166,6 +164,10 @@ constexpr u32 state_offset_uniform_buffer = offsetof(State, uniform_buffer_begin
 constexpr u32 state_offset_exit_request = offsetof(State, exit_request);
 static_assert(state_offset_exit_request == 0);
 static_assert(sizeof(State::l1_code_cache) == sizeof(State::exit_request));
+constexpr u32 state_offset_indirect_l1_code_cache =
+        offsetof(State, indirect_l1_code_cache);
+static_assert(state_offset_indirect_l1_code_cache == sizeof(u64));
+static_assert(alignof(State) >= 2 * alignof(u64));
 constexpr u32 state_offset_spill_area = offsetof(State, spill_area);
 // FLAGS_REGS park: PSTATE and x12 last_result. Occupies spill_area[0..1]
 // so uniform offsets do not move. RA must not allocate these slots when
@@ -188,8 +190,6 @@ constexpr u32 state_offset_rsb_bottom = offsetof(State, rsb_bottom);
 constexpr u32 state_offset_rsb_top = offsetof(State, rsb_top);
 constexpr u32 state_offset_host_flags = offsetof(State, host_cpu_flags);
 constexpr u32 state_offset_exec_profile_ptr = offsetof(State, interface);
-constexpr u32 state_offset_indirect_l1_code_cache =
-        offsetof(State, indirect_l1_code_cache);
 constexpr u32 exec_offset_exit_direct = offsetof(RuntimeProfileInterface, exec) +
                                         offsetof(ExecProfileCounters, exit_direct);
 constexpr u32 exec_offset_exit_indirect = offsetof(RuntimeProfileInterface, exec) +
