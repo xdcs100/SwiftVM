@@ -738,7 +738,14 @@ bool JitTranslator::ReproveCoalescedHostFPRWrite(ir::Inst* inst) const {
                 return false;
             }
         } else if (left.Defined() && context.SharesFPR(left, produced)) {
-            return false;
+            if (!left.Def() ||
+                left.Def()->GetOp() != ir::OpCode::GetHostFPR ||
+                left.Def()->GetArg<ir::Imm>(0).Get() != target ||
+                left.Def()->GetArg<ir::Imm>(1).Get() != 0 ||
+                !context.IsHostReadCoalesced(left.Id()) ||
+                last_use(left.Def()) != producer->Id()) {
+                return false;
+            }
         }
     } else if (scalar_unary) {
         auto merge = ResolveHostCoalesceBitCast(

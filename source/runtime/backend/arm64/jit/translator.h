@@ -411,6 +411,7 @@ private:
                               u32 lane_bits,
                               u32 lane_count,
                               ir::Inst *inst);
+    void EmitVecFScalarBinaryLegacy(ir::Inst *inst, u32 lane_bits);
     void EmitVecFScalarBinaryTied(ir::Inst *inst, u32 lane_bits);
     [[nodiscard]] bool UseAFPNaN(ir::Inst *inst) const;
     VRegister PreserveNaNColdSource(ir::Inst *inst,

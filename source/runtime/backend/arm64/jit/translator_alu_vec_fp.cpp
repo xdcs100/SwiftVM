@@ -299,131 +299,129 @@ void JitTranslator::EmitVecNaNColdPaths() {
 }
 
 void JitTranslator::EmitVecFAddScalar32(ir::Inst* inst) {
-    auto left = context.V(inst->GetArg<ir::Value>(0));
-    auto result = context.V(ir::Value{inst});
     if (sse_scalar_insert) {
         EmitVecFScalarBinaryTied(inst, 32);
         return;
     }
-    auto scalar = context.GetTmpV();
-    auto right = GetVecScalarOperand(inst->GetArg<ir::Value>(1), 32);
-    auto repair_left = PreserveNaNColdSource(inst, left, scalar, ipv0);
-    auto repair_right = PreserveNaNColdSource(inst, right, scalar, ipv1);
-    __ Fadd(scalar.S(), left.S(), right.S());
-    EmitVecFloatNaNFixup(scalar, repair_left, repair_right, 32, 1, inst);
-    __ Orr(result.V16B(), left.V16B(), left.V16B());
-    __ Ins(result.V4S(), 0, scalar.V4S(), 0);
+    EmitVecFScalarBinaryLegacy(inst, 32);
 }
 
 void JitTranslator::EmitVecFSubScalar32(ir::Inst* inst) {
-    auto left = context.V(inst->GetArg<ir::Value>(0));
-    auto result = context.V(ir::Value{inst});
     if (sse_scalar_insert) {
         EmitVecFScalarBinaryTied(inst, 32);
         return;
     }
-    auto scalar = context.GetTmpV();
-    auto right = GetVecScalarOperand(inst->GetArg<ir::Value>(1), 32);
-    auto repair_left = PreserveNaNColdSource(inst, left, scalar, ipv0);
-    auto repair_right = PreserveNaNColdSource(inst, right, scalar, ipv1);
-    __ Fsub(scalar.S(), left.S(), right.S());
-    EmitVecFloatNaNFixup(scalar, repair_left, repair_right, 32, 1, inst);
-    __ Orr(result.V16B(), left.V16B(), left.V16B());
-    __ Ins(result.V4S(), 0, scalar.V4S(), 0);
+    EmitVecFScalarBinaryLegacy(inst, 32);
 }
 
 void JitTranslator::EmitVecFMulScalar32(ir::Inst* inst) {
-    auto left = context.V(inst->GetArg<ir::Value>(0));
-    auto result = context.V(ir::Value{inst});
     if (sse_scalar_insert) {
         EmitVecFScalarBinaryTied(inst, 32);
         return;
     }
-    auto scalar = context.GetTmpV();
-    auto right = GetVecScalarOperand(inst->GetArg<ir::Value>(1), 32);
-    auto repair_left = PreserveNaNColdSource(inst, left, scalar, ipv0);
-    auto repair_right = PreserveNaNColdSource(inst, right, scalar, ipv1);
-    __ Fmul(scalar.S(), left.S(), right.S());
-    EmitVecFloatNaNFixup(scalar, repair_left, repair_right, 32, 1, inst);
-    __ Orr(result.V16B(), left.V16B(), left.V16B());
-    __ Ins(result.V4S(), 0, scalar.V4S(), 0);
+    EmitVecFScalarBinaryLegacy(inst, 32);
 }
 
 void JitTranslator::EmitVecFDivScalar32(ir::Inst* inst) {
-    auto left = context.V(inst->GetArg<ir::Value>(0));
-    auto result = context.V(ir::Value{inst});
     if (sse_scalar_insert) {
         EmitVecFScalarBinaryTied(inst, 32);
         return;
     }
-    auto scalar = context.GetTmpV();
-    auto right = GetVecScalarOperand(inst->GetArg<ir::Value>(1), 32);
-    auto repair_left = PreserveNaNColdSource(inst, left, scalar, ipv0);
-    auto repair_right = PreserveNaNColdSource(inst, right, scalar, ipv1);
-    __ Fdiv(scalar.S(), left.S(), right.S());
-    EmitVecFloatNaNFixup(scalar, repair_left, repair_right, 32, 1, inst);
-    __ Orr(result.V16B(), left.V16B(), left.V16B());
-    __ Ins(result.V4S(), 0, scalar.V4S(), 0);
+    EmitVecFScalarBinaryLegacy(inst, 32);
 }
 
 void JitTranslator::EmitVecFAddScalar64(ir::Inst* inst) {
-    auto left = context.V(inst->GetArg<ir::Value>(0));
-    auto result = context.V(ir::Value{inst});
     if (sse_scalar_insert) {
         EmitVecFScalarBinaryTied(inst, 64);
         return;
     }
-    auto right = GetVecScalarOperand(inst->GetArg<ir::Value>(1), 64);
-    auto repair_left = PreserveNaNColdSource(inst, left, result, ipv0);
-    auto repair_right = PreserveNaNColdSource(inst, right, result, ipv1);
-    __ Fadd(result.D(), left.D(), right.D());
-    EmitVecFloatNaNFixup(result, repair_left, repair_right, 64, 1, inst);
-    __ Ins(result.V2D(), 1, left.V2D(), 1);
+    EmitVecFScalarBinaryLegacy(inst, 64);
 }
 
 void JitTranslator::EmitVecFSubScalar64(ir::Inst* inst) {
-    auto left = context.V(inst->GetArg<ir::Value>(0));
-    auto result = context.V(ir::Value{inst});
     if (sse_scalar_insert) {
         EmitVecFScalarBinaryTied(inst, 64);
         return;
     }
-    auto right = GetVecScalarOperand(inst->GetArg<ir::Value>(1), 64);
-    auto repair_left = PreserveNaNColdSource(inst, left, result, ipv0);
-    auto repair_right = PreserveNaNColdSource(inst, right, result, ipv1);
-    __ Fsub(result.D(), left.D(), right.D());
-    EmitVecFloatNaNFixup(result, repair_left, repair_right, 64, 1, inst);
-    __ Ins(result.V2D(), 1, left.V2D(), 1);
+    EmitVecFScalarBinaryLegacy(inst, 64);
 }
 
 void JitTranslator::EmitVecFMulScalar64(ir::Inst* inst) {
-    auto left = context.V(inst->GetArg<ir::Value>(0));
-    auto result = context.V(ir::Value{inst});
     if (sse_scalar_insert) {
         EmitVecFScalarBinaryTied(inst, 64);
         return;
     }
-    auto right = GetVecScalarOperand(inst->GetArg<ir::Value>(1), 64);
-    auto repair_left = PreserveNaNColdSource(inst, left, result, ipv0);
-    auto repair_right = PreserveNaNColdSource(inst, right, result, ipv1);
-    __ Fmul(result.D(), left.D(), right.D());
-    EmitVecFloatNaNFixup(result, repair_left, repair_right, 64, 1, inst);
-    __ Ins(result.V2D(), 1, left.V2D(), 1);
+    EmitVecFScalarBinaryLegacy(inst, 64);
 }
 
 void JitTranslator::EmitVecFDivScalar64(ir::Inst* inst) {
-    auto left = context.V(inst->GetArg<ir::Value>(0));
-    auto result = context.V(ir::Value{inst});
     if (sse_scalar_insert) {
         EmitVecFScalarBinaryTied(inst, 64);
         return;
     }
-    auto right = GetVecScalarOperand(inst->GetArg<ir::Value>(1), 64);
-    auto repair_left = PreserveNaNColdSource(inst, left, result, ipv0);
-    auto repair_right = PreserveNaNColdSource(inst, right, result, ipv1);
-    __ Fdiv(result.D(), left.D(), right.D());
-    EmitVecFloatNaNFixup(result, repair_left, repair_right, 64, 1, inst);
-    __ Ins(result.V2D(), 1, left.V2D(), 1);
+    EmitVecFScalarBinaryLegacy(inst, 64);
+}
+
+void JitTranslator::EmitVecFScalarBinaryLegacy(ir::Inst* inst,
+                                                u32 lane_bits) {
+    ASSERT(lane_bits == 32 || lane_bits == 64);
+    auto left = context.V(inst->GetArg<ir::Value>(0));
+    auto result = context.V(ir::Value{inst});
+    const bool tied = result.GetCode() == left.GetCode();
+    auto value = lane_bits == 32
+            ? context.GetTmpV()
+            : (tied ? ipv2 : result);
+    auto right = GetVecScalarOperand(inst->GetArg<ir::Value>(1), lane_bits);
+    auto repair_left = PreserveNaNColdSource(inst, left, value, ipv0);
+    auto repair_right = PreserveNaNColdSource(inst, right, value, ipv1);
+    switch (inst->GetOp()) {
+        case ir::OpCode::VecFAddScalar32:
+            ASSERT(lane_bits == 32);
+            __ Fadd(value.S(), left.S(), right.S());
+            break;
+        case ir::OpCode::VecFSubScalar32:
+            ASSERT(lane_bits == 32);
+            __ Fsub(value.S(), left.S(), right.S());
+            break;
+        case ir::OpCode::VecFMulScalar32:
+            ASSERT(lane_bits == 32);
+            __ Fmul(value.S(), left.S(), right.S());
+            break;
+        case ir::OpCode::VecFDivScalar32:
+            ASSERT(lane_bits == 32);
+            __ Fdiv(value.S(), left.S(), right.S());
+            break;
+        case ir::OpCode::VecFAddScalar64:
+            ASSERT(lane_bits == 64);
+            __ Fadd(value.D(), left.D(), right.D());
+            break;
+        case ir::OpCode::VecFSubScalar64:
+            ASSERT(lane_bits == 64);
+            __ Fsub(value.D(), left.D(), right.D());
+            break;
+        case ir::OpCode::VecFMulScalar64:
+            ASSERT(lane_bits == 64);
+            __ Fmul(value.D(), left.D(), right.D());
+            break;
+        case ir::OpCode::VecFDivScalar64:
+            ASSERT(lane_bits == 64);
+            __ Fdiv(value.D(), left.D(), right.D());
+            break;
+        default:
+            PANIC();
+    }
+    EmitVecFloatNaNFixup(
+            value, repair_left, repair_right, lane_bits, 1, inst);
+    if (lane_bits == 32) {
+        if (!tied) {
+            __ Orr(result.V16B(), left.V16B(), left.V16B());
+        }
+        __ Ins(result.V4S(), 0, value.V4S(), 0);
+    } else if (tied) {
+        __ Ins(result.V2D(), 0, value.V2D(), 0);
+    } else {
+        __ Ins(result.V2D(), 1, left.V2D(), 1);
+    }
 }
 
 

@@ -28,7 +28,8 @@ struct ScalarPublication {
 };
 
 ScalarPublication MakeScalarPublication(bool scalar32, bool fixed_left,
-                                        bool fault_observer = false) {
+                                        bool fault_observer = false,
+                                        bool keep_left_live = false) {
     IntrusivePtr<Block> block{new Block(0, Location{0x8730})};
     auto left = fixed_left
             ? block->GetHostFPR(HostRegIndex(kResidentTarget), Imm{0u})
@@ -40,8 +41,11 @@ ScalarPublication MakeScalarPublication(bool scalar32, bool fixed_left,
     auto result = scalar32
             ? block->VecFAddScalar32(left, right).SetType(ValueType::V128)
             : block->VecFAddScalar64(left, right).SetType(ValueType::V128);
+    if (keep_left_live) {
+        block->StoreUniform(Uniform{32, ValueType::V128}, left);
+    }
     if (fault_observer) {
-        auto address = block->LoadUniform(Uniform{32, ValueType::U64})
+        auto address = block->LoadUniform(Uniform{48, ValueType::U64})
                                .SetType(ValueType::U64);
         (void)block->LoadMemory(Operand{address}).SetType(ValueType::U64);
     }
@@ -95,10 +99,26 @@ TEST_CASE("legacy scalar FPR results publish directly to a resident home") {
 TEST_CASE("legacy scalar FPR publication preserves a fixed left source") {
     for (bool scalar32 : {false, true}) {
         CAPTURE(scalar32);
-        auto item = MakeScalarPublication(scalar32, true);
+        auto item = MakeScalarPublication(scalar32, true, false, true);
         auto alloc = Allocate(item);
         REQUIRE(alloc->ValueFPR(item.result).id != kResidentTarget);
         REQUIRE_FALSE(alloc->IsHostWriteCoalesced(item.publish->Id()));
+    }
+}
+
+TEST_CASE("legacy scalar FPR results reuse a dead fixed left home") {
+    for (bool scalar32 : {false, true}) {
+        CAPTURE(scalar32);
+        auto item = MakeScalarPublication(scalar32, true);
+        auto baseline = Allocate(item, false);
+        const auto baseline_size = EmitSize(item.block.get(), *baseline);
+        auto alloc = Allocate(item);
+        REQUIRE(alloc->ValueFPR(item.result).id == kResidentTarget);
+        REQUIRE(alloc->IsHostWriteCoalesced(item.publish->Id()));
+        const swift::u32 saved_instructions = scalar32 ? 2 : 1;
+        REQUIRE(EmitSize(item.block.get(), *alloc) +
+                saved_instructions * vixl::aarch64::kInstructionSize ==
+                baseline_size);
     }
 }
 

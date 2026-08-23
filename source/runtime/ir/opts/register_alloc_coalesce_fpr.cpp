@@ -276,7 +276,15 @@ void CoalesceGuestFPRWrites(
                     continue;
                 }
             } else if (mapped_to(left, target)) {
-                continue;
+                if (!left.Defined() || !left.Def() ||
+                    left.Def()->GetOp() != OpCode::GetHostFPR ||
+                    left.Def()->GetArg<Imm>(0).Get() != target ||
+                    left.Def()->GetArg<Imm>(1).Get() != 0 ||
+                    !reg_alloc->IsHostReadCoalesced(left.Id()) ||
+                    left.Id() >= use_end.size() ||
+                    use_end[left.Id()] != producer->Id()) {
+                    continue;
+                }
             }
         } else if (IsResidentScalarUnaryProducer(
                            *producer, features.sse_scalar_tie)) {
