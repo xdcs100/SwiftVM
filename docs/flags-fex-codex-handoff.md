@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`d9eb980`** `perf: form aligned L1 addresses with BFI`
+- Code tip: **`e2f9527`** `perf: preserve register-offset memory operands`
 - Tracked tree is clean before the documentation commit. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -56,6 +56,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 | `aa7b83d` | Read a live PSTATE single-bit flag directly with non-clobbering `CSET` |
 | `a505485` | Lower encodable negative GetOperand displacements directly with `SUB` |
 | `d9eb980` | Align direct-hash L1 storage and form each 16-byte entry address with one `BFI` |
+| `e2f9527` | Preserve identity-mode `[base + index]` in memory IR and use the AArch64 register-offset encoding directly |
 
 Hot files:
 
@@ -175,13 +176,13 @@ Validation for `ff42917`:
   1,047,523 passed / 45 failed assertions. The unsafe generic prototype had added one U16 helper
   failure; the final consumer whitelist removes it.
 
-Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9d49` / `b3998d5` / `3ec9582` / `e74e734` / `030f52d` / `97009a3` / `f99eabf` / `b692fca` / `c15a712` / `2f2fb88` / `523d679` / `e1257d6` / `b1e501e` / `215a059` / `21000f1` / `0fc245c` / `723ace5` / `8ca4b0b` / `aa7b83d` / `a505485` / `d9eb980`:
+Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9d49` / `b3998d5` / `3ec9582` / `e74e734` / `030f52d` / `97009a3` / `f99eabf` / `b692fca` / `c15a712` / `2f2fb88` / `523d679` / `e1257d6` / `b1e501e` / `215a059` / `21000f1` / `0fc245c` / `723ace5` / `8ca4b0b` / `aa7b83d` / `a505485` / `d9eb980` / `e2f9527`:
 
 - Current formal smallpt is `smallpt_wh_x64 8 128 96`; do not substitute the fixed 1024×768
   `smallpt_x64` when updating the formal FEX ratio.
 - Formal smallpt default-region host:
-  `1,321,651,162 → 1,303,939,990 → 1,297,980,655 → 1,296,969,640 → 1,246,900,800 → 1,201,575,549 → 1,201,372,215 → 1,199,466,420 → 1,187,471,711 → 1,168,614,398 → 1,165,502,656 → 1,163,020,553 → 1,141,267,073 → 1,126,372,521 → 1,096,331,217 → 1,081,436,665 → 1,072,445,284 → 1,068,863,253 → 1,064,572,872 → 1,060,138,659 → 1,060,040,252 → 1,052,965,418 → 1,047,125,252 → 1,043,588,497 → 1,042,807,357 → 1,040,901,562`;
-  cumulative `-280,749,600` (`-21.2423%`), spill 0 throughout. The arrows are full-NZCV
+  `1,321,651,162 → 1,303,939,990 → 1,297,980,655 → 1,296,969,640 → 1,246,900,800 → 1,201,575,549 → 1,201,372,215 → 1,199,466,420 → 1,187,471,711 → 1,168,614,398 → 1,165,502,656 → 1,163,020,553 → 1,141,267,073 → 1,126,372,521 → 1,096,331,217 → 1,081,436,665 → 1,072,445,284 → 1,068,863,253 → 1,064,572,872 → 1,060,138,659 → 1,060,040,252 → 1,052,965,418 → 1,047,125,252 → 1,043,588,497 → 1,042,807,357 → 1,040,901,562 → 1,040,846,721`;
+  cumulative `-280,804,441` (`-21.2465%`), spill 0 throughout. The arrows are full-NZCV
   compaction, VecZip resident publication, retained RSB target reuse, static-exit direct-link,
   default return-L1, cycle-polled successor layout, paired indirect-L1 state loading, then live
   resident-FPR publication, scalar-load FPR fusion, scalar-sqrt resident publication, then
@@ -191,7 +192,7 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   materialization elision, direct simple-condition extraction from saved flags, then scaled
   immediate load/store addressing, direct single-bit flag tests, PSTATE-preserving zero tests,
   one-instruction live-PSTATE flag materialization, direct negative-displacement lowering, then
-  aligned L1 entry formation with `BFI`.
+  aligned L1 entry formation with `BFI`, then register-offset memory EA preservation.
   `7110d20` is neutral here but saves
   452,646,984 on fixed 1024×768
   smallpt.
@@ -320,8 +321,14 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   deltas are `-90,922,904` / `-91,098,755` with 1,129 equal-entry PCs smaller and none larger.
   STREAM raw/equal-entry are `-941` / `-875`; CoreMark raw/equal-entry are `-31,825,004` /
   `-31,825,027`. PPM, c-ray IDAT, STREAM validation, CoreMark CRC and spill gates remain exact.
+- Identity-mode `[base + index]` memory operands now stay composite through the frontend instead
+  of materializing an intermediate `GetOperand`; the existing ARM64 memory emitter consumes the
+  register-offset form directly. Formal smallpt is `-54,841` (`-0.0053%`) with 45 PCs smaller and
+  none larger. Formal c-ray raw/equal-entry are `-5,506,465` / `-5,469,864` with 200 equal-entry
+  PCs smaller and none larger. STREAM equal-entry is `-111`; CoreMark equal-entry is `-640,298`
+  with 66 PCs smaller and none larger. PPM, IDAT, STREAM, CRC and spill gates remain exact.
 - FEX-aligned RE=0 same-harness refresh for formal smallpt: SVM host/guest
-  `3.335622 → 3.267832`; the landed stages fold this to about `2.620602`. With unchanged FEX
+  `3.335622 → 3.267832`; the landed stages fold this to about `2.620464`. With unchanged FEX
   `1.549`, ratio is `2.153× → 1.692×`. The earlier
   2.180× table used a different retained unit-formation artifact, so quote the current gap as
   approximately 1.68–1.75× rather than mixing the two raw tables.
@@ -394,6 +401,11 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   Baseline/candidate FLAGS twelve-grid is byte-identical and the 1,657-unit/11-guest fingerprint
   matches. Fixed seed 424242 is 191 passed / 35 existing failed cases / 45 failed assertions with
   the same failure-file set.
+- The address-lowering focus passes 84 assertions on Mac and Orb. Baseline/candidate FLAGS
+  twelve-grid is byte-identical. The candidate is self-consistent at 1,657 units / 11 guests;
+  unit and decoded-block totals stay fixed while six guests lose 152 aggregate IR instructions.
+  Fixed seed 424242 remains 191 passed / 35 existing failed cases / 45 failed assertions with the
+  same failure-file set.
 - RSB/indirect structure focus passes 26 assertions, including the paired state/cache load and
   no-target dispatcher path. A temporary mismatched-return probe passes default, both L1-off RSB
   frames, FLAGS-off and interpreter paths and was deleted. Mac and Orb builds pass.
@@ -487,11 +499,12 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 | One-instruction legacy scalar FP | the two instructions are low-lane arithmetic plus required x86 high-lane preservation; the only one-instruction AFP/NEP route remains rejected by the exact smallpt oracle |
 | Broader resident-XMM StoreUniform removal | local DSE/fault sinking and profitable XMM1-11 homes are already active; XMM0 regressed wall time and XMM12-15 reintroduce the closed FPR-pool pressure |
 | Remaining absolute `GetOperand` materialization | 21.75M left-immediate instances are true two-part constants; ADRP/literal alternatives do not preserve the current relocation and mapping contract |
+| Saved-flags compound `CondSet` | two-instruction HI/LS and GE/LT forms were implemented and validated, but execute 0 times in formal smallpt/CoreMark and the c-ray audit sample; GT/LE still need three inputs, so the zero-gain prototype was removed |
 
 ## Next ready (pick one, measure, revert on 124/134)
 
 The current single-version opcode ledger covers about 83.77% of formal smallpt host execution. The
-largest remaining per-op host responsibilities are GetOperand 83.40M, StoreUniform 82.41M,
+largest remaining per-op host responsibilities are GetOperand 83.35M, StoreUniform 82.41M,
 VecFMulScalar64 78.89M, LoadMemory 76.55M, VecFAddScalar64 58.03M, LoadUniform 56.33M and
 StoreMemory 51.64M.
 
@@ -505,9 +518,9 @@ StoreMemory 51.64M.
    8,317,804 (`0.785%`) full writes. Low-load/high-zero remain 10,641,609 (`1.004%`) /
    10,093,484 (`0.952%`); all-compatible high-zero materialization is gone. About 8.29M adjacent
    candidates were rejected by exact fault/alias/home gates and must not be recovered heuristically.
-3. **Remaining compound conditions** — direct extraction has closed the eight single-bit CondSet
-   forms. HI/LS, GE/LT and GT/LE still need compound boolean logic; do not replace their three
-   instruction restore/CSET path unless a measured lowering is strictly smaller.
+3. **Remaining composite EA** — identity `[base+imm]`, `[base+index]` and matching scaled-index
+   forms are now direct. Remaining materialized forms involve bias/32-bit wrapping, shifts or an
+   AArch64-unencodable scale; require an exact encoding and wrap proof before extending the gate.
 4. **CoreMark remaining truncations** — raw BitExtract is no longer a pool. Only reopen 8/16-bit
    cases with a consumer-specific physical-high proof and the U16 helper regression in the gate.
 5. **SHA valid workload first** — fix or replace the current OpenSSL guest path that PageFatals before hashing, then redo the boundary census. Do not bypass guest fault semantics.
