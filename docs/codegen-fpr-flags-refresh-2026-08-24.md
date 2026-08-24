@@ -38,11 +38,11 @@ legacy scalar-binary resident publication、direct absolute-address materializat
 FCMP PF/AF publication、trailing static-location cold publication、compact FCMP carrier
 publication、semantic Nop elision、zero-register FPR lane publication 和 shared zero-store
 materialization elision，再加入 simple CondSet saved-flags extraction 和 scaled memory
-displacement encoding 后，按正式 host 权重折算约为 2.668787。以未变的 FEX 1.549
-为分母，对应 2.153×→1.723×。
+displacement encoding 和 direct single-bit TestFlags extraction 后，按正式 host 权重折算
+约为 2.650975。以未变的 FEX 1.549 为分母，对应 2.153×→1.711×。
 旧表与这次重采的
 unit 形成参数不完全相同，
-因此不直接覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 1.71–1.78×。
+因此不直接覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 1.70–1.77×。
 
 ## 已落地
 
@@ -373,7 +373,20 @@ use 数精确闭合；跨块、地址复用、算术/pseudo observer、spill、�
 - c-ray、STREAM、CoreMark 等 entry 分别减少 93 / 8 / 8，全部只减不增，PPM、IDAT、
   `Solution Validates` 和 CRC final `0x382f` 保持一致。
 
-二十一项合计使正式 smallpt 默认 region host 减少 261,610,910（19.7942%）。
+### Direct single-bit TestFlags extraction
+
+提交 `723ace5` 对单个 N/Z/C/V 的数值读取直接提取 host bit。x26 为权威状态时只发一条
+`UBFX`；PSTATE 为权威状态时使用 `MRS + UBFX`，不再用会破坏 NZCV 的 `TST + CSET`
+及恢复序列。PF/AF 和多 bit 测试继续使用原 lowering，没有新增开关。
+
+- 正式 smallpt 1,060,040,252→1,052,965,418，减少 7,074,834（0.6674%）；81 个共同
+  PC 缩短、0 个增长，unit/version/entry 与 spill 均一致；
+- c-ray 等 entry 减少 32,621,346，221 个有执行的共同 PC 缩短；唯一增长的共同 PC
+  entries 为 0，IDAT MD5 保持 `d0c71130abf3544a86b64417bc488c21`；
+- STREAM/CoreMark 等 entry 分别减少 1,100 / 7,481,108，并保持 `Solution Validates` /
+  CRC final `0x382f`。
+
+二十二项合计使正式 smallpt 默认 region host 减少 268,685,744（20.3296%）。
 
 ## 否决项
 
@@ -466,6 +479,10 @@ XMM fault sink 和 XMM1-11 驻留均已启用；XMM0 有既有墙钟回退证据
 - 既有 address/host-base focus 在 Mac/Orb 均通过 39 assertions；基线/候选 FLAGS 十二格
   与 1664-unit/11-guest fingerprint 逐字一致。顶层 seed 424242 保持 191 passed / 35 个
   既有 failed cases / 45 个失败断言。
+- flags focus 在 Mac/Orb 均通过 46 + 12 + 24 + 4 + 62 assertions，COMIS 两端均通过
+  3,482 assertions；基线/候选 FLAGS 十二格、helper-fault 38/0 和
+  1664-unit/11-guest fingerprint 一致。顶层 seed 424242 保持 191 passed / 35 个既有
+  failed cases / 45 个失败断言。
 - RSB/indirect 结构测试 26 assertions，覆盖八指令 L1 快路径、无 push 和无目标
   dispatcher 路径；显式改写栈返回地址的临时 probe 在默认、L1-off 两种 RSB frame、
   FLAGS-off 和 interpreter 下均 rc=0，probe 已删除。
