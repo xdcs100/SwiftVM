@@ -1,5 +1,7 @@
 #include "translator.h"
 
+#include <limits>
+
 #include "runtime/backend/context.h"
 #include "runtime/backend/arm64/defines.h"
 #include "runtime/backend/arm64/fpcr_mode.h"
@@ -572,6 +574,9 @@ void JitTranslator::EmitGetOperand(ir::Inst* inst) {
         if (operand.GetOp() == ir::OperandOp::Plus) {
             if (__ IsImmAddSub(imm)) {
                 __ Add(dst, left, imm);
+            } else if (imm < 0 && imm != std::numeric_limits<s64>::min() &&
+                       __ IsImmAddSub(-imm)) {
+                __ Sub(dst, left, -imm);
             } else {
                 __ Mov(dst, imm);
                 __ Add(dst, left, dst);
