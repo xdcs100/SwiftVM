@@ -1545,11 +1545,14 @@ bool X64Decoder::PreserveMemoryEA(const X64Decoder::Operand& operand,
         ir::GetValueSizeByte(ir_operand.GetLeft().value.Type()) != sizeof(u64)) {
         return false;
     }
-    // 只保留现有 ARM64 memory emitter 已能直接编码的两类结构；其它地址
+    // 只保留现有 ARM64 memory emitter 已能直接编码的结构；其它地址
     // 仍先经 GetOperand 物化，避免把本开关扩成通用地址重写。
-    if (ir_operand.GetOp() == ir::OperandOp::Plus &&
-        ir_operand.GetRight().IsImm()) {
-        return true;
+    if (ir_operand.GetOp() == ir::OperandOp::Plus) {
+        if (ir_operand.GetRight().IsImm()) {
+            return true;
+        }
+        return ir_operand.GetRight().IsValue() &&
+               ir::GetValueSizeByte(ir_operand.GetRight().value.Type()) == sizeof(u64);
     }
     if (ir_operand.GetOp() != ir::OperandOp::PlusExt ||
         !ir_operand.GetRight().IsValue() ||

@@ -8438,6 +8438,9 @@ TEST_CASE("composite memory EA survives only in identity mode") {
             decode_address({0x8b, 0x43, 0x08, 0xf4, 0x00}, true);
     auto [bias_imm_block, bias_imm] =
             decode_address({0x8b, 0x43, 0x08, 0xf4, 0x00}, false);
+    // mov eax,[rbx+rcx]; hlt。
+    auto [identity_reg_block, identity_reg] =
+            decode_address({0x8b, 0x04, 0x0b, 0xf4, 0x00}, true);
     // mov eax,[rbx+rcx*4]; hlt。
     auto [identity_ext_block, identity_ext] =
             decode_address({0x8b, 0x04, 0x8b, 0xf4, 0x00}, true);
@@ -8446,9 +8449,12 @@ TEST_CASE("composite memory EA survives only in identity mode") {
     if (enabled) {
         REQUIRE(identity_imm.GetOp() == OperandOp::Plus);
         REQUIRE(identity_imm.GetRight().IsImm());
+        REQUIRE(identity_reg.GetOp() == OperandOp::Plus);
+        REQUIRE(identity_reg.GetRight().IsValue());
         REQUIRE(identity_ext.GetOp() == OperandOp::PlusExt);
         REQUIRE(identity_ext.GetRight().IsValue());
     } else {
+        REQUIRE(identity_reg.GetRight().Null());
         REQUIRE(identity_ext.GetRight().Null());
     }
     // bias 不论开关状态都保留旧的 GetOperand 单值边界。
