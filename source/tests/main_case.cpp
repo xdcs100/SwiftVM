@@ -286,6 +286,13 @@ TEST_CASE("helper FP effects default conservative and compose with ABI metadata"
 TEST_CASE("config hash includes programmatic effective AFP policy") {
     swift::runtime::Config off{};
     swift::runtime::Config on{};
+    on.sse_scalar_insert = true;
+
+    REQUIRE(swift::runtime::backend::ComputeConfigHash(off) !=
+            swift::runtime::backend::ComputeConfigHash(on));
+    on.sse_scalar_insert = false;
+    REQUIRE(swift::runtime::backend::ComputeConfigHash(off) ==
+            swift::runtime::backend::ComputeConfigHash(on));
     on.sse_afp_nan = true;
 
     REQUIRE(swift::runtime::backend::ComputeConfigHash(off) !=
@@ -6948,6 +6955,11 @@ TEST_CASE("AFP translated SSE arithmetic matches the 64-case x86 NaN truth matri
 
     SmcTracker::SetEnabled(false);
     auto* instance = X86Instance::Make();
+    const auto& config = instance->GetAddressSpace()->GetConfig();
+    const bool capable = swift::runtime::True(
+            config.arm64_features & swift::runtime::Arm64Features::AFP);
+    REQUIRE(config.sse_scalar_insert ==
+            (swift::runtime::GetSvmConfig().sse_scalar_insert && capable));
     auto* core = X86Core::Make(instance);
     auto& context = core->GetContext();
     struct Outcome {

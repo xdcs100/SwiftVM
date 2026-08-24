@@ -243,17 +243,8 @@ static Arm64Features DetectArm64Features() {
 }
 
 static bool SSEScalarInsertEnabled(Arm64Features features) {
-#if defined(__APPLE__) && defined(__aarch64__)
-    // Preserve W23 exactly: it was default-on on AFP-capable macOS hosts and
-    // unavailable on Linux because the old Linux probe never published AFP.
-    // Hardware capability is now platform-neutral, so policy must be kept
-    // separate or merely detecting AFP would change Linux OFF codegen.
     return True(features & Arm64Features::AFP) &&
            runtime::GetSvmConfig().sse_scalar_insert;
-#else
-    (void) features;
-    return false;
-#endif
 }
 
 static bool SSEAFPNanEnabled(Arm64Features features) {

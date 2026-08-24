@@ -700,7 +700,6 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 | PF/AF dedicated GPR on current CoreMark | saves 0; adds 67,754,766 dispatcher/RSB recovery instructions |
 | SHA census from failing OpenSSL path | PageFatal at `rip=0x62b930` before valid hashing; no performance evidence |
 | Generic same-width fold including U8/U16/CallLambda | fixed-seed U16 popcount helper mismatch; narrowed to U32 W-consumer whitelist |
-| Linux AFP scalar insert | c-ray −1.92%, but smallpt diverges from the exact FEX PPM; tie=0 still diverges, fully reverted |
 | True fallthrough after a direct cycle poll | falls into the source block's cold stub; CoreMark 1.224s→57.597s despite correct CRC, fully rejected |
 | Tagged L1 control word loaded with nonzero-offset `LDAR` | AArch64 `LDAR` has no immediate offset; VIXL ignored it and production hit PageFatal, fully reverted |
 | `LDAXP` request/cache-base pair | smallpt `-1,905,795`, but call-dense scale-3 wall time regressed 223%; fully reverted |
@@ -711,7 +710,6 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 | Sole TestZero/TestNotZero identity/general Select fusion | strict local `4 8 6` saves only 79 (`-0.013547%`); exact PPM and no growth, but the extra planner state is not justified and was fully reverted |
 | Zero-register `SetHostGPR` publication | smallpt / c-ray equal-entry only `-1` / `-22`; existing GPR coalescing already absorbs it, fully reverted |
 | Transparent `BitCast` zero-store graph | formal smallpt and c-ray are byte-identical at every equal-entry PC; the proof reaches no remaining materialization and was fully reverted |
-| One-instruction legacy scalar FP | the two instructions are low-lane arithmetic plus required x86 high-lane preservation; the only one-instruction AFP/NEP route remains rejected by the exact smallpt oracle |
 | XMM12-15 resident expansion | XMM0-11 are now resident by default; extending the ABI through XMM15 reintroduces the closed FPR-pool pressure and remains rejected |
 | Remaining absolute `GetOperand` materialization | 21.75M left-immediate instances are true two-part constants; ADRP/literal alternatives do not preserve the current relocation and mapping contract |
 | Saved-flags compound `CondSet` | two-instruction HI/LS and GE/LT forms were implemented and validated, but execute 0 times in formal smallpt/CoreMark and the c-ray audit sample; GT/LE still need three inputs, so the zero-gain prototype was removed |
@@ -761,14 +759,11 @@ peepholes.
    8,317,804 (`0.785%`) full writes. Low-load/high-zero remain 10,641,609 (`1.004%`) /
    10,093,484 (`0.952%`); all-compatible high-zero materialization is gone. About 8.29M adjacent
    candidates were rejected by exact fault/alias/home gates and must not be recovered heuristically.
-   A bounded short-run full-write census found 4,826 weighted explicit copies before the indexed
-   shuffle stage: scalar64 FP producers account for 4,024, `BitCast` for 559 and
-   `VecShuffle32Indexed` for 221. Root tracing shows `BitCast` is not an independent producer pool:
-   558 of its weighted executions resolve to `VecFAddScalar64` and one to `GetHostFPR`. Of 4,582
-   scalar64-root copies, 1,883 start from the same resident home; an exact two-node/sole-use chain
-   prototype saved only 384 (`0.066136%`) and required disproportionate dual proof machinery, so it
-   was fully removed. The indexed-shuffle pool is closed; do not broadly whitelist scalar
-   merge-home shapes.
+   The older bounded full-write census attributed most explicit copies to scalar64 FP producers.
+   That pool is superseded on AFP-capable hosts by the platform-neutral scalar-insert path below;
+   recount it before treating scalar64 publication as a remaining target. Non-AFP hosts retain the
+   legacy low-lane arithmetic plus high-lane preservation sequence. The indexed-shuffle pool is
+   closed; do not broadly whitelist scalar merge-home shapes.
 5. **Remaining composite EA** — identity `[base+imm]`, `[base+index]` and matching scaled-index
    forms are now direct. Remaining materialized forms involve bias/32-bit wrapping, shifts or an
    AArch64-unencodable scale; require an exact encoding and wrap proof before extending the gate.
@@ -847,6 +842,16 @@ peepholes.
   merge groups, but none of their targets satisfied the existing complete-overwrite contract;
   the weighted saving upper bound was zero. The implementation, tests and census logging were
   removed rather than retaining an unused cross-unit ABI extension.
+- Scalar SSE insert now follows detected FEAT_AFP on Linux as well as macOS. Orb's native NEP probe
+  preserved the upper 64-bit lane with `FPCR=0x6`, and the translated 64-case SSE NaN/high-lane
+  truth matrix passes with scalar insert both enabled and disabled. The old Linux rejection no
+  longer reproduces after the completed FPCR/AFP lifecycle work.
+- The bounded Orb `smallpt_wh_x64 4 32 24` scalar-insert OFF/ON comparison has identical 2,793-PC /
+  3,647-version sets, 100% host, entry and top-20 coverage, exact PPM SHA
+  `fe779f46a4c8f0f75ab42b573253492e5f1da2ee508fdb6aee62389787244cd0` and zero spills. Weighted
+  host instructions fall `4,804,966 -> 4,598,890` (`-206,076`, `-4.288813%`); move-class work falls
+  by the same `206,076`, from `1,313,749` to `1,107,673`. Programmatic cache identity now hashes
+  effective scalar-insert policy. This stage ran no long benchmark, stress test or full suite.
 
 ## Orb loop
 
