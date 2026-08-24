@@ -687,6 +687,6 @@ void JitTranslator::EmitCallLocation(ir::Inst* inst) {
     EmitHostCall(lambda, args, has_result, result);
 }
 
-void JitTranslator::EmitNop(ir::Inst* inst) { __ Nop(); }
+void JitTranslator::EmitNop(ir::Inst* inst) {}
 
 }  // namespace swift::runtime::backend::arm64
