@@ -39,8 +39,9 @@ FCMP PF/AF publication、trailing static-location cold publication、compact FCM
 publication、semantic Nop elision、zero-register FPR lane publication 和 shared zero-store
 materialization elision，再加入 simple CondSet saved-flags extraction 和 scaled memory
 displacement encoding、direct single-bit TestFlags extraction 和 PSTATE-preserving zero
-tests，再加入 live-PSTATE CSET materialization 后，按正式 host 权重折算约为 2.627368。
-以未变的 FEX 1.549 为分母，对应 2.153×→1.696×。
+tests，再加入 live-PSTATE CSET materialization 和 negative GetOperand displacement lowering
+后，按正式 host 权重折算约为 2.625401。
+以未变的 FEX 1.549 为分母，对应 2.153×→1.695×。
 旧表与这次重采的
 unit 形成参数不完全相同，
 因此不直接覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 1.68–1.75×。
@@ -413,7 +414,18 @@ ZF，既有 3-assertion repro 捕获了该问题；最终证明显式拒绝该�
 - STREAM/CoreMark 等 entry 分别减少 30 / 3,740,015，并保持 `Solution Validates` /
   CRC final `0x382f`。
 
-二十四项合计使正式 smallpt 默认 region host 减少 278,062,665（21.0390%）。
+### Negative GetOperand displacement lowering
+
+提交 `a505485` 对 AArch64 add/sub immediate 可编码的负 `GetOperand` 偏移直接发射 `SUB`，
+不再先物化有符号立即数再执行 `ADD`。
+
+- 正式 smallpt 1,043,588,497→1,042,807,357，减少 781,140（0.0749%）；等 entry
+  减少 781,195，99 个共同 PC 缩短、0 个增长，spill 保持 0；
+- c-ray 等 entry 减少 10,527,227，288 个共同 PC 缩短、0 个增长；
+- STREAM/CoreMark 等 entry 分别减少 214 / 59；PPM、IDAT、STREAM validation 和
+  CoreMark CRC 全部精确一致。
+
+二十五项合计使正式 smallpt 默认 region host 减少 278,843,805（21.0981%）。
 
 ## 否决项
 
@@ -449,6 +461,9 @@ legacy scalar FP 的两条指令分别承担低 lane 运算和 x86 高 lane 保�
 单条路径依赖 AFP/NEP，而该路线已被 exact smallpt 输出否决。StoreUniform 侧的同块 DSE、
 XMM fault sink 和 XMM1-11 驻留均已启用；XMM0 有既有墙钟回退证据，XMM12-15 会重新压缩
 已关闭的动态 FPR 池，因此本轮不扩展驻留范围。
+
+剩余 21.75M 个 left-immediate `GetOperand` 是必须分两段构造的绝对常量；ADRP/literal
+替代不满足当前 relocation 与 mapping 契约，这条路线关闭。
 
 ## 验证
 
@@ -516,6 +531,10 @@ XMM fault sink 和 XMM1-11 驻留均已启用；XMM0 有既有墙钟回退证据
 - flags focus、zero-rotate repro 与 COMIS 在 Mac/Orb 保持通过；基线/候选 FLAGS 十二格和
   1664-unit/11-guest fingerprint 一致。顶层 seed 424242 保持 191 passed / 35 个既有
   failed cases / 45 个失败断言。
+- address/host-base focus 在 Mac/Orb 均通过 39 assertions，基线/候选 FLAGS 十二格逐字
+  一致。候选自一致为 1,657 units / 11 guests；相对 1,664-unit 基线有 7 个 unit 合并，
+  decoded-block 与 IR 总量同步下降，所有 guest 输出精确一致。顶层 seed 424242 为
+  191 passed / 35 个既有 failed cases / 44 个失败断言。
 - RSB/indirect 结构测试 26 assertions，覆盖八指令 L1 快路径、无 push 和无目标
   dispatcher 路径；显式改写栈返回地址的临时 probe 在默认、L1-off 两种 RSB frame、
   FLAGS-off 和 interpreter 下均 rc=0，probe 已删除。
@@ -537,8 +556,8 @@ XMM fault sink 和 XMM1-11 驻留均已启用；XMM0 有既有墙钟回退证据
 
 ## 下一步
 
-当前 single-version opcode ledger 覆盖正式 smallpt host 执行的约 83.64%。剩余单 op host
-责任最高的是 GetOperand 84.18M、StoreUniform 82.41M、VecFMulScalar64 78.89M、LoadMemory
+当前 single-version opcode ledger 覆盖正式 smallpt host 执行的约 83.62%。剩余单 op host
+责任最高的是 GetOperand 83.40M、StoreUniform 82.41M、VecFMulScalar64 78.89M、LoadMemory
 76.55M、VecFAddScalar64 58.03M、LoadUniform 56.33M 和 StoreMemory 51.64M。
 
 1. 当前正式 smallpt 的已覆盖 link 约 6.8%。region/cycle link tail 约 2.1%，其中
