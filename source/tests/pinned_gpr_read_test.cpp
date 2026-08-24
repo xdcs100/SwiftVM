@@ -21,9 +21,11 @@ enum class PinnedReadShape {
     SelfAnd,
     SignExtend,
     StoreMemory,
+    Subtract,
 };
 
-std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read) {
+std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
+                                        ValueType type = ValueType::U32) {
     Config config{
             .loc_start = 0,
             .loc_end = 1ull << 48,
@@ -36,13 +38,17 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read) 
 
     IntrusivePtr<Block> block{new Block(0, Location{0x8940})};
     auto value = block->GetHostGPR(HostRegIndex(22), Imm{0u})
-                         .SetType(ValueType::U32);
+                         .SetType(type);
     if (shape == PinnedReadShape::SelfAnd) {
         auto result = block->And(value, Operand{value}).SetType(ValueType::U32);
         block->SaveFlags(result, Flags::Negate | Flags::Zero | Flags::Parity);
     } else if (shape == PinnedReadShape::SignExtend) {
         auto result = block->SignExtend(value).SetType(ValueType::U64);
         block->StoreUniform(Uniform{8, ValueType::U64}, result);
+    } else if (shape == PinnedReadShape::Subtract) {
+        auto right = block->LoadImm(Imm{swift::u32{1}}).SetType(type);
+        auto result = block->Sub(value, Operand{right}).SetType(type);
+        block->SaveFlags(result, Flags::All);
     } else {
         auto address = block->LoadImm(Imm{swift::u64{0x1000}})
                                .SetType(ValueType::U64);
@@ -111,6 +117,17 @@ TEST_CASE("pinned GPR memory store reads the fixed W view directly") {
     const auto lines = EmitPinnedRead(PinnedReadShape::StoreMemory, false);
     REQUIRE(Count(lines, "ubfx ", "x22") == 0);
     REQUIRE(Count(lines, "str w22", "[") == 1);
+}
+
+TEST_CASE("callee-saved pinned GPR subtraction reads the fixed W view directly") {
+    for (auto type : {ValueType::U8, ValueType::U16, ValueType::U32}) {
+        CAPTURE(type);
+        const auto lines = EmitPinnedRead(PinnedReadShape::Subtract, false, type);
+        REQUIRE(Count(lines, "ubfx ", "x22") == 0);
+        REQUIRE(std::ranges::any_of(lines, [](const auto& line) {
+            return line.find("w22") != std::string::npos;
+        }));
+    }
 }
 
 TEST_CASE("a reused pinned GPR memory value keeps the read move") {

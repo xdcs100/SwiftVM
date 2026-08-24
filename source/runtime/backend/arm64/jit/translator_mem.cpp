@@ -1127,6 +1127,9 @@ void JitTranslator::EmitGetHostGPR(ir::Inst* inst) {
                     (it->GetOp() == ir::OpCode::Add || it->GetOp() == ir::OpCode::Sub) &&
                     ir::GetValueSizeByte(it->ReturnType()) <= sizeof(u32) &&
                     (reg_index <= 5 || value_size == sizeof(u32));
+            const bool direct_callee_pin_sub =
+                    reg_index >= 19 && it->GetOp() == ir::OpCode::Sub &&
+                    ir::GetValueSizeByte(it->ReturnType()) <= sizeof(u32);
             const bool direct_extend =
                     (value_size == sizeof(u8) || value_size == sizeof(u16)) &&
                     it->GetOp() == ir::OpCode::ZeroExtend32 &&
@@ -1137,8 +1140,8 @@ void JitTranslator::EmitGetHostGPR(ir::Inst* inst) {
             const bool direct_store =
                     named_uses == 1 && it->GetOp() == ir::OpCode::StoreMemory &&
                     it->GetArg<ir::Value>(1).Def() == inst;
-            if (direct_alu || direct_caller_pin_alu || direct_extend ||
-                direct_sign_extend || direct_store) {
+            if (direct_alu || direct_caller_pin_alu || direct_callee_pin_sub ||
+                direct_extend || direct_sign_extend || direct_store) {
                 fused_pin_gpr_reads.emplace(inst, static_cast<u16>(reg_index));
                 return;
             }
