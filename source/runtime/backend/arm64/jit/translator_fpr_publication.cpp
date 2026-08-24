@@ -1,6 +1,7 @@
 #include "translator.h"
 
 #include <algorithm>
+#include <unordered_map>
 
 namespace swift::runtime::backend::arm64 {
 
@@ -60,7 +61,6 @@ bool JitTranslator::ReproveScalarFPRPublication(
         publication.low_store->GetArg<ir::Imm>(2).Get() != 0 ||
         publication.high_store->GetArg<ir::Imm>(2).Get() != sizeof(u64) ||
         publication.high_store->GetArg<ir::Value>(0).Def() != publication.zero ||
-        publication.zero->GetUses(false) != 1 ||
         publication.low_store->Id() + 1 != publication.high_store->Id()) {
         return false;
     }
@@ -76,7 +76,8 @@ bool JitTranslator::ReproveScalarLoadFPRFusion(
         load->ReturnType() != ir::ValueType::U64 ||
         !ReproveScalarFPRPublication(fusion) ||
         fusion.low_store->GetArg<ir::Value>(0).Def() != load ||
-        load->GetUses(false) != 1 || load->Id() >= fusion.low_store->Id()) {
+        load->GetUses(false) != 1 || fusion.zero->GetUses(false) != 1 ||
+        load->Id() >= fusion.low_store->Id()) {
         return false;
     }
 
@@ -140,6 +141,7 @@ bool JitTranslator::ReproveScalarValueFPRFusion(
 void JitTranslator::PrepareScalarFPRPublications(ir::Block* block) {
     scalar_load_fpr_fusions.clear();
     scalar_value_fpr_fusions.clear();
+    std::unordered_map<ir::Inst*, u32> scalar_value_zero_uses;
     auto& list = block->GetInstList();
     for (auto low_it = list.begin(); low_it != list.end(); ++low_it) {
         auto* low = low_it.operator->();
@@ -172,7 +174,7 @@ void JitTranslator::PrepareScalarFPRPublications(ir::Block* block) {
                 continue;
             }
             scalar_value_fpr_fusions.emplace(low, fusion);
-            disable_instructions.set(zero->Id());
+            ++scalar_value_zero_uses[zero];
             disable_instructions.set(high->Id());
             continue;
         }
@@ -180,6 +182,11 @@ void JitTranslator::PrepareScalarFPRPublications(ir::Block* block) {
         disable_instructions.set(zero->Id());
         disable_instructions.set(low->Id());
         disable_instructions.set(high->Id());
+    }
+    for (const auto& [zero, uses] : scalar_value_zero_uses) {
+        if (zero->GetUses(false) == uses) {
+            disable_instructions.set(zero->Id());
+        }
     }
 }
 
