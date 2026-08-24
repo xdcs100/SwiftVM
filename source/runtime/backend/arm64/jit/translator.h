@@ -338,6 +338,7 @@ private:
     // Restore host NZCV from the flags register (uses the emission's shared scratch).
     void LoadNZCVFromFlags();
     [[nodiscard]] bool TryEmitCondSetFromFlags(ir::Inst* inst, ir::Cond cond);
+    void EmitZeroTestPreservingPstate(ir::Inst* inst, bool nonzero);
 
     // Merge host N/Z into the flags register and clear stale C/V (x86 logical ops)
     void MergeLogicalFlagsNZ(ir::Flags requested);

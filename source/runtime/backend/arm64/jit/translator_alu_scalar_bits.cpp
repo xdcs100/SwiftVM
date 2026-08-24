@@ -13,6 +13,21 @@ namespace swift::runtime::backend::arm64 {
 
 namespace {
 
+bool HasLaterLocalControlFlow(ir::Block* block, ir::Inst* inst) {
+    bool seen = false;
+    for (auto& scan : block->GetInstList()) {
+        if (!seen) {
+            seen = &scan == inst;
+            continue;
+        }
+        if (scan.GetOp() == ir::OpCode::Goto ||
+            scan.GetOp() == ir::OpCode::NotGoto ||
+            scan.GetOp() == ir::OpCode::BindLabel) {
+            return true;
+        }
+    }
+    return false;
+}
 
 ir::Value ResolveWidthChainBitCast(ir::Value value) {
     while (value.Defined() && value.Def()->IsBitCastOperation()) {
@@ -159,6 +174,11 @@ void JitTranslator::EmitTestZero(ir::Inst* inst) {
                 }
             }
         }
+    }
+    if (save_in_nzcv && nzcv_dirty &&
+        !HasLaterLocalControlFlow(cur_block, inst)) {
+        EmitZeroTestPreservingPstate(inst, false);
+        return;
     }
     auto value = inst->GetArg<ir::Value>(0);
     auto result = context.W(ir::Value{inst});
@@ -444,11 +464,32 @@ void JitTranslator::EmitTestNotZero(ir::Inst* inst) {
             }
         }
     }
+    if (save_in_nzcv && nzcv_dirty &&
+        !HasLaterLocalControlFlow(cur_block, inst)) {
+        EmitZeroTestPreservingPstate(inst, true);
+        return;
+    }
     auto value = inst->GetArg<ir::Value>(0);
     auto result = context.W(ir::Value{inst});
     MergeNZCV();
     __ Cmp(context.R(value), 0);
     __ Cset(result, ne);
+}
+
+void JitTranslator::EmitZeroTestPreservingPstate(ir::Inst* inst, bool nonzero) {
+    const auto value = context.R(inst->GetArg<ir::Value>(0));
+    const auto result = context.X(ir::Value{inst});
+    const auto scratch = context.GetSharedTmpX();
+    if (value.Is64Bits()) {
+        __ Clz(scratch, value);
+        __ Lsr(result, scratch, 6);
+    } else {
+        __ Clz(scratch.W(), value.W());
+        __ Lsr(result.W(), scratch.W(), 5);
+    }
+    if (nonzero) {
+        __ Eor(result.W(), result.W(), 1);
+    }
 }
 
 void JitTranslator::EmitZeroExtend32(ir::Inst* inst) {
