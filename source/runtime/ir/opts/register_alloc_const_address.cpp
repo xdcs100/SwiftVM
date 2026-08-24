@@ -3,6 +3,27 @@
 
 namespace swift::runtime::ir {
 
+namespace {
+
+constexpr u64 kConstAddressPageOffsetMask = 0xfff;
+constexpr u64 kConstAddressPageMask = ~kConstAddressPageOffsetMask;
+
+bool CanUsePageOffset(Inst& use, u64 address) {
+    ValueType type{};
+    if (use.GetOp() == OpCode::LoadMemory) {
+        type = use.ReturnType();
+    } else if (use.GetOp() == OpCode::StoreMemory) {
+        type = use.GetArg<Value>(1).Type();
+    } else {
+        return false;
+    }
+    const u64 size = GetValueSizeByte(type);
+    const u64 offset = address & kConstAddressPageOffsetMask;
+    return size != 0 && (offset <= 255 || offset % size == 0);
+}
+
+}  // namespace
+
 std::optional<u64> RawConstAddressValue(Inst* inst) {
     if (!inst || inst->GetOp() != OpCode::GetOperand) {
         return std::nullopt;
@@ -46,7 +67,7 @@ void CacheConstantAddressesForBlock(
         return callbacks.directly_feeds_memory(callbacks.context, inst);
     };
     struct Group {
-        u64 address{};
+        u64 base{};
         Vector<ConstAddressCandidate> candidates{};
         u32 cached_reuses{};
         u32 residual_no_free{};
@@ -70,13 +91,13 @@ void CacheConstantAddressesForBlock(
                     std::fprintf(
                             stderr,
                             "[svm-const-addr-group] unit=0x%llx block=0x%llx "
-                            "segment=%u address=0x%llx occurrences=1 potential=0 "
+                            "segment=%u base=0x%llx occurrences=1 potential=0 "
                             "cached=0 no_free=0 verify=0\n",
                             static_cast<unsigned long long>(unit_pc),
                             static_cast<unsigned long long>(
                                     lir_block->GetStartLocation().Value()),
                             segment,
-                            static_cast<unsigned long long>(group.address));
+                            static_cast<unsigned long long>(group.base));
                 }
                 continue;
             }
@@ -221,13 +242,13 @@ void CacheConstantAddressesForBlock(
                 std::fprintf(
                         stderr,
                         "[svm-const-addr-group] unit=0x%llx block=0x%llx "
-                        "segment=%u address=0x%llx occurrences=%zu potential=%u "
+                        "segment=%u base=0x%llx occurrences=%zu potential=%u "
                         "cached=%u no_free=%u verify=%u\n",
                         static_cast<unsigned long long>(unit_pc),
                         static_cast<unsigned long long>(
                                 lir_block->GetStartLocation().Value()),
                         segment,
-                        static_cast<unsigned long long>(group.address),
+                        static_cast<unsigned long long>(group.base),
                         group.candidates.size(), potential,
                         group.cached_reuses, group.residual_no_free,
                         group.residual_verify);
@@ -267,7 +288,7 @@ void CacheConstantAddressesForBlock(
             continue;
         }
         u32 use_id = inst.Id();
-        bool valid_use = false;
+        Inst* memory_use = nullptr;
         for (auto& use : list) {
             if (use.Id() <= inst.Id()) {
                 continue;
@@ -281,21 +302,22 @@ void CacheConstantAddressesForBlock(
             }
             if (names) {
                 use_id = use.Id();
-                valid_use = true;
+                memory_use = &use;
                 break;
             }
         }
-        if (!valid_use) {
+        if (!memory_use || !CanUsePageOffset(*memory_use, *address)) {
             ++mismatch_barrier;
             continue;
         }
         ++eligible;
+        const u64 base = *address & kConstAddressPageMask;
         auto group = std::find_if(groups.begin(), groups.end(),
                                   [&](const Group& item) {
-                                      return item.address == *address;
+                                      return item.base == base;
                                   });
         if (group == groups.end()) {
-            groups.push_back(Group{*address, {}});
+            groups.push_back(Group{base, {}});
             group = std::prev(groups.end());
         }
         group->candidates.push_back({&inst, use_id});

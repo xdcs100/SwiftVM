@@ -28,6 +28,42 @@ bool LeafHelperABIEnabled(const FeatureSet& features) {
 #endif
 }
 
+constexpr u64 kConstAddressPageOffsetMask = 0xfff;
+constexpr u64 kConstAddressPageMask = ~kConstAddressPageOffsetMask;
+
+std::optional<u64> GetConstAddress(ir::Inst* inst) {
+    if (!inst || inst->GetOp() != ir::OpCode::GetOperand ||
+        inst->ReturnType() != ir::ValueType::U64) {
+        return std::nullopt;
+    }
+    const auto operand = inst->GetArg<ir::Operand>(0);
+    if (!operand.GetLeft().IsImm()) {
+        return std::nullopt;
+    }
+    if (operand.GetRight().Null()) {
+        return operand.GetLeft().imm.Get();
+    }
+    if (operand.GetOp() == ir::OperandOp::Plus &&
+        operand.GetRight().IsImm() && operand.GetRight().imm.Get() == 0) {
+        return operand.GetLeft().imm.Get();
+    }
+    return std::nullopt;
+}
+
+bool CanUseConstPageOffset(ir::Inst& memory, u64 address) {
+    ir::ValueType type{};
+    if (memory.GetOp() == ir::OpCode::LoadMemory) {
+        type = memory.ReturnType();
+    } else if (memory.GetOp() == ir::OpCode::StoreMemory) {
+        type = memory.GetArg<ir::Value>(1).Type();
+    } else {
+        return false;
+    }
+    const u64 size = ir::GetValueSizeByte(type);
+    const u64 offset = address & kConstAddressPageOffsetMask;
+    return size != 0 && (offset <= 255 || offset % size == 0);
+}
+
 }  // namespace
 
 #define __ masm.
@@ -435,28 +471,7 @@ bool JitTranslator::ReproveCachedConstAddress(ir::Inst* inst) const {
         return false;
     }
     const u32 anchor_id = context.ConstAddressCacheAnchor(inst->Id());
-    if (anchor_id == inst->Id()) {
-        return true;
-    }
-    auto address = [](ir::Inst* candidate) -> std::optional<u64> {
-        if (!candidate || candidate->GetOp() != ir::OpCode::GetOperand ||
-            candidate->ReturnType() != ir::ValueType::U64) {
-            return std::nullopt;
-        }
-        const auto operand = candidate->GetArg<ir::Operand>(0);
-        if (!operand.GetLeft().IsImm()) {
-            return std::nullopt;
-        }
-        if (operand.GetRight().Null()) {
-            return operand.GetLeft().imm.Get();
-        }
-        if (operand.GetOp() == ir::OperandOp::Plus &&
-            operand.GetRight().IsImm() && operand.GetRight().imm.Get() == 0) {
-            return operand.GetLeft().imm.Get();
-        }
-        return std::nullopt;
-    };
-    const auto current_address = address(inst);
+    const auto current_address = GetConstAddress(inst);
     if (!current_address) {
         return false;
     }
@@ -468,8 +483,13 @@ bool JitTranslator::ReproveCachedConstAddress(ir::Inst* inst) const {
         }
     }
     if (!anchor || !context.IsConstAddressCached(anchor_id) ||
-        context.ConstAddressCacheAnchor(anchor_id) != anchor_id ||
-        address(anchor) != current_address) {
+        context.ConstAddressCacheAnchor(anchor_id) != anchor_id) {
+        return false;
+    }
+    const auto anchor_address = GetConstAddress(anchor);
+    if (!anchor_address ||
+        (*anchor_address & kConstAddressPageMask) !=
+                (*current_address & kConstAddressPageMask)) {
         return false;
     }
     const auto target = context.X(ir::Value{inst}).GetCode();
@@ -477,7 +497,7 @@ bool JitTranslator::ReproveCachedConstAddress(ir::Inst* inst) const {
         return false;
     }
     u32 use_id = inst->Id();
-    bool found_use = false;
+    ir::Inst* memory_use = nullptr;
     for (auto& scan : cur_block->GetInstList()) {
         if (scan.Id() <= inst->Id()) {
             continue;
@@ -494,14 +514,11 @@ bool JitTranslator::ReproveCachedConstAddress(ir::Inst* inst) const {
         if (!names) {
             continue;
         }
-        found_use = scan.GetOp() == ir::OpCode::LoadMemory ||
-                    scan.GetOp() == ir::OpCode::StoreMemory ||
-                    scan.GetOp() == ir::OpCode::LoadMemoryTSO ||
-                    scan.GetOp() == ir::OpCode::StoreMemoryTSO;
+        memory_use = &scan;
         use_id = scan.Id();
         break;
     }
-    if (!found_use) {
+    if (!memory_use || !CanUseConstPageOffset(*memory_use, *current_address)) {
         return false;
     }
     for (auto& scan : cur_block->GetInstList()) {
@@ -513,13 +530,30 @@ bool JitTranslator::ReproveCachedConstAddress(ir::Inst* inst) const {
     return true;
 }
 
+std::optional<u64> JitTranslator::CachedConstAddressOffset(ir::Inst* inst) const {
+    if (use_memory_base || !ReproveCachedConstAddress(inst)) {
+        return std::nullopt;
+    }
+    const auto address = GetConstAddress(inst);
+    return address ? std::optional<u64>{*address & kConstAddressPageOffsetMask}
+                   : std::nullopt;
+}
+
 void JitTranslator::EmitGetOperand(ir::Inst* inst) {
     auto operand = inst->GetArg<ir::Operand>(0);
     auto result = context.R(ir::Value{inst});
-    if (context.IsConstAddressCached(inst->Id()) &&
-        context.ConstAddressCacheAnchor(inst->Id()) != inst->Id()) {
+    if (context.IsConstAddressCached(inst->Id())) {
         ASSERT_MSG(ReproveCachedConstAddress(inst),
                    "constant-address cache proof failed at IR {}", inst->Id());
+        const auto address = GetConstAddress(inst);
+        ASSERT(address);
+        if (use_memory_base) {
+            __ Mov(result, *address);
+            return;
+        }
+        if (context.ConstAddressCacheAnchor(inst->Id()) == inst->Id()) {
+            __ Mov(result, *address & kConstAddressPageMask);
+        }
         return;
     }
     if (abs_const_mat && operand.GetRight().Null() && operand.GetLeft().IsImm()) {

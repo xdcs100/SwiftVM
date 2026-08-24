@@ -113,6 +113,7 @@ private:
     [[nodiscard]] bool CanUseZeroStoreRegister(ir::Value value);
     [[nodiscard]] bool ReproveCoalescedHostWrite(ir::Inst* inst) const;
     [[nodiscard]] bool ReproveCoalescedHostRead(ir::Inst* inst) const;
+    [[nodiscard]] std::optional<u64> CachedConstAddressOffset(ir::Inst* inst) const;
     [[nodiscard]] bool ReproveCoalescedHostFPRWrite(ir::Inst* inst) const;
     [[nodiscard]] bool ReproveScalarFPRTie(ir::Inst* inst) const;
     [[nodiscard]] bool ReproveShufpsImmTie(ir::Inst* inst) const;

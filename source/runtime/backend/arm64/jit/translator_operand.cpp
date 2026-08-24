@@ -131,6 +131,14 @@ MemOperand JitTranslator::EmitMemOperand(ir::Operand& ir_op,
         } else {
             // Match Case: load store post/index & push/pop
             auto addr_value = ir_op.GetLeft().value;
+            if (!use_memory_base &&
+                context.IsConstAddressCached(addr_value.Id())) {
+                const auto offset = CachedConstAddressOffset(addr_value.Def());
+                ASSERT_MSG(offset,
+                           "constant-address offset proof failed at IR {}",
+                           addr_value.Id());
+                return MemOperand{context.R(addr_value), static_cast<s64>(*offset)};
+            }
             if (allow_writeback && !atomic) {
                 auto update = MatchPreIndexMemoryUpdate(addr_value.Def());
                 if (update && update->memory == memory_inst) {

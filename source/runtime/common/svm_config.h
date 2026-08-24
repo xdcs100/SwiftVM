@@ -72,7 +72,7 @@ namespace swift::runtime {
     X(ra_coalesce_live, true) \
     X(ra_width_chain, false) \
     X(ra_width_chain_long, true) \
-    X(const_addr_cache, false) \
+    X(const_addr_cache, true) \
     X(indirect_l1, true) \
     X(shadow_lean, true) \
     X(flag_full_elim, false) \
@@ -212,7 +212,7 @@ struct FeatureOverrides {
     X(bool, ra_coalesce_live, "SVM_RA_COALESCE_LIVE", DefaultOn, true, "发布后仍活的 SSA 绑到 pin 家；缺省 ON，=0 回退 last-use W-alpha；同 pin 再写或 caller-saved helper 拒绝") \
     X(bool, ra_width_chain, "SVM_RA_WIDTH_CHAIN", NonZero, false, "unit 内多节点整数宽度 identity 链合并；非 0 开，缺省 OFF；原 register_alloc_pass.cpp") \
     X(bool, ra_width_chain_long, "SVM_RA_WIDTH_CHAIN_LONG", DefaultOn, true, "unit 内长 Add/Xor 发布链的低 32 位 ownership 合并；缺省 ON，=0 回退；原 register_alloc_pass.cpp") \
-    X(bool, const_addr_cache, "SVM_CONST_ADDR_CACHE", NonZero, false, "unit 内重复绝对地址寄存器缓存；非 0 开，缺省 OFF；原 register_alloc_pass.cpp") \
+    X(bool, const_addr_cache, "SVM_CONST_ADDR_CACHE", DefaultOn, true, "unit 内同页绝对地址共享 guest page base；缺省 ON，=0 回退；原 register_alloc_pass.cpp") \
     X(bool, indirect_l1, "SVM_INDIRECT_L1", DefaultOn, true, "间接出口块内 L1 首槽快查，含逐出口信号 safepoint；缺省 ON，=0 回退；原 jit_context.cpp") \
     X(bool, shadow_lean, "SVM_SHADOW_LEAN", DefaultOn, true, "RSB frame 复用 L2 slot，缩短 push/pop；缺省 ON，=0 回退；原 jit_context.cpp") \
     X(std::string, arm64_lrcpc_override, "SVM_ARM64_LRCPC", RawString, "", "RCpc host 特征 override；仅明确 0/1 生效，缺省或其他值不改探测；原 translator/x86/translator.cpp:315") \

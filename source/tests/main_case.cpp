@@ -8514,13 +8514,16 @@ TEST_CASE("unit-local absolute addresses reuse only verified idle GPR windows") 
         bool reuse{};
         bool host_write{};
     };
-    auto run = [](bool cache, bool tight_pool, bool coalesce) {
+    auto run = [](bool cache, bool tight_pool, bool coalesce,
+                  swift::u64 second_address = 0x004958d8,
+                  bool biased_memory = false) {
         Config config{
                 .loc_start = 0,
                 .loc_end = 1ull << 48,
                 .enable_jit = true,
                 .has_local_operation = false,
                 .backend_isa = kArm64,
+                .page_table = biased_memory ? reinterpret_cast<void*>(0x1000) : nullptr,
         };
         AddressSpace address_space{config};
         ModuleConfig module_config{};
@@ -8534,7 +8537,7 @@ TEST_CASE("unit-local absolute addresses reuse only verified idle GPR windows") 
         auto first = block->GetOperand(Operand{Imm{swift::u64{0x004958d8}}})
                              .SetType(ValueType::U64);
         (void)block->LoadMemory(Operand{first}).SetType(ValueType::U64);
-        auto second = block->GetOperand(Operand{Imm{swift::u64{0x004958d8}}})
+        auto second = block->GetOperand(Operand{Imm{second_address}})
                               .SetType(ValueType::U64);
         (void)block->LoadMemory(Operand{second}).SetType(ValueType::U64);
         Inst* publish = nullptr;
@@ -8579,14 +8582,30 @@ TEST_CASE("unit-local absolute addresses reuse only verified idle GPR windows") 
         return Result{context.CurrentBufferSize(), anchor, reuse, host_write};
     };
 
-    SECTION("a repeated RIP-style absolute address removes one three-instruction materialization") {
+    SECTION("a repeated RIP-style absolute address shares one page base") {
         const auto off = run(false, false, false);
         const auto on = run(true, false, false);
         REQUIRE_FALSE(off.anchor);
         REQUIRE_FALSE(off.reuse);
         REQUIRE(on.anchor);
         REQUIRE(on.reuse);
-        REQUIRE(on.bytes + 3 * vixl::aarch64::kInstructionSize == off.bytes);
+        REQUIRE(on.bytes + 4 * vixl::aarch64::kInstructionSize == off.bytes);
+    }
+
+    SECTION("nearby absolute addresses share one page base") {
+        const auto off = run(false, false, false, 0x004958e0);
+        const auto on = run(true, false, false, 0x004958e0);
+        REQUIRE(on.anchor);
+        REQUIRE(on.reuse);
+        REQUIRE(on.bytes + 4 * vixl::aarch64::kInstructionSize == off.bytes);
+    }
+
+    SECTION("biased memory rematerializes each exact guest address") {
+        const auto off = run(false, false, false, 0x004958e0, true);
+        const auto on = run(true, false, false, 0x004958e0, true);
+        REQUIRE(on.anchor);
+        REQUIRE(on.reuse);
+        REQUIRE(on.bytes + 2 * vixl::aarch64::kInstructionSize == off.bytes);
     }
 
     SECTION("scratch headroom shortage falls back without a cache owner") {
