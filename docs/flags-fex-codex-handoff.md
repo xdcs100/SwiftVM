@@ -726,10 +726,10 @@ StoreMemory 51.64M. Do not subtract the local short carry census from these form
 candidate changes unit/version formation and must pass a future formal gate before the ledger is rebased.
 
 The new bounded census closes redundant partial/full merge masks, redundant pre-`MSR` masks and
-provably dead published-entry restores. The remaining high-weight `MRS`/full merge and one-instruction
-`MSR` sites are local ISA floors under the committed x26 ABI. A further large flags reduction now
-requires a real cross-unit pending-flags/dual-entry ABI; do not reopen these closed sequences with
-more mask peepholes.
+provably dead published-entry restores. `0a2eabf` adds the cross-unit pending-flags entry for full
+NZCV edges whose target proves a complete overwrite. Remaining partial requested masks and targets
+that observe incoming flags still need a broader contract; do not reopen them with more mask
+peepholes.
 
 1. **Canonical carry formal gate** — the largest StoreUniform subpool is closed on FlagM and the
    short oracle is exact. Dead inversion elimination has a 100%-coverage same-shape short A/B, but
@@ -753,8 +753,10 @@ more mask peepholes.
    2.1%; their acquire poll and branch across per-block cold stubs are load-bearing. Audit the
    roughly 1.26% remaining return-L1 static sequences separately; address formation is now one
    `BFI`, and `LDP + CMP + CSEL + BR` has no obvious base-ISA fusion. Public host exit executes
-   only 139 times. The remaining
-   `SetLocation` tail is dynamic or has a later observer and must not inherit the trailing-constant proof.
+   only 139 times. Full-NZCV external direct edges with overwrite-first targets now use the pending
+   entry; continue this direction only with an explicit partial-mask or observing-target ABI. The
+   remaining `SetLocation` tail is dynamic or has a later observer and must not inherit the
+   trailing-constant proof.
 4. **Remaining FPR publication** — SetHostFPR is about 30,193,585 (`2.848%`), with about
    8,317,804 (`0.785%`) full writes. Low-load/high-zero remain 10,641,609 (`1.004%`) /
    10,093,484 (`0.952%`); all-compatible high-zero materialization is gone. About 8.29M adjacent
@@ -802,9 +804,29 @@ more mask peepholes.
   interleaved wall pairs were dominated by warm-up noise (the final pair was 2.219s/2.218s), so this
   stage makes no wall-time claim. The region trampoline test covers public-first/direct-after-patch,
   signal delink remains green, and the smallpt oracle is exact.
-- This closes the target-entry restore half of the direct-link flags tax. The larger remaining flags
-  step is still source-side pending NZCV: it needs a contract for requested-bit subsets and PF/AF
-  token state plus a cold-path materializer. Do not skip source `MergeNZCV` until that ABI exists.
+- The bounded pending-flags census found 81 full-NZCV edges in smallpt (`4 8 6`) across 51 source
+  merge groups. Of 54 edges with a compiled target, 18 targets already satisfy the existing
+  overwrite-before-observe/fault proof. The matching c-ray census found 263 full-NZCV edges among
+  436 observed external edges. A per-target cold-stub design would have grown smallpt by 41 static
+  instructions and was rejected.
+- `0a2eabf` completes the full-NZCV cross-unit contract. Candidate sites initially branch around the
+  three-instruction source merge and use a pending slow trampoline that materializes PSTATE NZCV
+  into x26 while preserving PF/AF. A proven overwrite-first target publishes a pending entry at its
+  counted body. Before an incompatible target is patched directly, LinkManager restores the source
+  merge; unlinked and far arms remain safe through the pending trampoline.
+- The first implementation required every conditional arm to be linked and compatible. The bounded
+  smallpt/CoreMark runs enabled zero groups, so it was replaced before commit. In the final design,
+  unexecuted cold arms no longer block a hot compatible arm. The smallpt debugger census observed
+  five incompatible-link restores and two compatible re-enables. Each surviving linked transition
+  replaces three merge instructions with one branch; the first cold link pays two extra trampoline
+  instructions, and an incompatible linked edge returns to the old steady-state cost.
+- Pending target entries, source patch metadata and normalized live merge words are persisted in
+  disk-cache format v7. Focused validation passes 324 assertions across seven tests, including
+  conditional execution, incompatible-target fallback, signal/SMC delink, cache serialization and
+  all static-pin trampoline configurations. The final static smallpt screen completed in 2.352s,
+  covered 558 PCs and preserved PPM SHA
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. Unit sizes are unchanged;
+  this stage makes no wall-time claim and ran no long benchmark, stress test or full suite.
 
 ## Orb loop
 
