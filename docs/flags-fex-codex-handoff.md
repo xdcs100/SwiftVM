@@ -416,12 +416,15 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 - Normalized U8 `Select(condition, 1, 0)` now emits `CSET`, and its two `LoadImm` producers are
   suppressed only when every use is another proven identity select. The proof accepts only direct
   boolean producers and bounded `And` / `Or` compositions. A sole `CondSet` condition is folded into
-  the result; when PSTATE is dirty, `CSET` runs before `MergeNZCV` so the old guest-flags publication
-  boundary remains. Other non-local conditions retain the existing `MergeNZCV + CMP` path. The
+  identity and general selects; when PSTATE is dirty, `CSET` / `CSEL` runs before `MergeNZCV` so the
+  old guest-flags and pending-token publication boundary remains. Other non-local conditions retain
+  the existing `MergeNZCV + CMP` path. The
   strict local `4 8 6` A/B has identical 2,757-PC / 3,597-version sets, 100% host/entry and
-  top-20 coverage,
-  byte-identical PPM, zero spills and common host `591,583 -> 588,807` (`-2,776`, `-0.469249%`)
-  with no growing PC. CondSet, flag-elimination and COMIS checks pass 3,588 assertions. The bounded
+  top-20 coverage, byte-identical PPM, zero spills and common host `591,583 -> 583,155`
+  (`-8,428`, `-1.424652%`)
+  with no growing PC. General conditional-select fusion contributes `-5,652` (`-0.959907%`) on top
+  of the identity form; one 2,502-entry PC accounts for 5,004 of those instructions. CondSet,
+  flag-elimination and COMIS checks pass 3,588 assertions. The bounded
   setcc/cmov/jcc and BMI diagnostics are byte-for-byte identical to the pre-change failure sets;
   the 512-iteration interpreter run passes. A frontend-only SetCC collapse reached `586,558`, but
   raised BMI JIT/interpreter divergences from 324 to 327 by skipping this publication boundary and
