@@ -4495,6 +4495,7 @@ TEST_CASE("guest GPR coalescing keeps publication and snapshot proofs local") {
             ExpandedProducer{OpCode::Not, "Not"},
             ExpandedProducer{OpCode::Neg, "Neg"},
             ExpandedProducer{OpCode::GetOperand, "GetOperand"},
+            ExpandedProducer{OpCode::SignExtend, "SignExtend"},
             ExpandedProducer{OpCode::LslImm, "LslImm"},
             ExpandedProducer{OpCode::LslValue, "LslValue"},
             ExpandedProducer{OpCode::LsrImm, "LsrImm"},
@@ -4553,6 +4554,14 @@ TEST_CASE("guest GPR coalescing keeps publication and snapshot proofs local") {
                 return block->Neg(load_scalar(0x123456789abcdef0ull)).SetType(type);
             case OpCode::GetOperand:
                 return block->GetOperand(Operand{load_scalar(0x1000)}).SetType(type);
+            case OpCode::SignExtend: {
+                const auto input_type = type == ValueType::U64
+                        ? ValueType::U32
+                        : ValueType::U16;
+                auto input = block->LoadImm(Imm{swift::u32{0x8001}})
+                                     .SetType(input_type);
+                return block->SignExtend(input).SetType(type);
+            }
             case OpCode::LslImm:
                 return block->LslImm(load_scalar(0x123456789abcdef0ull), Imm{5u})
                         .SetType(type);

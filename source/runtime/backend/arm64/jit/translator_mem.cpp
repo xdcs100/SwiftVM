@@ -45,6 +45,7 @@ bool IsHostCoalesceProducer(ir::OpCode op, bool width_chain) {
         case O::Neg:
         case O::GetOperand:
         case O::ZeroExtend32:
+        case O::SignExtend:
         case O::LslImm:
         case O::LslValue:
         case O::LsrImm:
@@ -61,7 +62,6 @@ bool IsHostCoalesceProducer(ir::OpCode op, bool width_chain) {
         case O::MulHigh:
             return true;
         case O::GetHostGPR:
-        case O::SignExtend:
             return width_chain;
         default:
             return false;
