@@ -4947,7 +4947,7 @@ TEST_CASE("guest GPR coalescing keeps publication and snapshot proofs local") {
     }
 }
 
-TEST_CASE("resident XMM ABI leaves the accumulator home in canonical state") {
+TEST_CASE("resident XMM ABI maps the low register bank") {
     using namespace swift::runtime;
     using namespace swift::translator::x86;
 
@@ -4972,7 +4972,7 @@ TEST_CASE("resident XMM ABI leaves the accumulator home in canonical state") {
     }
     X86Instance::Destroy(instance);
 
-    REQUIRE_FALSE(xmm0_mapped);
+    REQUIRE(xmm0_mapped);
     REQUIRE(std::ranges::all_of(low_mapped, [](bool value) { return value; }));
 }
 

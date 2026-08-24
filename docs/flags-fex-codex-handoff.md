@@ -712,7 +712,7 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 | Zero-register `SetHostGPR` publication | smallpt / c-ray equal-entry only `-1` / `-22`; existing GPR coalescing already absorbs it, fully reverted |
 | Transparent `BitCast` zero-store graph | formal smallpt and c-ray are byte-identical at every equal-entry PC; the proof reaches no remaining materialization and was fully reverted |
 | One-instruction legacy scalar FP | the two instructions are low-lane arithmetic plus required x86 high-lane preservation; the only one-instruction AFP/NEP route remains rejected by the exact smallpt oracle |
-| Broader resident-XMM StoreUniform removal | local DSE/fault sinking and profitable XMM1-11 homes are already active; XMM0 regressed wall time and XMM12-15 reintroduce the closed FPR-pool pressure |
+| XMM12-15 resident expansion | XMM0-11 are now resident by default; extending the ABI through XMM15 reintroduces the closed FPR-pool pressure and remains rejected |
 | Remaining absolute `GetOperand` materialization | 21.75M left-immediate instances are true two-part constants; ADRP/literal alternatives do not preserve the current relocation and mapping contract |
 | Saved-flags compound `CondSet` | two-instruction HI/LS and GE/LT forms were implemented and validated, but execute 0 times in formal smallpt/CoreMark and the c-ray audit sample; GT/LE still need three inputs, so the zero-gain prototype was removed |
 | General narrow `TEST` direct-`And` flags | 496-PC bounded A/B had 29 shrinking and 31 growing PCs, only 13 net static instructions and `-623` retained-formal-weighted instructions; fully reverted |
@@ -827,6 +827,17 @@ peepholes.
   covered 558 PCs and preserved PPM SHA
   `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. Unit sizes are unchanged;
   this stage makes no wall-time claim and ran no long benchmark, stress test or full suite.
+- XMM0 now joins the default resident ABI, so XMM0-11 map to v16-v27. The bounded Orb
+  `smallpt_wh_x64 4 32 24` comparison has identical 2,793-PC / 3,647-version sets, 100% host,
+  entry and top-20 coverage, exact PPM SHA
+  `fe779f46a4c8f0f75ab42b573253492e5f1da2ee508fdb6aee62389787244cd0` and zero spills. Weighted
+  host instructions fall `4,914,012 -> 4,804,966` (`-109,046`, `-2.219083%`): 163 PCs shrink,
+  three grow and 2,627 are unchanged. Move-class instructions rise `1,291,180 -> 1,313,749`, but
+  the fixed-home moves replace a larger uniform-state load/store cost. The final Mac static screen
+  completes in 1.206s, covers 558 PCs and preserves its existing PPM oracle. Disk-cache format is
+  v8 because cached code embeds the resident-XMM ABI. Focused resident-XMM, page-fault and cache
+  serializer validation passes 909 assertions; the cross-process v8 cache round trip also passes.
+  This stage makes no wall-time claim and ran no long benchmark, stress test or full suite.
 
 ## Orb loop
 

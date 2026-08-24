@@ -164,7 +164,7 @@ struct FeatureOverrides {
     X(bool, narrow_rotate_compact, "SVM_NARROW_ROTATE_COMPACT", DefaultOn, true, "U16 立即数 8 rotate 紧凑 lowering；缺省 ON，=0 回退；原 decoder_alu.cc:1335") \
     X(bool, xmm_ssa_fwd2, "SVM_XMM_SSA_FWD2", DefaultOn, true, "XMM load-load SSA 转发；缺省 ON，=0 回退；原 uniform_elimination_pass.cpp:90") \
     X(bool, xmm_narrow_fwd, "SVM_XMM_NARROW_FWD", DefaultOn, true, "XMM 窄视图转发；缺省 ON，=0 回退；原 uniform_elimination_pass.cpp:102") \
-    X(bool, xmm_resident, "SVM_XMM_RESIDENT", DefaultOn, true, "XMM1-7 固定驻留 v17-v23，XMM0 保持 State；缺省 ON，=0 回退；跨 unit ABI，原 translator/x86/translator.cpp") \
+    X(bool, xmm_resident, "SVM_XMM_RESIDENT", DefaultOn, true, "XMM0-7 固定驻留 v16-v23；缺省 ON，=0 回退；跨 unit ABI，原 translator/x86/translator.cpp") \
     X(bool, xmm_resident_hi, "SVM_XMM_RESIDENT_HI", DefaultOn, true, "XMM8-11 固定驻留 v24-v27；缺省 ON，=0 回退，依赖 SVM_XMM_RESIDENT；无害性依赖 SVM_FPR_SCRATCH_PRECISE+SVM_FPR_IPV_RECLAIM 同开（单独关 B 退化为池 17 有税形态）；跨 unit ABI，原 translator/x86/translator.cpp") \
     X(bool, vec_imm_shift, "SVM_VEC_IMM_SHIFT", DefaultOn, true, "vector immediate shift lowering；缺省 ON，=0 回退；原 decoder_sse.cc/decoder_avx_int.cc") \
     X(bool, vec_const_cache, "SVM_VEC_CONST_CACHE", DefaultOn, true, "vector constant cache；缺省 ON，=0 回退；原 decoder_internal.h:47") \
