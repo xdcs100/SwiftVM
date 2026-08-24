@@ -442,7 +442,9 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   beyond the sole-use form. FPR publication/fault, resident-XMM, scalar SSE, COMIS and
   directed/fuzzed VEX.128 validation pass 5,616 assertions. The pre-existing SSE batch-B
   JIT/interpreter divergence count remains exactly 392 on both arms. No long benchmark or full
-  suite was run.
+  suite was run. A complete bounded pair census found 105 adjacent publications: all are GPR64 +
+  high-zero, 43 use the existing load fusion and 62 use value fusion, for 4,004 weighted pair
+  executions; no adjacent pair remains unmatched. The temporary census output was removed.
 - FEX-aligned RE=0 same-harness refresh for formal smallpt: SVM host/guest
   `3.335622 → 3.267832`; the landed stages fold this to about `2.478306`. With unchanged FEX
   `1.549`, ratio is `2.153× → 1.600×`. The earlier
