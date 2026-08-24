@@ -737,6 +737,9 @@ saved-flags compound CondSet 的 `HI/LS` 与 `GE/LT` 两指令原型通过 88-as
    ordinary StoreMemory、callee-saved `Sub`、窄 `Sub` 的 `LSL #0` preparation 和
    `SignExtend` publication 已关闭；同构 `Add` 仅 `-51`，不再扩池。当前 bounded census
    的 31,705 次实际 SetHostGPR 发码中，13,002 次 `GetHostGPR` 根是 guest home 间真复制。
+   另有 5,157 次 `Sub` 根来自 Mac biased-memory 的栈更新；faulting StoreMemory 位于 Sub
+   与 RSP publication 之间，不能提前覆盖 x19。Linux identity 的精确形态已由 pre-index
+   store 合并，因此这不是剩余 FEX 对齐池。
 2. 当前正式 smallpt 的已覆盖 link 约 6.6%。region/cycle link tail 约 2.1%，其中
    acquire poll 与跨本块 cold stub 的目标跳转不可直接删除；
    七条 return-L1 静态序列约 1.26%，地址形成已缩为 `BFI`，剩余

@@ -693,7 +693,10 @@ candidate changes unit/version formation and must pass a future formal gate befo
    same `Add` extension was only `-51` and is closed. A current bounded emitted-write census has
    31,705 weighted `SetHostGPR` instructions: 13,002 are `GetHostGPR`-root guest copies, while the
    3,944 `SignExtend` pool is now closed. Recount roots after each landed stage; do not treat the
-   remaining total as a generally safe GetHost elimination.
+   remaining total as a generally safe GetHost elimination. Another 5,157 `Sub`-root live writes
+   are Mac biased-memory stack updates separated from publication by a faulting store; Linux
+   identity already folds the exact safe form into pre-index stores, so this is not a remaining
+   FEX-alignment pool.
 3. **smallpt remaining link** — covered link is now about 6.6%. Region/cycle tails are about
    2.1%; their acquire poll and branch across per-block cold stubs are load-bearing. Audit the
    roughly 1.26% remaining return-L1 static sequences separately; address formation is now one
