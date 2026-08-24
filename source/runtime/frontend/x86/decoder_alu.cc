@@ -705,6 +705,13 @@ void X64Decoder::DecodeAnd(_DInst& insn, bool save_result) {
     auto& op0 = insn.ops[0];
     auto& op1 = insn.ops[1];
 
+    if (!save_result && op0.size < 32 && op0.type == O_REG &&
+        op1.type == O_REG && op0.index == op1.index && op0.size == op1.size) {
+        auto result = ToValue(Src(insn, op0));
+        SaveLogicFlags(result, op0.size, true);
+        return;
+    }
+
     auto right = ToValue(Src(insn, op1));
     const bool locked_rmw =
             save_result && op0.type != O_REG && (insn.flags & FLAG_LOCK) != 0;

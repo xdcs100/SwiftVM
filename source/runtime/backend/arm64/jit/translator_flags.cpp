@@ -272,45 +272,70 @@ void JitTranslator::MergeLogicalFlagsNZ(ir::Flags requested) {
 void JitTranslator::SaveLogicalResultFlags(Register& result,
                                            ir::ValueType type,
                                            const PseudoFlags& pseudo) {
-    const auto scratch = context.GetSharedTmpX();
+    const bool needs_parity_value =
+            !FlagsRegsEnabled() && True(pseudo.set & ir::Flags::Parity);
+    if (pseudo.branch_only || !needs_parity_value) {
+        EmitLogicalNZFlags(result, type);
+    } else {
+        const auto scratch = context.GetSharedTmpX();
+        switch (type) {
+            case ir::ValueType::S8:
+            case ir::ValueType::U8:
+                __ Sxtb(scratch, result.W());
+                break;
+            case ir::ValueType::S16:
+            case ir::ValueType::U16:
+                __ Sxth(scratch, result.W());
+                break;
+            case ir::ValueType::S32:
+            case ir::ValueType::U32:
+                __ Sxtw(scratch, result.W());
+                break;
+            case ir::ValueType::S64:
+            case ir::ValueType::U64:
+                __ Mov(scratch, result);
+                break;
+            default:
+                PANIC();
+        }
+        __ Tst(scratch, scratch);
+    }
+    if (pseudo.branch_only) {
+        return;
+    }
+    if (FlagsRegsEnabled()) {
+        nzcv_requested |= GuestNZCVToHost(pseudo.set & ir::Flags::NZ);
+        nzcv_dirty = true;
+    } else {
+        MergeLogicalFlagsNZ(pseudo.set);
+    }
+    if (True(pseudo.set & ir::Flags::Parity)) {
+        SaveParity(result);
+    }
+}
+
+void JitTranslator::EmitLogicalNZFlags(const Register& value,
+                                       ir::ValueType type) {
     switch (type) {
         case ir::ValueType::S8:
         case ir::ValueType::U8:
-            __ Sxtb(scratch, result.W());
+            // Zero plus the shifted value sets narrow N/Z while leaving C/V clear.
+            __ Adds(wzr, wzr, Operand{value.W(), LSL, 24});
             break;
         case ir::ValueType::S16:
         case ir::ValueType::U16:
-            __ Sxth(scratch, result.W());
+            __ Adds(wzr, wzr, Operand{value.W(), LSL, 16});
             break;
         case ir::ValueType::S32:
         case ir::ValueType::U32:
-            __ Sxtw(scratch, result.W());
+            __ Tst(value.W(), value.W());
             break;
         case ir::ValueType::S64:
         case ir::ValueType::U64:
-            __ Mov(scratch, result);
+            __ Tst(value.X(), value.X());
             break;
         default:
             PANIC();
-    }
-    // NZ from the sign-extended result, with C/V cleared — the x86 logical-op
-    // flag shape. Must NOT be spelled `Bics(ip, ip, 0)`: vixl inverts a BIC
-    // immediate, and the resulting all-ones is not a legal logical immediate,
-    // so LogicalMacro synthesizes it through UseScratchRegisterScope and
-    // silently clobbers x16 (vixl's tmp_list_ is {x16, x17}, which this
-    // backend does not reserve from the register allocator). Tst is the
-    // register form of ANDS and yields the identical NZCV with no scratch.
-    __ Tst(scratch, scratch);
-    if (!pseudo.branch_only) {
-        if (FlagsRegsEnabled()) {
-            nzcv_requested |= GuestNZCVToHost(pseudo.set & ir::Flags::NZ);
-            nzcv_dirty = true;
-        } else {
-            MergeLogicalFlagsNZ(pseudo.set);
-        }
-        if (True(pseudo.set & ir::Flags::Parity)) {
-            SaveParity(result);
-        }
     }
 }
 

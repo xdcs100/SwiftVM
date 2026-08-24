@@ -476,6 +476,16 @@ void JitTranslator::EmitOr(ir::Inst* inst) {
     }
     auto left = inst->GetArg<ir::Value>(0);
     auto right = inst->GetArg<ir::Operand>(1);
+    auto pseudo_flags = GetPseudoFlags(inst);
+    if (!pseudo_flags.Null() && inst->GetUses() == 0 && right.IsImm() &&
+        right.GetLeft().imm.Get() == 0) {
+        auto value = context.R(left);
+        if (!pseudo_flags.branch_only) {
+            BeginFlagsTokenProducer(pseudo_flags);
+        }
+        SaveLogicalResultFlags(value, left.Type(), pseudo_flags);
+        return;
+    }
     auto right_operand = context.GetFeatures().int_imm_fold && right.IsImm() &&
                                  Assembler::IsImmLogical(
                                          right.GetLeft().imm.Get(),
@@ -487,8 +497,6 @@ void JitTranslator::EmitOr(ir::Inst* inst) {
             : EmitOperand(right);
     auto result = context.R(ir::Value{inst});
     auto left_register = context.R(left, true);
-
-    auto pseudo_flags = GetPseudoFlags(inst);
 
     if (!pseudo_flags.Null() && !pseudo_flags.branch_only) {
         BeginFlagsTokenProducer(pseudo_flags);

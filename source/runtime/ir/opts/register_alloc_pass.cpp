@@ -1219,12 +1219,42 @@ private:
         return false;
     }
 
+    bool DirectlyFeedsLogicalFlagIdentity(Inst* inst) const {
+        auto in_block = [&](Block* candidate) {
+            bool found = false;
+            for (auto& next : candidate->GetInstList()) {
+                if (found) {
+                    if (next.GetOp() != OpCode::Or || next.GetUses() != 0 ||
+                        next.GetArg<Value>(0).Def() != inst ||
+                        !next.HasFlagsSavePseudo()) {
+                        return false;
+                    }
+                    auto operand = next.GetArg<Operand>(1);
+                    return operand.IsImm() &&
+                           operand.GetLeft().imm.Get() == 0;
+                }
+                found = &next == inst;
+            }
+            return false;
+        };
+        if (block) {
+            return in_block(block);
+        }
+        for (auto* hir_block : function->GetHIRBlocks()) {
+            if (in_block(hir_block->GetBlock())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     Value NarrowLoadTieSource(Inst* inst) const {
         if (shift_imm_fast) {
             if (inst->GetOp() == OpCode::BitExtract &&
                 inst->GetArg<Imm>(1).Get() == 0 &&
                 inst->GetArg<Imm>(2).Get() == GetValueSizeByte(inst->ReturnType()) * 8 &&
-                DirectlyFeedsImmediateShift(inst)) {
+                (DirectlyFeedsImmediateShift(inst) ||
+                 DirectlyFeedsLogicalFlagIdentity(inst))) {
                 return ResolveBitCastSource(inst->GetArg<Value>(0));
             } else if (inst->GetOp() == OpCode::ZeroExtend32) {
                 auto source = ResolveBitCastSource(inst->GetArg<Value>(0));

@@ -7,6 +7,7 @@ add_executable(swift_test
         flags_merge_test.cpp
         jit_cache_direct_link_test.cpp
         integer_width_elimination_test.cpp
+        logical_flags_codegen_test.cpp
         pinned_gpr_read_test.cpp
         register_alloc_copy_test.cpp
         register_alloc_fpr_test.cpp

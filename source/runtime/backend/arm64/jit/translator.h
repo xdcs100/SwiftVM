@@ -373,6 +373,7 @@ private:
 
     // Compute N/Z from a result value and merge them (for ops without a flag setting form)
     void SaveLogicalResultFlags(Register &result, ir::ValueType type, const PseudoFlags &pseudo);
+    void EmitLogicalNZFlags(const Register& value, ir::ValueType type);
 
     // Materialize an IR operand into a scratch register
     Register MaterializeOperand(const Operand &operand, ir::ValueType type);
