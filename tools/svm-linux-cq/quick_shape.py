@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import time
@@ -23,6 +24,14 @@ PROFILE_ENV = (
     "SVM_MEM_MODE_TRACE",
     "SVM_PROF",
     "SVM_PROF2",
+    "SVM_RA_HOT_COALESCE",
+    "SVM_RA_HOT_COALESCE_ALL",
+    "SVM_VIXL_HOST_DUMP",
+)
+
+HOST_DUMP_LINE = re.compile(
+    rb"^\[svm-host\]\s+pc=(0x[0-9a-f]+)\s+size=(\d+)\s+",
+    re.MULTILINE,
 )
 
 
@@ -35,6 +44,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out", required=True, type=pathlib.Path)
     parser.add_argument("--timeout", type=float, default=15.0)
     parser.add_argument("--oracle", action="append", default=[])
+    parser.add_argument(
+        "--static-only",
+        action="store_true",
+        help="capture host shape without emitting runtime entry counters",
+    )
     parser.add_argument("guest_args", nargs=argparse.REMAINDER)
     return parser.parse_args()
 
@@ -53,6 +67,24 @@ def sha256(path: pathlib.Path) -> str:
     return digest.hexdigest()
 
 
+def write_static_shape(stderr_path: pathlib.Path, hot_path: pathlib.Path) -> int:
+    versions: dict[int, list[int]] = {}
+    for match in HOST_DUMP_LINE.finditer(stderr_path.read_bytes()):
+        pc = int(match.group(1), 0)
+        versions.setdefault(pc, []).append(int(match.group(2)))
+    with hot_path.open("w", encoding="utf-8") as handle:
+        for pc, sizes in sorted(versions.items()):
+            host_bytes = max(sizes)
+            if host_bytes % 4:
+                raise ValueError(f"unaligned host code size for 0x{pc:x}: {host_bytes}")
+            handle.write(
+                f"[svm-hot-all] pc=0x{pc:x} versions={len(sizes)} entries=1 "
+                f"host_bytes={host_bytes} host_static={host_bytes // 4} "
+                "move_static=0 nan_static=0 spill_static=0 state_saved_static=0\n"
+            )
+    return len(versions)
+
+
 def main() -> int:
     args = parse_args()
     svm = args.svm.resolve()
@@ -69,11 +101,15 @@ def main() -> int:
     hot_path = output / "shape.hot"
     stdout_path = output / "stdout.log"
     stderr_path = output / "stderr.log"
+    hot_path.unlink(missing_ok=True)
     environment = os.environ.copy()
     for name in PROFILE_ENV:
         environment.pop(name, None)
-    environment["SVM_RA_HOT_COALESCE"] = str(hot_path)
-    environment["SVM_RA_HOT_COALESCE_ALL"] = "1"
+    if args.static_only:
+        environment["SVM_VIXL_HOST_DUMP"] = "1"
+    else:
+        environment["SVM_RA_HOT_COALESCE"] = str(hot_path)
+        environment["SVM_RA_HOT_COALESCE_ALL"] = "1"
 
     guest_args = args.guest_args[1:] if args.guest_args[:1] == ["--"] else args.guest_args
     command = [str(svm), str(guest), *guest_args]
@@ -94,9 +130,9 @@ def main() -> int:
             return_code = 124
     elapsed = time.monotonic() - started
 
-    hot_records = 0
+    hot_records = write_static_shape(stderr_path, hot_path) if args.static_only else 0
     summary = ""
-    if hot_path.is_file():
+    if not args.static_only and hot_path.is_file():
         with hot_path.open(encoding="utf-8", errors="replace") as handle:
             for line in handle:
                 hot_records += line.startswith("[svm-hot-all]")

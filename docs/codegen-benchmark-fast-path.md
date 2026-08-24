@@ -25,6 +25,29 @@ control flow, unit formation or workload inputs.
 profile variables in the child. It enables only the existing hot-shape collector, writes stdout
 and stderr to the requested output directory, enforces a timeout and hashes requested oracles.
 
+For the first code-size screen, `--static-only` skips runtime counters and parses the existing host
+code dump. Each PC receives `entries=1`; `host_static` is the largest emitted version, while move,
+NaN and spill fields are unavailable and remain zero. Require 100% PC coverage and use this mode
+only to reject zero-impact or growing candidates before the weighted screen.
+
+```sh
+python3 "$ROOT/tools/svm-linux-cq/quick_shape.py" \
+  --static-only --svm "$BASE" --guest "$GUEST" --out "$OUT/static-base" \
+  --timeout 8 --oracle image.ppm -- 4 8 6
+python3 "$ROOT/tools/svm-linux-cq/quick_shape.py" \
+  --static-only --svm "$CAND" --guest "$GUEST" --out "$OUT/static-candidate" \
+  --timeout 8 --oracle image.ppm -- 4 8 6
+python3 "$ROOT/tools/svm-linux-cq/weighted_diff.py" \
+  --weights "$OUT/static-base/shape.hot" \
+  "$OUT/static-base/shape.hot" "$OUT/static-candidate/shape.hot" \
+  --min-coverage 100 --top 20 --fail-on-growth
+```
+
+On the current Mac Debug build, `smallpt_wh_x64 4 8 6` static captures completed in 2.3–4.2
+seconds during this stage. The counter-based capture exceeded 15 seconds under the same bounded
+input, so static mode is the default iteration path and the retained formal log remains the
+promotion gate.
+
 ```sh
 ROOT=/path/to/SwiftVM
 BASE=/path/to/baseline/svm_translator_linux

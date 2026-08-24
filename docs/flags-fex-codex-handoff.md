@@ -778,6 +778,34 @@ more mask peepholes.
 8. **PF/AF dedicated GPR is closed** until a new canonical park/recovery carrier yields a nonzero mechanical saving; the current audit is strictly negative.
 9. **Do not** grow the default region window again for coremark (64 == 128). Other benches might still want 128 **after** the lazy fix.
 
+## 2026-08-25 continuation
+
+- Default level 2 still pins 12 of 16 guest GPRs. Level 3/full pin remains closed: the fixed audit
+  grows move/bridge work by 3.526%, and the Mac Debug pool can abort at 6 available registers for
+  a 21-register scratch demand.
+- `quick_shape.py --static-only` now captures the existing host dump without runtime entry counters.
+  The bounded `smallpt_wh_x64 4 8 6` screen completes in 2.3–4.2 seconds on this Mac Debug build,
+  covers 558 PCs and preserves PPM SHA
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. Use it to reject
+  zero-impact or growing candidates; retained formal entries remain the promotion weights.
+- Closed in the fast screen: region window 128 grows common code by 357 instructions (`+0.572473%`);
+  AFP minmax and SHUFPS immediate are byte-identical; width chain saves 9 instructions; loop flags
+  grows 40; full flag elimination grows 3. Direct `GetHostGPR -> SetHostGPR` is byte-identical, and
+  forwarding through `ZeroExtend32To64` saves only 38 of 62,372 instructions (`0.060925%`). All
+  production prototypes and their probes were removed.
+- `4f27b7a` adds canonical-state cross-unit dual entries. The cold linker still returns through the
+  published entry after its C++ helper call; once linked, the patched branch targets the counted
+  body entry and skips the redundant `MSR NZCV,x26; B body`. Flags-transparent blocks retain the
+  published entry because their terminal may republish incoming PSTATE. The second entry is carried
+  through LinkManager generation/SMC ownership and disk-cache format v6.
+- Each eligible linked transition now has a mechanical two-instruction reduction. Three tiny
+  interleaved wall pairs were dominated by warm-up noise (the final pair was 2.219s/2.218s), so this
+  stage makes no wall-time claim. The region trampoline test covers public-first/direct-after-patch,
+  signal delink remains green, and the smallpt oracle is exact.
+- This closes the target-entry restore half of the direct-link flags tax. The larger remaining flags
+  step is still source-side pending NZCV: it needs a contract for requested-bit subsets and PF/AF
+  token state plus a cold-path materializer. Do not skip source `MergeNZCV` until that ABI exists.
+
 ## Orb loop
 
 ```
