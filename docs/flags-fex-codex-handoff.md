@@ -615,6 +615,7 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 | Same-value carry-polarity publication dedup | equal-entry smallpt only `-23,703` (`-0.0022%`), with 137 PCs larger, 17 smaller and changed unit formation; fully reverted |
 | Generalized legacy scalar resident-left chain | formal smallpt byte-identical at `1,072,445,284`; exact `GetHostFPR` origin is not the remaining limiter, fully reverted |
 | Generated TestZero/TestNotZero local condition | FLAGS=1 transparent window still saves only 919 formal smallpt instructions; fully reverted |
+| Sole TestZero/TestNotZero identity/general Select fusion | strict local `4 8 6` saves only 79 (`-0.013547%`); exact PPM and no growth, but the extra planner state is not justified and was fully reverted |
 | Zero-register `SetHostGPR` publication | smallpt / c-ray equal-entry only `-1` / `-22`; existing GPR coalescing already absorbs it, fully reverted |
 | Transparent `BitCast` zero-store graph | formal smallpt and c-ray are byte-identical at every equal-entry PC; the proof reaches no remaining materialization and was fully reverted |
 | One-instruction legacy scalar FP | the two instructions are low-lane arithmetic plus required x86 high-lane preservation; the only one-instruction AFP/NEP route remains rejected by the exact smallpt oracle |
