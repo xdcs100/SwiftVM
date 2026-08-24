@@ -37,8 +37,9 @@ live resident-FPR publication、scalar-load FPR fusion、scalar-sqrt resident pu
 legacy scalar-binary resident publication、direct absolute-address materialization 和 compact
 FCMP PF/AF publication、trailing static-location cold publication、compact FCMP carrier
 publication、semantic Nop elision、zero-register FPR lane publication 和 shared zero-store
-materialization elision，再加入 simple CondSet saved-flags extraction 后，按正式 host 权重
-折算约为 2.669035。以未变的 FEX 1.549 为分母，对应 2.153×→1.723×。
+materialization elision，再加入 simple CondSet saved-flags extraction 和 scaled memory
+displacement encoding 后，按正式 host 权重折算约为 2.668787。以未变的 FEX 1.549
+为分母，对应 2.153×→1.723×。
 旧表与这次重采的
 unit 形成参数不完全相同，
 因此不直接覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 1.71–1.78×。
@@ -361,7 +362,18 @@ use 数精确闭合；跨块、地址复用、算术/pseudo observer、spill、�
 - STREAM/CoreMark 等 entry 分别减少 2,168 / 2,210，均为 53 个共同 PC 缩短、0 个增长，
   并保持 `Solution Validates` / CRC final `0x382f`。
 
-二十项合计使正式 smallpt 默认 region host 减少 261,512,503（19.7868%）。
+### Scaled memory displacement encoding
+
+提交 `0fc245c` 让 identity-mode `[base + imm]` 同时接受 AArch64 unsigned scaled offset，
+避免把已按访问宽度对齐的正位移先 `MOV` 到寄存器。pair、shift、writeback 和 bounded-bias
+路径继续使用原判定，没有新增开关。
+
+- 正式 smallpt 1,060,138,659→1,060,040,252，减少 98,407（0.0093%）；18 个共同 PC
+  缩短、0 个增长，unit/version/entry 与 spill 均一致；
+- c-ray、STREAM、CoreMark 等 entry 分别减少 93 / 8 / 8，全部只减不增，PPM、IDAT、
+  `Solution Validates` 和 CRC final `0x382f` 保持一致。
+
+二十一项合计使正式 smallpt 默认 region host 减少 261,610,910（19.7942%）。
 
 ## 否决项
 
@@ -392,6 +404,11 @@ TestZero/TestNotZero 的 generated local condition 即使允许 FLAGS=1 下跨
 透明 `BitCast` 零值存储图证明通过既有 537-assertion 矩阵，但正式 smallpt 的 3,364 个
 unit 与 c-ray 的所有等 entry PC 均逐字不变，说明剩余零物化不受该透明节点限制；原型已
 完整删除。
+
+legacy scalar FP 的两条指令分别承担低 lane 运算和 x86 高 lane 保留，不是普通 copy；
+单条路径依赖 AFP/NEP，而该路线已被 exact smallpt 输出否决。StoreUniform 侧的同块 DSE、
+XMM fault sink 和 XMM1-11 驻留均已启用；XMM0 有既有墙钟回退证据，XMM12-15 会重新压缩
+已关闭的动态 FPR 池，因此本轮不扩展驻留范围。
 
 ## 验证
 
@@ -446,6 +463,9 @@ unit 与 c-ray 的所有等 entry PC 均逐字不变，说明剩余零物化不�
   38/0，1664-unit/11-guest fingerprint 全部一致。顶层 seed 424242 的重复运行保持
   191 passed / 35 个既有 failed cases；嵌套子进程 seed 会使既有 config/fuzz 失败断言在
   44–45 间波动，没有新增失败类别。
+- 既有 address/host-base focus 在 Mac/Orb 均通过 39 assertions；基线/候选 FLAGS 十二格
+  与 1664-unit/11-guest fingerprint 逐字一致。顶层 seed 424242 保持 191 passed / 35 个
+  既有 failed cases / 45 个失败断言。
 - RSB/indirect 结构测试 26 assertions，覆盖八指令 L1 快路径、无 push 和无目标
   dispatcher 路径；显式改写栈返回地址的临时 probe 在默认、L1-off 两种 RSB frame、
   FLAGS-off 和 interpreter 下均 rc=0，probe 已删除。
