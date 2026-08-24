@@ -131,13 +131,14 @@ bool ApplyRelocations(u8* rw_code,
 // Serialized unit
 // --------------------------------------------------------------------------
 // One guest basic block inside a compiled unit: its guest byte range, the
-// offset of its entry point inside the unit's host code, and the hash of the
-// guest bytes the translation was produced from.
+// offsets of its public and optional direct-link entries inside the unit's
+// host code, and the hash of the guest bytes the translation was produced from.
 struct SerialBlock {
     u64 guest_start{};
     u64 guest_end{};
     u32 code_offset{};
     u64 guest_bytes_hash{};
+    u32 direct_code_offset{UINT32_MAX};
 };
 
 // One direct-link branch site inside the unit. The code byte at
@@ -222,7 +223,7 @@ struct ValidityKey {
     bool operator==(const ValidityKey&) const = default;
 };
 
-constexpr u64 kCacheFormatVersion = 5;
+constexpr u64 kCacheFormatVersion = 6;
 
 u64 HashBytes(const void* data, std::size_t size, u64 seed);
 u64 HashU64(u64 value, u64 seed);

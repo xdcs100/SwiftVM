@@ -386,7 +386,10 @@ bool JitDiskCache::ReviveUnit(const std::shared_ptr<Module>& module, const Seria
             dirty = true;
             return false;
         }
-        if (block.code_offset % 4 != 0 || block.code_offset >= unit.code.size()) {
+        if (block.code_offset % 4 != 0 || block.code_offset >= unit.code.size() ||
+            (block.direct_code_offset != UINT32_MAX &&
+             ((block.direct_code_offset & 3u) != 0 ||
+              block.direct_code_offset >= unit.code.size()))) {
             stats.reject_reloc.fetch_add(1, std::memory_order_relaxed);
             dirty = true;
             return false;
@@ -580,9 +583,13 @@ bool JitDiskCache::ReviveUnit(const std::shared_ptr<Module>& module, const Seria
     // by the cold linker only after every source record and signal patch record
     // for this allocation exists. Linked state is never restored from disk.
     for (const auto& block : unit.blocks) {
+        auto* direct_host_pc = block.direct_code_offset == UINT32_MAX
+                ? nullptr
+                : buffer.exec_data + block.direct_code_offset;
         (void)module->PublishLinkTarget(ir::Location{block.guest_start},
                                         buffer.exec_data + block.code_offset,
-                                        buffer.exec_data);
+                                        buffer.exec_data,
+                                        direct_host_pc);
         address_space.PushCodeCache(ir::Location{block.guest_start},
                                     buffer.exec_data + block.code_offset);
         if (!module->GetModuleConfig().read_only) {

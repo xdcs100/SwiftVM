@@ -568,6 +568,7 @@ void WriteUnit(BlobWriter& w, const SerialUnit& unit) {
         w.U64(b.guest_end);
         w.U32(b.code_offset);
         w.U64(b.guest_bytes_hash);
+        w.U32(b.direct_code_offset);
     }
     w.U32(static_cast<u32>(unit.relocs.size()));
     for (const auto& r : unit.relocs) {
@@ -607,10 +608,13 @@ bool ReadUnit(BlobReader& r, SerialUnit& unit) {
     unit.blocks.resize(count);
     for (auto& b : unit.blocks) {
         if (!r.U64(b.guest_start) || !r.U64(b.guest_end) || !r.U32(b.code_offset) ||
-            !r.U64(b.guest_bytes_hash)) {
+            !r.U64(b.guest_bytes_hash) || !r.U32(b.direct_code_offset)) {
             return false;
         }
-        if (b.code_offset >= code_size || b.guest_end < b.guest_start) {
+        if (b.code_offset >= code_size || b.guest_end < b.guest_start ||
+            (b.direct_code_offset != UINT32_MAX &&
+             ((b.direct_code_offset & 3u) != 0 ||
+              b.direct_code_offset >= code_size))) {
             return false;
         }
     }

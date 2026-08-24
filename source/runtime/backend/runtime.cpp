@@ -974,17 +974,30 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
             }
             const auto guest = block->GetStartLocation().Value();
             const auto offset = emitted_context->GetCodeOffset(guest);
+            const auto direct_offset =
+                    emitted_context->GetDirectLinkCodeOffset(guest);
             ASSERT(offset >= 0 && static_cast<size_t>(offset) < buffer.size);
+            ASSERT(direct_offset >= 0 &&
+                   static_cast<size_t>(direct_offset) < buffer.size);
+            auto* direct_host_pc = direct_offset == offset
+                    ? nullptr
+                    : buffer.exec_data + direct_offset;
             {
                 PerfScope2 perf_pub_l2{GetPerfStats2().publish_l2};
                 (void)module->PublishLinkTarget(
-                        ir::Location{guest}, buffer.exec_data + offset, buffer.exec_data);
+                        ir::Location{guest}, buffer.exec_data + offset,
+                        buffer.exec_data, direct_host_pc);
                 mutable_address_space.PushCodeCache(guest, buffer.exec_data + offset);
             }
-            cache_blocks.push_back({guest,
-                                    block->GetEndLocation().Value(),
-                                    static_cast<u32>(offset),
-                                    0});
+            cache_blocks.push_back({
+                    .guest_start = guest,
+                    .guest_end = block->GetEndLocation().Value(),
+                    .code_offset = static_cast<u32>(offset),
+                    .guest_bytes_hash = 0,
+                    .direct_code_offset = direct_host_pc
+                            ? static_cast<u32>(direct_offset)
+                            : UINT32_MAX,
+            });
             if (!module->GetModuleConfig().read_only) {
                 PerfScope2 perf_pub_smc{GetPerfStats2().publish_smc};
                 mutable_address_space.GetSmcTracker().RegisterNode(

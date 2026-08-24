@@ -49,6 +49,9 @@ extern "C" void* RegionLinkTrampolineSlow(RegionLinkContext* context,
         if (!target || !target->host_pc) {
             return ReturnToDispatcher(*context, state, site);
         }
+        auto* direct_host_pc = target->direct_host_pc
+                ? target->direct_host_pc
+                : target->host_pc;
 
         if (site->state == LinkSiteState::Linked) {
             if (site->target_generation == target->generation) {
@@ -64,15 +67,16 @@ extern "C" void* RegionLinkTrampolineSlow(RegionLinkContext* context,
         }
 
         const bool same_region = target->region_id == context->region->id &&
-                                 context->region->ContainsRx(target->host_pc);
-        if (!same_region || !Imm26Reachable(rx_site, target->host_pc)) {
+                                 context->region->ContainsRx(direct_host_pc);
+        if (!same_region || !Imm26Reachable(rx_site, direct_host_pc)) {
             if (context->manager->MarkFar(key, target->generation)) {
                 return target->host_pc;
             }
             continue;
         }
 
-        const auto offset = static_cast<u8*>(target->host_pc) - static_cast<const u8*>(rx_site);
+        const auto offset = static_cast<u8*>(direct_host_pc) -
+                            static_cast<const u8*>(rx_site);
         const auto branch = EncodeB(offset);
         if (!branch) {
             return ReturnToDispatcher(*context, state, site);

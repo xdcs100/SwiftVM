@@ -423,13 +423,13 @@ TEST_CASE("disk cache scanner keeps move-wide constants and rejects PC-relative 
     }
 }
 
-TEST_CASE("disk cache v5 serializes feature hash and arbitrary link-site records",
+TEST_CASE("disk cache v6 serializes direct entries and arbitrary link-site records",
           "[direct-link][jit-cache][serializer]") {
     SerialUnit input{};
     input.guest_start = 0x1000;
     input.feature_hash = 0x123456789abcdef0ull;
     input.code.resize(32, 0);
-    input.blocks.push_back({0x1000, 0x1004, 0, 0x1234});
+    input.blocks.push_back({0x1000, 0x1004, 0, 0x1234, 16});
     input.link_sites = {
             {4, 0x2000, static_cast<u8>(LinkSiteKind::ConditionalThen)},
             {8, 0x3000, static_cast<u8>(LinkSiteKind::ConditionalElse)},
@@ -444,6 +444,8 @@ TEST_CASE("disk cache v5 serializes feature hash and arbitrary link-site records
     REQUIRE(output.guest_start == input.guest_start);
     REQUIRE(output.feature_hash == input.feature_hash);
     REQUIRE(output.code == input.code);
+    REQUIRE(output.blocks.size() == 1);
+    REQUIRE(output.blocks[0].direct_code_offset == 16);
     REQUIRE(output.link_sites.size() == input.link_sites.size());
     for (size_t i = 0; i < input.link_sites.size(); ++i) {
         REQUIRE(output.link_sites[i].code_offset == input.link_sites[i].code_offset);

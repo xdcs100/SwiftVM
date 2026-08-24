@@ -190,7 +190,8 @@ std::optional<LinkSiteRecord> LinkManager::QuerySite(LinkSiteKey site) const {
 u64 LinkManager::PublishTarget(u64 guest_target,
                                void* host_pc,
                                CodeRegionId region_id,
-                               LinkSourceOwner target_owner) {
+                               LinkSourceOwner target_owner,
+                               void* direct_host_pc) {
     std::lock_guard guard(mutex_);
     const u64 generation = next_target_generation_++;
     ASSERT(generation != kSignalInvalidatingGeneration);
@@ -216,6 +217,7 @@ u64 LinkManager::PublishTarget(u64 guest_target,
     targets_[guest_target] = TargetRecord{
             .generation = generation,
             .host_pc = host_pc,
+            .direct_host_pc = direct_host_pc ? direct_host_pc : host_pc,
             .region_id = region_id,
             .target_owner = target_owner,
             .signal_target = signal_target,
@@ -239,6 +241,7 @@ std::optional<LinkTargetRecord> LinkManager::QueryTarget(u64 guest_target) const
         return LinkTargetRecord{
                 .guest_target = guest_target,
                 .host_pc = it->second.host_pc,
+                .direct_host_pc = it->second.direct_host_pc,
                 .region_id = it->second.region_id,
                 .generation = it->second.generation,
                 .target_owner = it->second.target_owner,

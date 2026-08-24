@@ -1026,6 +1026,21 @@ ptrdiff_t JitContext::GetCodeOffset(LocationDescriptor location) const {
     return it->second.GetLocation();
 }
 
+ptrdiff_t JitContext::GetDirectLinkCodeOffset(LocationDescriptor location) const {
+    if (const auto it = direct_link_entry_offsets.find(location);
+        it != direct_link_entry_offsets.end()) {
+        return it->second;
+    }
+    return GetCodeOffset(location);
+}
+
+void JitContext::RecordDirectLinkEntry(LocationDescriptor location) {
+    auto* entry = GetCountedEntryLabel(location);
+    ASSERT(entry->IsBound());
+    direct_link_entry_offsets.insert_or_assign(
+            location, static_cast<u32>(entry->GetLocation()));
+}
+
 bool JitContext::IsUniform(const Register& reg) {
     auto &uniform_info = module->GetAddressSpace().GetUniformInfo();
     if (reg.IsV()) {

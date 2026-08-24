@@ -37,7 +37,7 @@ static_assert(sizeof(LinkSiteKey) == 16);
 static_assert(sizeof(LinkSourceOwner) == 16);
 static_assert(sizeof(LinkSiteRecord) == 56);
 static_assert(sizeof(LinkSignalPatchSite) == 56);
-static_assert(sizeof(LinkTargetRecord) == 48);
+static_assert(sizeof(LinkTargetRecord) == 56);
 static_assert(sizeof(CodeRegion) == 32);
 
 Config Arm64Config() {

@@ -154,6 +154,10 @@ public:
     [[nodiscard]] u32 CurrentBufferSize();
     [[nodiscard]] u32 HotProbeBytesInRange(u32 begin, u32 end) const;
     [[nodiscard]] ptrdiff_t GetCodeOffset(LocationDescriptor location) const;
+    // A linked canonical-state edge can bypass the published flags veneer.
+    [[nodiscard]] ptrdiff_t GetDirectLinkCodeOffset(
+            LocationDescriptor location) const;
+    void RecordDirectLinkEntry(LocationDescriptor location);
     [[nodiscard]] bool IsUniform(const Register& reg);
     [[nodiscard]] bool IsSpilled(const ir::Value& value) {
         return reg_alloc.ValueType(value) == RegAlloc::MEM;
@@ -352,6 +356,7 @@ private:
     std::array<ir::HostGPR, ARM64_MAX_X_REGS> spilled_gprs;
     std::array<ir::HostGPR, ARM64_MAX_X_REGS> spilled_fprs;
     std::map<LocationDescriptor, Label> labels;
+    std::map<LocationDescriptor, u32> direct_link_entry_offsets;
     std::map<LocationDescriptor, Label> internal_labels;
     // FLAGS_REGS L2 veneer lands here, immediately before the entry counter.
     // Internal taken edges still use internal_labels after the counter, matching

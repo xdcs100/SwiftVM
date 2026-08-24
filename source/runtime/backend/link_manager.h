@@ -75,7 +75,10 @@ struct LinkSignalPatchSite {
 // such a target can never be direct-linked by the region trampoline.
 struct LinkTargetRecord {
     u64 guest_target{};
+    // The slow trampoline returns through host_pc after its helper call;
+    // a successfully patched site branches to direct_host_pc.
     void* host_pc{};
+    void* direct_host_pc{};
     CodeRegionId region_id{};
     u64 generation{};
     LinkSourceOwner target_owner{};
@@ -127,7 +130,8 @@ public:
     [[nodiscard]] u64 PublishTarget(u64 guest_target,
                                     void* host_pc = nullptr,
                                     CodeRegionId region_id = 0,
-                                    LinkSourceOwner target_owner = {});
+                                    LinkSourceOwner target_owner = {},
+                                    void* direct_host_pc = nullptr);
     [[nodiscard]] std::optional<LinkTargetRecord> QueryTarget(u64 guest_target) const;
     [[nodiscard]] std::optional<u64> QueryTargetGeneration(u64 guest_target) const;
     [[nodiscard]] bool ValidateTargetGeneration(u64 guest_target, u64 generation) const;
@@ -184,6 +188,7 @@ private:
     struct TargetRecord {
         u64 generation{};
         void* host_pc{};
+        void* direct_host_pc{};
         CodeRegionId region_id{};
         LinkSourceOwner target_owner{};
         SignalTarget* signal_target{};

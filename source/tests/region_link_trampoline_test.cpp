@@ -210,7 +210,9 @@ TEST_CASE("region trampoline preserves x30 and every static-pin configuration",
                 const auto generation = manager.PublishTarget(
                         kGuestTarget,
                         code->exec_data + kTarget1,
-                        cache.GetRegion().id);
+                        cache.GetRegion().id,
+                        {},
+                        code->exec_data + kTarget2);
                 REQUIRE(generation != 0);
 
                 TestState test_state{config.uniform_buffer_size};
@@ -234,7 +236,7 @@ TEST_CASE("region trampoline preserves x30 and every static-pin configuration",
                 REQUIRE(manager.QuerySite(key)->state == LinkSiteState::Linked);
                 REQUIRE(DecodeBranchTarget(code->exec_data + kSite,
                                            LoadInsn(code->exec_data + kSite)) ==
-                        reinterpret_cast<uintptr_t>(code->exec_data + kTarget1));
+                        reinterpret_cast<uintptr_t>(code->exec_data + kTarget2));
                 if (afp_nan) {
                     constexpr u64 kExpectedGuestFPCR =
                             kSseAFPGuestFPCRBase | (u64{1} << 22);

@@ -355,17 +355,19 @@ std::optional<CodeRegion> Module::GetCodeRegion(CodeRegionId region_id) {
 
 u64 Module::PublishLinkTarget(ir::Location guest,
                               void* host_pc,
-                              const void* allocation) {
+                              const void* allocation,
+                              void* direct_host_pc) {
     if (!IsDirectLinkConfigured()) {
         return 0;
     }
     const auto region = GetCodeRegion(static_cast<u8*>(host_pc));
     if (!region || !region->ContainsRx(host_pc) ||
+        (direct_host_pc && !region->ContainsRx(direct_host_pc)) ||
         region->trampoline_offset == CodeRegion::kInvalidTrampolineOffset) {
         return 0;
     }
     return address_space.GetLinkManager().PublishTarget(
-            guest.Value(), host_pc, region->id, {this, allocation});
+            guest.Value(), host_pc, region->id, {this, allocation}, direct_host_pc);
 }
 
 void Module::DiscardLinkSource(const void* allocation) {
