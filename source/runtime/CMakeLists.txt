@@ -143,6 +143,7 @@ add_library(swift_runtime STATIC
         backend/arm64/jit/translator_alu_vec_shuffle.cpp
         backend/arm64/jit/translator_alu_vec_int.cpp
         backend/arm64/jit/translator_alu_scalar.cpp
+        backend/arm64/jit/translator_select.cpp
         backend/arm64/jit/translator_alu_vec_fp.cpp
         backend/arm64/jit/translator_alu_scalar_bits.cpp
         backend/arm64/jit/translator_control.cpp

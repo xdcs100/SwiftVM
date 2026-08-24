@@ -734,20 +734,6 @@ void JitTranslator::EmitMul(ir::Inst* inst) {
     }
 }
 
-void JitTranslator::EmitSelect(ir::Inst* inst) {
-    auto cond = inst->GetArg<ir::Value>(0);
-    auto true_value = inst->GetArg<ir::Value>(1);
-    auto false_value = inst->GetArg<ir::Value>(2);
-    auto result = context.R(ir::Value{inst});
-    if (auto local = LocalConditionFor(cond)) {
-        __ Csel(result, context.R(true_value), context.R(false_value), *local);
-        return;
-    }
-    MergeNZCV();
-    __ Cmp(context.W(cond), 0);
-    __ Csel(result, context.R(true_value), context.R(false_value), ne);
-}
-
 void JitTranslator::EmitCondSelect(ir::Inst* inst) {
     auto cond = inst->GetArg<ir::Cond>(0);
     auto true_value = inst->GetArg<ir::Value>(1);

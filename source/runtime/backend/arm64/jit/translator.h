@@ -135,6 +135,7 @@ private:
         u16 target{};
     };
     void PrepareScalarLoadFPRFusions(ir::Block* block);
+    void PrepareBooleanSelects(ir::Block* block);
     [[nodiscard]] bool ReproveScalarLoadFPRFusion(
             ir::Inst* load, const ScalarLoadFPRFusion& fusion) const;
     [[nodiscard]] bool ReprovePshufd4eExtConstant(ir::Inst* inst) const;
@@ -508,6 +509,7 @@ private:
     BitVector disable_instructions{};
     std::map<ir::Inst *, Label> local_labels{};
     std::map<ir::Inst *, Condition> local_conditions{};
+    std::unordered_set<ir::Inst*> normalized_bool_selects{};
     // ZeroExtend32To64 values whose sole consumer is a W55 full pinned write.
     // Their producer emits nothing; EmitSetHostGPR reads the original W value.
     std::unordered_set<ir::Inst*> fused_pin_zext32{};
