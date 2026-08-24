@@ -512,10 +512,26 @@ ARM64 emitter 分别维护并复算同一 producer 集合；既有 observer、fi
 - 严格 A/B 的 PC/version 均为 2,757 / 3,597，host/entry 与 top-20 覆盖 100%，PPM
   逐字一致、spill 为 0、无增长 PC，common host `580,841 -> 580,620`，减少 221
   （0.038048%）；
-- 剩余 census 由 scalar64 FP producer 的 4,024 次和 `BitCast` 的 559 次主导。前者受
-  legacy 高 lane merge 与多 use 限制，不做通用白名单；下一步先追 `BitCast` 根来源。
+- root tracing 证明 `BitCast` 不是独立 producer 池：559 次中 558 次回溯到
+  `VecFAddScalar64`，1 次回溯到 `GetHostFPR`。按根重算共有 4,582 次 scalar64 copy；
+  其中 1,883 次链头来自同一 resident home，但精确两节点/sole-use 原型只兑现 384 次。
 
 该阶段只运行短基准和定向测试，没有运行长 benchmark 或完整 suite；临时 census 已删除。
+
+### Callee-saved pinned subtraction input
+
+提交 `613dd12` 允许唯一 U8/U16/U32 consumer 为 `Sub` 时，x19–x29 callee-saved fixed home
+直接提供 W view。既有扫描仍要求同一 read 的全部 named use 落在该 consumer，并在遇到
+同 home 写入时停止，因此 snapshot、宽度和 helper-clobber 边界不变；没有扩展到其他 op。
+
+- 严格 `4 8 6` A/B 的 2,757 PC / 3,597 version、100% host/entry 和 top-20 coverage、PPM
+  与零 spill 全部保持；common host `580,620 -> 580,290`，减少 330（0.056836%），十个
+  PC 缩短且无增长；
+- pinned-GPR 六个 focused cases 通过 14 assertions；固定 seed 424242、各 256 iteration
+  的 ALU/mixed fuzz 在两臂均保持既有 88 / 106 divergence；
+- 同样放开 callee-saved `Add` 只减少 51（0.008789%），已完整删除。
+
+该阶段没有新增开关，没有运行长 benchmark 或完整 suite。
 
 ## 否决项
 
@@ -537,6 +553,11 @@ smallpt 两臂均为 1,168,614,398，证明现有 successor layout 已吸收所�
 把 legacy scalar-binary 的固定左源从精确 `GetHostFPR` 放宽到任意同 resident home 的
 SSA 链后，正式 smallpt 两臂均为 1,072,445,284，3,364 个共同 PC 全部 byte-identical；
 该条件不是剩余 publication 的限制来源，原型已完整删除。
+
+新的 scalar-insert 链审计把 4,582 次 scalar64-root full copy 分成 1,883 次同 home 链和
+其余真实跨 home/非 resident 链。精确两节点、sole-use 且 observer 安全的原型仅使短筛
+`580,620 -> 580,236`，减少 384（0.066136%），但需要约 390 行 RA/emitter 双证明；收益与
+复杂度不匹配，源码和专项测试已完整删除。`BitCast` 本身零发射，不另立优化池。
 
 TestZero/TestNotZero 的 generated local condition 即使允许 FLAGS=1 下跨
 `LoadImm + StoreUniform + AdvancePC`，正式 smallpt 也仅减少 919，收益不成比例；原型
@@ -662,6 +683,10 @@ saved-flags compound CondSet 的 `HI/LS` 与 `GE/LT` 两指令原型通过 88-as
   scalar fixed-home tie 通过 90，PSHUFD 全 immediate golden model 通过 6,914；VEX.128
   directed 通过 76，固定 seed 424242 的 256-iteration fuzz 通过。SSE batch-B directed
   通过 210，既有 JIT/interpreter differential 仍精确为 392 个 divergence。
+- callee-saved pinned `Sub` 的 U8/U16/U32 结构门将 pinned-GPR focus 扩为 6 cases /
+  14 assertions；固定 seed 424242 的 256-iteration ALU/mixed fuzz 在基线与候选均为
+  88 / 106 个既有 divergence。scratch-price focus 的 U64 large-imm 项在两臂同样为
+  24/25，属于既有过时期望，不是本阶段回归。
 - smallpt_wh PPM SHA-256 两臂均为
   `fe96f7e48295b27c8df8236294052d138c3ed130b81d022739907fe6b2cde5aa`；
   原 equal-entry c-ray sample 的 IDAT MD5 两臂均为
@@ -678,6 +703,7 @@ saved-flags compound CondSet 的 `HI/LS` 与 `GE/LT` 两指令原型通过 88-as
 1. GPR pin 应按实际 host bytes 而不是 IR 数量判断。level 2 保持 12/16 固定映射；level 3
    的 spill/host 膨胀已经否决。剩余 SetHost 热 move 多数是 guest 架构寄存器之间的真实复制，
    只能继续寻找 consumer 直接读取 fixed home 的形态，不能把真实 `mov` 当 publication 删除。
+   ordinary StoreMemory 与 callee-saved `Sub` 已关闭；同构 `Add` 仅 `-51`，不再扩池。
 2. 当前正式 smallpt 的已覆盖 link 约 6.6%。region/cycle link tail 约 2.1%，其中
    acquire poll 与跨本块 cold stub 的目标跳转不可直接删除；
    七条 return-L1 静态序列约 1.26%，地址形成已缩为 `BFI`，剩余
@@ -689,9 +715,10 @@ saved-flags compound CondSet 的 `HI/LS` 与 `GE/LT` 两指令原型通过 88-as
    （0.952%）；所有 use 都兼容的 high-zero 常量物化已经消除，剩余数值是 publication IR 次数。
    相邻池中约
    8.29M 次因 fault/alias/fixed-home 门拒绝，不为继续扩池放宽精确状态边界。
-   bounded short-run 全写 census 的 4,826 次 copy 中，scalar64 FP producer 占 4,024，
-   `BitCast` 占 559，`VecShuffle32Indexed` 的 221 已全部关闭。下一项先分类 `BitCast`
-   producer root；没有根来源与 alias 证明前不放宽白名单。
+   bounded short-run 全写 census 的 4,826 次 copy 中，`VecShuffle32Indexed` 的 221 已关闭；
+   `BitCast` 559 次实际回溯为 558 次 `VecFAddScalar64` 加 1 次 `GetHostFPR`。按根统计的
+   4,582 次 scalar64 copy 中，1,883 次同 home 链的严格原型也只兑现 384，且证明复杂度
+   不成比例，已删除。没有新的 alias/observer 载体前不再扩池。
 4. identity `[base+imm]`、`[base+index]` 与 access-size 匹配的 scaled index 已直接进入
    memory emitter。剩余复合 EA 涉及 bias/32-bit wrapping、shift 或 AArch64 不可编码的
    scale；只有同时给出 encoding 与 wrap 证明才扩展。

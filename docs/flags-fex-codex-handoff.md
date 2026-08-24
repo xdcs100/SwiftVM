@@ -456,6 +456,14 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   6,914 assertions, directed VEX.128 passes 76, and fixed-seed 256-iteration VEX.128 fuzz passes.
   The pre-existing SSE batch-B JIT/interpreter divergence count remains exactly 392. No long
   benchmark or full suite was run.
+- `613dd12` lets a sole U8/U16/U32 callee-saved fixed-home read feed `Sub` directly from its W
+  view. Snapshot reuse and an intervening fixed-home write still retain the read bridge; other
+  consumers are unchanged. The strict local `4 8 6` A/B keeps all 2,757 PCs / 3,597 versions,
+  100% coverage, the exact PPM and zero spills, with common host `580,620 -> 580,290` (`-330`,
+  `-0.056836%`) across ten shrinking PCs and none growing. The six pinned-GPR focused cases pass
+  14 assertions. Fixed-seed 256-iteration ALU and mixed fuzz retain their exact pre-existing
+  88 / 106 divergence counts on both arms. A matching callee-saved `Add` extension saved only 51
+  (`0.008789%`) and was removed. No long benchmark or full suite was run.
 - FEX-aligned RE=0 same-harness refresh for formal smallpt: SVM host/guest
   `3.335622 → 3.267832`; the landed stages fold this to about `2.478306`. With unchanged FEX
   `1.549`, ratio is `2.153× → 1.600×`. The earlier
@@ -667,9 +675,9 @@ candidate changes unit/version formation and must pass a future formal gate befo
    not GetHost/SetHost IR. The largest remaining SetHost moves in the retained log implement real
    guest copies such as `mov rbp,rdi` and `mov rbx,rdx`; deleting them requires architectural
    register renaming, not another fixed-home peephole. Direct ordinary StoreMemory payload reads
-   are closed. Continue only with another consumer that can read the fixed home directly while
-   retaining snapshot, width and helper-clobber proofs; narrow Sub is the next measured candidate,
-   not a generally safe GetHost elimination.
+   and callee-saved `Sub` reads are closed. Continue only with another measured consumer that can
+   read the fixed home directly while retaining snapshot, width and helper-clobber proofs; the
+   same `Add` extension was only `-51` and is closed, not a generally safe GetHost elimination.
 3. **smallpt remaining link** — covered link is now about 6.6%. Region/cycle tails are about
    2.1%; their acquire poll and branch across per-block cold stubs are load-bearing. Audit the
    roughly 1.26% remaining return-L1 static sequences separately; address formation is now one
@@ -682,9 +690,12 @@ candidate changes unit/version formation and must pass a future formal gate befo
    candidates were rejected by exact fault/alias/home gates and must not be recovered heuristically.
    A bounded short-run full-write census found 4,826 weighted explicit copies before the indexed
    shuffle stage: scalar64 FP producers account for 4,024, `BitCast` for 559 and
-   `VecShuffle32Indexed` for 221. The indexed-shuffle pool is now closed. Audit the `BitCast` roots
-   before changing its producer classification; do not broadly whitelist the scalar merge-home
-   shapes.
+   `VecShuffle32Indexed` for 221. Root tracing shows `BitCast` is not an independent producer pool:
+   558 of its weighted executions resolve to `VecFAddScalar64` and one to `GetHostFPR`. Of 4,582
+   scalar64-root copies, 1,883 start from the same resident home; an exact two-node/sole-use chain
+   prototype saved only 384 (`0.066136%`) and required disproportionate dual proof machinery, so it
+   was fully removed. The indexed-shuffle pool is closed; do not broadly whitelist scalar
+   merge-home shapes.
 5. **Remaining composite EA** — identity `[base+imm]`, `[base+index]` and matching scaled-index
    forms are now direct. Remaining materialized forms involve bias/32-bit wrapping, shifts or an
    AArch64-unencodable scale; require an exact encoding and wrap proof before extending the gate.
