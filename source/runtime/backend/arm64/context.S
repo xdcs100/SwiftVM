@@ -66,7 +66,7 @@ code_dispatcher:
 #define loc_index ip0
 #define l1_cache  ip1
 #define l1_index  ip2
-#define l1_start  ip3
+#define l1_start  l1_cache
 #define l2_cache  cache
 #define l2_index  ip4
 #define l2_start  ip5
@@ -76,8 +76,7 @@ code_dispatcher:
 
     // query l1 cache
     ldr l1_cache, [state, #OFF_L1_CACHE]
-    and l1_index, loc, #L1_CODE_CACHE_HASH
-    add l1_start, l1_cache, l1_index, lsl #4
+    bfi l1_start, loc, #4, #L1_CODE_CACHE_BITS
 
 1:  // l1 cache looper
     ldr l1_index, [l1_start], #0x10

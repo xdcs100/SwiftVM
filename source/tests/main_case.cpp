@@ -8694,14 +8694,14 @@ TEST_CASE("indirect L1 and lean shadow stack select compatible return paths") {
         return it == result.mnemonics.end() ? 0u : it->second;
     };
     // The production fast path reads the signal request and L1 base together.
-    REQUIRE(l1.bytes == off.bytes + 8 * vixl::aarch64::kInstructionSize);
+    REQUIRE(l1.bytes == off.bytes + 7 * vixl::aarch64::kInstructionSize);
     REQUIRE(shadow.bytes == off.bytes);
     REQUIRE(count(off, "br") == 0);
     REQUIRE(count(l1, "br") == 1);
     // Key mismatch selects x30; the sole local Ret is the signal cold arm.
     REQUIRE(count(l1, "ret") == 1);
     REQUIRE(count(l1, "csel") == 1);
-    REQUIRE(count(l1, "and") == count(off, "and") + 1);
+    REQUIRE(count(l1, "bfi") == count(off, "bfi") + 1);
     REQUIRE(count(l1, "ldp") == count(off, "ldp") + 2);
     REQUIRE(count(l1, "tbnz") == count(off, "tbnz") + 1);
     REQUIRE(l1.host_write_coalesced);
@@ -8710,7 +8710,8 @@ TEST_CASE("indirect L1 and lean shadow stack select compatible return paths") {
     const auto call_l1 = run(true, false, Shape::Call, false, false);
     const auto call_shadow = run(false, true, Shape::Call, false, false);
     const auto call_both = run(true, true, Shape::Call, false, false);
-    REQUIRE(call_l1.bytes == call_off.bytes);
+    REQUIRE(call_l1.bytes ==
+            call_off.bytes - vixl::aarch64::kInstructionSize);
     REQUIRE(call_shadow.bytes ==
             call_off.bytes - 2 * vixl::aarch64::kInstructionSize);
     REQUIRE(call_both.bytes == call_l1.bytes);
@@ -8721,7 +8722,7 @@ TEST_CASE("indirect L1 and lean shadow stack select compatible return paths") {
     const auto ret_shadow = run(false, true, Shape::Return, false, false);
     const auto ret_both = run(true, true, Shape::Return, false, false);
     REQUIRE(ret_l1.bytes ==
-            ret_off.bytes - 4 * vixl::aarch64::kInstructionSize);
+            ret_off.bytes - 5 * vixl::aarch64::kInstructionSize);
     REQUIRE(ret_shadow.bytes ==
             ret_off.bytes - 2 * vixl::aarch64::kInstructionSize);
     REQUIRE(ret_both.bytes == ret_l1.bytes);

@@ -693,8 +693,7 @@ void JitContext::ForwardIndirectL1(const Register& location) {
         __ Ldr(entry, MemOperand(state, state_offset_indirect_l1_code_cache));
     }
 
-    __ And(index, location, L1_CODE_CACHE_HASH);
-    __ Add(entry, entry, Operand(index, LSL, 4));
+    __ Bfi(entry, location, 4, L1_CODE_CACHE_BITS);
     __ Ldp(index, entry, MemOperand(entry));
     __ Cmp(index, location);
     if (indirect_l1_prof_enabled) {
@@ -715,7 +714,7 @@ void JitContext::ForwardIndirectL1(const Register& location) {
     // equivalent to Ret. On an SMC-invalidated key hit, entry is the safe L2
     // continuation installed by TranslateTable::Zero. No stale/zero pointer
     // can reach Br. With the two-instruction signal poll the production hot
-    // path is exactly eight instructions and still rents only two temporaries.
+    // path is exactly seven instructions and still rents only two temporaries.
     __ Csel(entry, entry, x30, eq);
     __ Br(entry);
     __ Bind(&signal);

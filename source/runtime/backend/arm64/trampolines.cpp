@@ -219,7 +219,7 @@ void TrampolinesArm64::Build() {
 #define loc_index ip0
 #define l1_cache ip1
 #define l1_index ip2
-#define l1_start ip3
+#define l1_start l1_cache
 #define l2_cache cache
 #define l2_index ip4
 #define l2_start ip5
@@ -330,8 +330,7 @@ void TrampolinesArm64::BuildRuntimeEntry(MacroAssembler& assembler) {
 
     // query l1 cache
     __ Ldr(l1_cache, MemOperand(state, state_offset_indirect_l1_code_cache));
-    __ And(l1_index, loc_reg, L1_CODE_CACHE_HASH);
-    __ Add(l1_start, l1_cache, Operand(l1_index, LSL, 4));
+    __ Bfi(l1_start, loc_reg, 4, L1_CODE_CACHE_BITS);
 
     Label query_step_1;
     Label query_step_2;

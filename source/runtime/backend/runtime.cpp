@@ -14,6 +14,7 @@
 #include <utility>
 #include "runtime/backend/address_space.h"
 #include "runtime/backend/arm64/constant.h"
+#include "runtime/backend/arm64/defines.h"
 #include "runtime/backend/arm64/jit/translator.h"
 #include "runtime/backend/arm64/fpcr_mode.h"
 #include "runtime/backend/context.h"
@@ -35,7 +36,7 @@ namespace swift::runtime {
 static_assert(std::atomic<u64>::is_always_lock_free,
               "signal-time FPCR handoff must not call a locking atomic runtime");
 
-constexpr static auto l1_cache_bits = 18;
+constexpr static auto l1_cache_bits = L1_CODE_CACHE_BITS;
 
 std::unique_ptr<Instance> Instance::Make(const Config& config) {
     return std::make_unique<backend::AddressSpace>(config);
@@ -123,6 +124,9 @@ struct Runtime::Impl final {
         }
         profile_interface.l1_code_cache = l1_code_cache.Data();
         state->indirect_l1_code_cache = l1_code_cache.Data();
+        ASSERT_MSG(reinterpret_cast<std::uintptr_t>(l1_code_cache.Data()) %
+                                   l1_code_cache.DataAlignment() == 0,
+                   "runtime L1 cache does not satisfy its address-formation alignment");
         // Production inline probes turn an invalidated key hit into a branch
         // to the dispatcher's L2 continuation. The diagnostic form keeps zero
         // so it can distinguish this fallback as a miss.

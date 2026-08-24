@@ -2,8 +2,11 @@
 
 #include <array>
 #include <atomic>
+#include <cstring>
+#include <memory>
+#include <new>
 #include <shared_mutex>
-#include <vector>
+#include <utility>
 #include "runtime/common/types.h"
 
 namespace swift::runtime {
@@ -31,7 +34,9 @@ public:
         Reset();
     }
 
-    TranslateEntry* Data() { return entries.data(); }
+    TranslateEntry* Data() { return entries.get(); }
+
+    [[nodiscard]] size_t DataAlignment() const { return storage_alignment; }
 
     [[nodiscard]] u32 Hash(size_t key) const {
         if (hash_mode == TranslateTableHash::Direct) {
@@ -217,20 +222,50 @@ public:
         }
     }
 
-    void Clear() { std::memset(entries.data(), 0, entries.size() * sizeof(TranslateEntry)); }
+    void Clear() {
+        std::memset(entries.get(), 0, entry_count * sizeof(TranslateEntry));
+    }
 
     void Reset() {
-        entries.resize(size + 10);
-        entries.back().key = size_t(-1);
+        const auto next_entry_count = size + 10;
+        const auto direct_alignment = hash_mode == TranslateTableHash::Direct
+                ? size * sizeof(TranslateEntry)
+                : 0;
+        auto* storage = static_cast<TranslateEntry*>(direct_alignment
+                ? ::operator new(next_entry_count * sizeof(TranslateEntry),
+                                 std::align_val_t{direct_alignment})
+                : ::operator new(next_entry_count * sizeof(TranslateEntry)));
+        EntryStorage next{storage, EntryDeleter{direct_alignment}};
+        std::memset(storage, 0, next_entry_count * sizeof(TranslateEntry));
+        storage[next_entry_count - 1].key = size_t(-1);
+        entries = std::move(next);
+        entry_count = next_entry_count;
+        storage_alignment = direct_alignment ? direct_alignment : alignof(TranslateEntry);
     }
 
 private:
+    struct EntryDeleter {
+        size_t alignment{};
+
+        void operator()(TranslateEntry* storage) const noexcept {
+            if (alignment) {
+                ::operator delete(storage, std::align_val_t{alignment});
+            } else {
+                ::operator delete(storage);
+            }
+        }
+    };
+
+    using EntryStorage = std::unique_ptr<TranslateEntry[], EntryDeleter>;
+
     TableLock lock{};
     size_t hash_bits;
     size_t size;
     TranslateTableHash hash_mode;
     size_t invalid_value{};
-    std::vector<TranslateEntry> entries;
+    size_t entry_count{};
+    size_t storage_alignment{};
+    EntryStorage entries{nullptr, EntryDeleter{}};
 };
 
 }  // namespace swift::runtime
