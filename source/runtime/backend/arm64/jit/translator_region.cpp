@@ -742,11 +742,7 @@ void JitTranslator::EmitBackedgeMaterialize(const BackedgeFlagsPlan& plan) {
                                             carry_inverted)));
     }
     const u64 requested = static_cast<u64>(plan.requested);
-    u64 keep = ~requested;
-    __ Mrs(ip0, NZCV);
-    __ And(flags, flags, ForceCast<s64>(keep));
-    __ And(ip0, ip0, static_cast<u32>(requested));
-    __ Orr(flags, flags, ip0);
+    EmitNZCVMerge(requested, ip0);
 }
 
 void JitTranslator::EmitRegionBranchPFAF(const BackedgeFlagsPlan& plan) {

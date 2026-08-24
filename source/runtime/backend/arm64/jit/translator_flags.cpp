@@ -125,22 +125,27 @@ void JitTranslator::MergeNZCV() {
               flags_audit_block_edge);
 }
 
-bool JitTranslator::TryMergeContiguousNZCV(u64 requested) {
+void JitTranslator::EmitNZCVMerge(u64 requested,
+                                  const Register& scratch) {
     const u64 nzcv = static_cast<u64>(HostFlags::NZCV);
-    if (!requested || requested == nzcv || (requested & ~nzcv)) {
-        return false;
-    }
+    ASSERT(requested && !(requested & ~nzcv));
     const u32 lsb = std::countr_zero(requested);
     const u64 normalized = requested >> lsb;
-    if (normalized & (normalized + 1)) {
-        return false;
+    if (requested != nzcv && !(normalized & (normalized + 1))) {
+        const u32 width = std::bit_width(normalized);
+        __ Mrs(scratch, NZCV);
+        __ Ubfx(scratch, scratch, lsb, width);
+        __ Bfi(flags, scratch, lsb, width);
+        return;
     }
-    const u32 width = std::bit_width(normalized);
-    const auto scratch = context.GetSharedTmpX();
+
+    u64 keep = ~requested;
     __ Mrs(scratch, NZCV);
-    __ Ubfx(scratch, scratch, lsb, width);
-    __ Bfi(flags, scratch, lsb, width);
-    return true;
+    __ And(flags, flags, ForceCast<s64>(keep));
+    if (requested != nzcv) {
+        __ And(scratch, scratch, static_cast<u32>(requested));
+    }
+    __ Orr(flags, flags, scratch);
 }
 
 void JitTranslator::MergeNZCV(FlagsRegsAuditMergeCause cause,
@@ -159,16 +164,7 @@ void JitTranslator::MergeNZCV(FlagsRegsAuditMergeCause cause,
         // between two flag-setting instructions is not overwritten.
         const u64 req = force_ret_pstate ? static_cast<u64>(HostFlags::NZCV)
                                          : static_cast<u64>(nzcv_requested);
-        if (!TryMergeContiguousNZCV(req)) {
-            const auto scratch = context.GetSharedTmpX();
-            u64 keep = ~req;
-            __ Mrs(scratch, NZCV);
-            __ And(flags, flags, ForceCast<s64>(keep));
-            if (req != static_cast<u64>(HostFlags::NZCV)) {
-                __ And(scratch, scratch, static_cast<u32>(req));
-            }
-            __ Orr(flags, flags, scratch);
-        }
+        EmitNZCVMerge(req, context.GetSharedTmpX());
         if (!flags_token_keep) {
             nzcv_dirty = false;
             nzcv_requested = {};
@@ -280,14 +276,7 @@ void JitTranslator::MergeLogicalFlagsNZ(ir::Flags requested) {
     if (!requested_nz) {
         return;
     }
-    if (!TryMergeContiguousNZCV(requested_nz)) {
-        const auto scratch = context.GetSharedTmpX();
-        u64 keep = ~requested_nz;
-        __ Mrs(scratch, NZCV);
-        __ And(flags, flags, ForceCast<s64>(keep));
-        __ And(scratch, scratch, static_cast<u32>(requested_nz));
-        __ Orr(flags, flags, scratch);
-    }
+    EmitNZCVMerge(requested_nz, context.GetSharedTmpX());
     nzcv_dirty = false;
     nzcv_requested = {};
 }
