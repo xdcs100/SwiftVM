@@ -9,7 +9,10 @@
 #include "runtime/backend/arm64/jit/translator.h"
 #include "runtime/ir/opts/register_alloc_pass.h"
 
-TEST_CASE("full NZCV publication omits the redundant source mask") {
+namespace {
+
+std::map<std::string, swift::u32> EmitFlagsPublication(
+        swift::runtime::ir::Flags saved_flags) {
     using namespace swift::runtime;
     using namespace swift::runtime::backend;
     using namespace swift::runtime::ir;
@@ -33,7 +36,7 @@ TEST_CASE("full NZCV publication omits the redundant source mask") {
     auto right = block->LoadUniform<TypedValue<ValueType::U64>>(
             Uniform{8, ValueType::U64});
     auto result = block->Sub(left, Operand{right}).SetType(ValueType::U64);
-    block->SaveFlags(result, Flags::NZCV);
+    block->SaveFlags(result, saved_flags);
     block->SetTerminal(terminal::ReturnToDispatch{});
     block->ReIdInstr();
 
@@ -69,7 +72,45 @@ TEST_CASE("full NZCV publication omits the redundant source mask") {
         ++mnemonics[std::string{text.substr(0, end)}];
     }
 
+    return mnemonics;
+}
+
+void RequireBitfieldMerge(std::map<std::string, swift::u32>& mnemonics) {
+    REQUIRE(mnemonics["mrs"] == 1);
+    REQUIRE(mnemonics["ubfx"] == 1);
+    REQUIRE(mnemonics["bfi"] == 1);
+    REQUIRE(mnemonics["and"] == 0);
+    REQUIRE(mnemonics["orr"] == 0);
+}
+
+}
+
+TEST_CASE("full NZCV publication omits the redundant source mask") {
+    auto mnemonics = EmitFlagsPublication(swift::runtime::ir::Flags::NZCV);
+
     REQUIRE(mnemonics["mrs"] == 1);
     REQUIRE(mnemonics["and"] == 1);
     REQUIRE(mnemonics["orr"] == 1);
+    REQUIRE(mnemonics["ubfx"] == 0);
+    REQUIRE(mnemonics["bfi"] == 0);
+}
+
+TEST_CASE("contiguous partial NZCV publication uses a bitfield merge") {
+    using swift::runtime::ir::Flags;
+    auto nz_mnemonics = EmitFlagsPublication(Flags::Negate | Flags::Zero);
+    auto z_mnemonics = EmitFlagsPublication(Flags::Zero);
+
+    RequireBitfieldMerge(nz_mnemonics);
+    RequireBitfieldMerge(z_mnemonics);
+}
+
+TEST_CASE("noncontiguous partial NZCV publication retains masked merge") {
+    using swift::runtime::ir::Flags;
+    auto mnemonics = EmitFlagsPublication(Flags::Negate | Flags::Carry);
+
+    REQUIRE(mnemonics["mrs"] == 1);
+    REQUIRE(mnemonics["and"] == 2);
+    REQUIRE(mnemonics["orr"] == 1);
+    REQUIRE(mnemonics["ubfx"] == 0);
+    REQUIRE(mnemonics["bfi"] == 0);
 }

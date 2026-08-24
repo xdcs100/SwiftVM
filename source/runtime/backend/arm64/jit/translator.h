@@ -361,6 +361,7 @@ private:
     void MergeNZCV();
     void MergeNZCV(FlagsRegsAuditMergeCause cause,
                    FlagsRegsAuditEdgeKind edge);
+    bool TryMergeContiguousNZCV(u64 requested);
     void PublishFlagsToken();
 
     // Restore host NZCV from the flags register (uses the emission's shared scratch).
