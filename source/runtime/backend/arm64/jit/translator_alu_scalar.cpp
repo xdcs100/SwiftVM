@@ -756,11 +756,6 @@ void JitTranslator::EmitCondSelect(ir::Inst* inst) {
     __ Csel(result, context.R(true_value), context.R(false_value), MapCond(cond));
 }
 
-// Condition -> 0/1 in one instruction.  The NZCV handling is deliberately
-// byte-for-byte the same as EmitCondSelect above: CSET and CSEL read the same
-// host flags, so if the two diverged, replacing a CondSelect with a CondSet in
-// the front end would silently change which flag state the condition sees.
-// Kept in step with Interpreter::RunCondSet.
 void JitTranslator::EmitCondSet(ir::Inst* inst) {
     if (inst->GetUses() == 1) {
         for (auto& user : cur_block->GetInstList()) {
@@ -783,6 +778,9 @@ void JitTranslator::EmitCondSet(ir::Inst* inst) {
     ASSERT(inst->ReturnType() != ir::ValueType::VOID);
     auto result = context.R(ir::Value{inst});
     if (!(save_in_nzcv && nzcv_dirty)) {
+        if (TryEmitCondSetFromFlags(inst, cond)) {
+            return;
+        }
         LoadNZCVFromFlags();
     }
     __ Cset(result, MapCond(cond));

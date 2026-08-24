@@ -218,6 +218,37 @@ void JitTranslator::LoadNZCVFromFlags() {
     __ Msr(NZCV, scratch);
 }
 
+bool JitTranslator::TryEmitCondSetFromFlags(ir::Inst* inst, ir::Cond cond) {
+    u32 bit;
+    switch (cond) {
+        case ir::Cond::EQ:
+        case ir::Cond::NE:
+            bit = HostFlagsBit::Z;
+            break;
+        case ir::Cond::CS:
+        case ir::Cond::CC:
+            bit = HostFlagsBit::C;
+            break;
+        case ir::Cond::MI:
+        case ir::Cond::PL:
+            bit = HostFlagsBit::N;
+            break;
+        case ir::Cond::VS:
+        case ir::Cond::VC:
+            bit = HostFlagsBit::V;
+            break;
+        default:
+            return false;
+    }
+
+    const auto result = context.X(ir::Value{inst});
+    __ Ubfx(result, flags, bit, 1);
+    if ((static_cast<u8>(cond) & 1) != 0) {
+        __ Eor(result, result, 1);
+    }
+    return true;
+}
+
 void JitTranslator::MergeLogicalFlagsNZ(ir::Flags requested) {
     // Logical flag producers may have only an N or only a Z SaveFlags pseudo
     // (SAHF deliberately writes them independently).  Commit exactly that

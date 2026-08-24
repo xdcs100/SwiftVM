@@ -8831,20 +8831,13 @@ TEST_CASE("SaveCV commits x86 CF/OF into the flags register") {
     REQUIRE(text.find("msr NZCV") == std::string::npos);
 }
 
-// --- CondSet is an arithmetic 0/1 value, not merely truthy ------------------
-//
-// Guest consumers historically fed CondSet only into truthiness operations,
-// so replacing CSET (0/1) with CSETM (0/-1) survived the entire guest corpus.
-// Build the missing IR shape directly: materialize EQ and add it to an integer
-// before storing it. The disassembly check is the direct backend contract,
-// following the SaveCV structural test above; a CSETM mutation fails here even
-// though branches would continue to behave the same way.
-static swift::runtime::ir::Block* BuildCondSetArithmeticBlock() {
+static swift::runtime::ir::Block* BuildCondSetArithmeticBlock(
+        swift::runtime::ir::Cond cond) {
     using namespace swift::runtime::ir;
     auto* block = new Block(0, Location{0x7100});
     auto flags_value = block->LoadImm(Imm{std::uint64_t(0ull)}).SetType(ValueType::U64);
-    block->SaveFlags(flags_value, Flags::NZ);
-    auto one = block->CondSet(Cond::EQ).SetType(ValueType::U64);
+    block->SaveFlags(flags_value, Flags::NZCV);
+    auto one = block->CondSet(cond).SetType(ValueType::U64);
     auto base = block->LoadImm(Imm{std::uint64_t(41ull)}).SetType(ValueType::U64);
     auto sum = block->Add(base, Operand{one});
     block->StoreUniform(Uniform{0, ValueType::U64}, sum);
@@ -8853,7 +8846,7 @@ static swift::runtime::ir::Block* BuildCondSetArithmeticBlock() {
     return block;
 }
 
-TEST_CASE("CondSet materializes exactly one for arithmetic consumers") {
+static std::string TranslateCondSetArithmeticBlock(swift::runtime::ir::Cond cond) {
     using namespace swift::runtime::ir;
     using namespace swift::runtime::backend;
 
@@ -8869,7 +8862,7 @@ TEST_CASE("CondSet materializes exactly one for arithmetic consumers") {
     const auto gprs = address_space.GetTrampolines().GetGPRRegs();
     const auto fprs = address_space.GetTrampolines().GetFPRRegs();
 
-    swift::runtime::IntrusivePtr<Block> block{BuildCondSetArithmeticBlock()};
+    swift::runtime::IntrusivePtr<Block> block{BuildCondSetArithmeticBlock(cond)};
     RegAlloc reg_alloc{block->MaxInstrId(), gprs, fprs, FeatureSet{}};
     RegisterAllocPass::Run(block.get(), &reg_alloc, false, FeatureSet{});
 
@@ -8877,8 +8870,6 @@ TEST_CASE("CondSet materializes exactly one for arithmetic consumers") {
     arm64::JitTranslator translator{context};
     translator.Translate(block.get());
     context.Finish();
-    REQUIRE(context.CurrentBufferSize() > 0);
-
     auto& masm = context.GetMasm();
     auto* buffer = masm.GetBuffer();
     auto* first = buffer->GetStartAddress<const vixl::aarch64::Instruction*>();
@@ -8893,9 +8884,44 @@ TEST_CASE("CondSet materializes exactly one for arithmetic consumers") {
         text += disassembler.GetOutput();
         text += '\n';
     }
-    INFO(text);
+    return text;
+}
 
-    REQUIRE(text.find("cset ") != std::string::npos);
-    REQUIRE(text.find("csetm ") == std::string::npos);
-    REQUIRE(text.find("add ") != std::string::npos);
+TEST_CASE("CondSet extracts simple conditions directly from saved flags") {
+    using swift::runtime::ir::Cond;
+    struct Case {
+        Cond cond;
+        std::uint32_t bit;
+        bool inverted;
+    };
+    constexpr std::array cases{
+            Case{Cond::EQ, 30, false},
+            Case{Cond::NE, 30, true},
+            Case{Cond::CS, 29, false},
+            Case{Cond::CC, 29, true},
+            Case{Cond::MI, 31, false},
+            Case{Cond::PL, 31, true},
+            Case{Cond::VS, 28, false},
+            Case{Cond::VC, 28, true},
+    };
+
+    for (const auto& test_case : cases) {
+        const auto text = TranslateCondSetArithmeticBlock(test_case.cond);
+        INFO(text);
+        REQUIRE(text.find("ubfx ") != std::string::npos);
+        REQUIRE(text.find("x26") != std::string::npos);
+        REQUIRE(text.find(fmt::format("#{}, #1", test_case.bit)) != std::string::npos);
+        REQUIRE(text.find("msr nzcv") == std::string::npos);
+        REQUIRE(text.find("cset ") == std::string::npos);
+        REQUIRE(text.find("csetm ") == std::string::npos);
+        REQUIRE(text.find("add ") != std::string::npos);
+        if (test_case.inverted) {
+            REQUIRE(text.find("eor ") != std::string::npos);
+        }
+    }
+
+    const auto composite = TranslateCondSetArithmeticBlock(Cond::HI);
+    INFO(composite);
+    REQUIRE(composite.find("msr nzcv") != std::string::npos);
+    REQUIRE(composite.find("cset ") != std::string::npos);
 }
