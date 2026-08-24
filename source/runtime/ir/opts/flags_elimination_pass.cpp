@@ -648,10 +648,11 @@ void FlagsEliminationPass::Run(Block* block, HIRFunction* hir_function,
                 break;
             }
             case OpCode::InvertCarry:
-                // Representation transform: output C is live exactly when its
-                // input C is.  Keep this deliberately conservative; the
-                // frontend only emits it between a known producer and ADC/SBB.
-                needed |= Flags::Carry;
+                if (!carry_elim_off && False(needed & Flags::Carry)) {
+                    victims.push_back(&inst);
+                } else {
+                    needed |= Flags::Carry;
+                }
                 break;
             case OpCode::PublishFCmpFlags:
                 // UCOMIS/COMIS define all six observable arithmetic flags

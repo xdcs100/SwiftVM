@@ -3563,23 +3563,28 @@ TEST_CASE("Flag elimination removes only overwritten in-block carry writes") {
         auto* old_clear = disabled.AppendInst(OpCode::ClearFlags, Flags::Carry);
         auto carry_value = disabled.LoadImm<BOOL>(Imm{1u});
         auto* old_set = disabled.AppendInst(OpCode::SetCarry, carry_value);
+        auto* old_invert = disabled.AppendInst(OpCode::InvertCarry);
         auto* old_noncarry =
                 disabled.AppendInst(OpCode::ClearFlags, Flags::Overflow);
         auto* last_save = append_carry_save(disabled, lhs, rhs);
         auto* last_noncarry =
                 disabled.AppendInst(OpCode::ClearFlags, Flags::Overflow);
 
-        FlagsEliminationPass::Run(&disabled, nullptr, FeatureSet{});
+        FeatureSet disabled_features{};
+        disabled_features.flag_carry_elim = false;
+        FlagsEliminationPass::Run(&disabled, nullptr, disabled_features);
 
         REQUIRE(contains(disabled, old_save));
         REQUIRE(contains(disabled, old_clear));
         REQUIRE(contains(disabled, old_set));
+        REQUIRE(contains(disabled, old_invert));
         REQUIRE_FALSE(contains(disabled, old_noncarry));
         REQUIRE(contains(disabled, last_save));
         REQUIRE(contains(disabled, last_noncarry));
         REQUIRE(count_op(disabled, OpCode::SaveFlags) == 2);
         REQUIRE(count_op(disabled, OpCode::ClearFlags) == 2);
         REQUIRE(count_op(disabled, OpCode::SetCarry) == 1);
+        REQUIRE(count_op(disabled, OpCode::InvertCarry) == 1);
         return;
     }
 
@@ -3666,15 +3671,44 @@ TEST_CASE("Flag elimination removes only overwritten in-block carry writes") {
     REQUIRE(contains(set_covered, last));
     REQUIRE(count_op(set_covered, OpCode::SetCarry) == 0);
 
+    // (6) A carry-representation transform follows the same liveness rule.
+    Block invert_covered{7, Location{0x3700}};
+    lhs = invert_covered.LoadImm(Imm{13u});
+    rhs = invert_covered.LoadImm(Imm{14u});
+    first = append_carry_save(invert_covered, lhs, rhs);
+    auto* invert = invert_covered.AppendInst(OpCode::InvertCarry);
+    last = append_carry_save(invert_covered, lhs, rhs);
+
+    FlagsEliminationPass::Run(&invert_covered, nullptr, FeatureSet{});
+
+    REQUIRE_FALSE(contains(invert_covered, first));
+    REQUIRE_FALSE(contains(invert_covered, invert));
+    REQUIRE(contains(invert_covered, last));
+
+    Block invert_read{8, Location{0x3800}};
+    lhs = invert_read.LoadImm(Imm{15u});
+    rhs = invert_read.LoadImm(Imm{16u});
+    first = append_carry_save(invert_read, lhs, rhs);
+    invert = invert_read.AppendInst(OpCode::InvertCarry);
+    invert_read.AppendInst(OpCode::TestFlags, Flags::Carry);
+    last = append_carry_save(invert_read, lhs, rhs);
+
+    FlagsEliminationPass::Run(&invert_read, nullptr, FeatureSet{});
+
+    REQUIRE(contains(invert_read, first));
+    REQUIRE(contains(invert_read, invert));
+    REQUIRE(contains(invert_read, last));
+
     // (7) Gate A remains block-wide: any Adc/Sbb leaves every instruction
     // untouched, including otherwise-covered C writers.
-    Block gate_a{7, Location{0x3700}};
+    Block gate_a{9, Location{0x3900}};
     lhs = gate_a.LoadImm(Imm{13u});
     rhs = gate_a.LoadImm(Imm{14u});
     first = append_carry_save(gate_a, lhs, rhs);
     clear = gate_a.AppendInst(OpCode::ClearFlags, Flags::Carry);
     carry_value = gate_a.LoadImm<BOOL>(Imm{1u});
     set = gate_a.AppendInst(OpCode::SetCarry, carry_value);
+    invert = gate_a.AppendInst(OpCode::InvertCarry);
     gate_a.Sbb(lhs, Operand{rhs});
     last = append_carry_save(gate_a, lhs, rhs);
 
@@ -3683,10 +3717,12 @@ TEST_CASE("Flag elimination removes only overwritten in-block carry writes") {
     REQUIRE(contains(gate_a, first));
     REQUIRE(contains(gate_a, clear));
     REQUIRE(contains(gate_a, set));
+    REQUIRE(contains(gate_a, invert));
     REQUIRE(contains(gate_a, last));
     REQUIRE(count_op(gate_a, OpCode::SaveFlags) == 2);
     REQUIRE(count_op(gate_a, OpCode::ClearFlags) == 1);
     REQUIRE(count_op(gate_a, OpCode::SetCarry) == 1);
+    REQUIRE(count_op(gate_a, OpCode::InvertCarry) == 1);
 }
 
 TEST_CASE("Register allocation gives every spilled value a private slot") {
