@@ -36,11 +36,11 @@ boundary 22.116%、uniform 6.522%、flags IR 2.506%；FPR state 为 5.484%，
 live resident-FPR publication、scalar-load FPR fusion、scalar-sqrt resident publication、
 legacy scalar-binary resident publication、direct absolute-address materialization 和 compact
 FCMP PF/AF publication、trailing static-location cold publication、compact FCMP carrier
-publication 后，按正式 host 权重折算约为 2.722656。以未变的 FEX 1.549 为分母，
-对应 2.153×→1.758×。
+publication 和 semantic Nop elision 后，按正式 host 权重折算约为 2.700019。以未变的
+FEX 1.549 为分母，对应 2.153×→1.743×。
 旧表与这次重采的
 unit 形成参数不完全相同，
-因此不直接覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 1.76–1.82×。
+因此不直接覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 1.74–1.81×。
 
 ## 已落地
 
@@ -304,7 +304,21 @@ bit26 是 AF，bit8–25 没有读者且本 opcode 已使 flags token 失效，�
   非 FCMP 冷块 `0x4668fd` 的一次 entry 偶发形成 9 条布局差异，第二组消失，按 opcode
   与重复样本隔离后不计入本阶段收益。
 
-十六项合计使正式 smallpt 默认 region host 减少 240,214,497（18.175%）。
+### Semantic Nop elision
+
+提交 `e1257d6` 让 IR `Nop` 不再发射 ARM `NOP`。guest NOP、PAUSE、prefetch、fence 等
+无状态提示仍经过 decode/translate 并保留 `dynamic_next_loc` 等编译期元数据效果；只删除
+backend 中不可观察的 host 指令。代码池放置与对齐使用独立的 VIXL 路径，不受影响。
+
+- 正式 smallpt 的 8,991,381 次 `Nop` 各精确删除一条，1,081,436,665→1,072,445,284，
+  减少 8,991,381（0.8314%）；245 个共同 PC 缩短、0 个增长，entries、units、spill 和
+  PPM 均一致；
+- 320×240、64-spp c-ray 等 entry 减少 141,118,113，837 个共同 PC 缩短、0 个增长，
+  IDAT MD5 保持 `d0c71130abf3544a86b64417bc488c21`；
+- STREAM 与 CoreMark 等 entry 分别减少 1,390 / 57,725,341，221 / 280 个共同 PC
+  缩短、0 个增长，分别保持 `Solution Validates` 与 CRC final `0x382f`。
+
+十七项合计使正式 smallpt 默认 region host 减少 249,205,878（18.8556%）。
 
 ## 否决项
 
@@ -318,6 +332,10 @@ insert 契约而非 RA tie。该原型已完整删除。
 终端尾部回边轮询曾尝试把 `LDAR + CBNZ cold + B target` 改为 `LDAR + CBZ target`；正式
 smallpt 两臂均为 1,168,614,398，证明现有 successor layout 已吸收所有安全命中。原型和
 接口改动已完整删除。
+
+同值 carry 极性发布去重在本地回归通过，但正式 smallpt 等 entry 仅减少 23,703
+（0.0022%），同时 137 个 PC 增长、17 个缩短且 units/entries 改变，不具备稳定收益；
+原型已完整删除。
 
 ## 验证
 
@@ -352,6 +370,11 @@ smallpt 两臂均为 1,168,614,398，证明现有 successor layout 已吸收所�
   均通过 46 assertions；固定 seed 全量保持 191 passed / 35 个既有失败和相同的 45 个
   失败断言位置。基线/候选 FLAGS 0/1 × function/block/interpreter 十二格逐字一致，
   fingerprint 仍为 1664 units / 11 guests。
+- semantic Nop elision 的 x86 Nop family、RSB/indirect 结构、direct-link fallback 和 flags
+  focus 在 Mac/Orb 分别通过 1、26、39、46 assertions；COMIS 全消费者差分通过 3,482
+  assertions。固定 seed 全量保持 191 passed / 35 个既有失败和相同的 45 个失败断言位置；
+  基线/候选 FLAGS 十二格逐字一致，clone futex/lock 四格均 rc=0，fingerprint 仍为
+  1664 units / 11 guests。
 - RSB/indirect 结构测试 26 assertions，覆盖八指令 L1 快路径、无 push 和无目标
   dispatcher 路径；显式改写栈返回地址的临时 probe 在默认、L1-off 两种 RSB frame、
   FLAGS-off 和 interpreter 下均 rc=0，probe 已删除。
@@ -373,13 +396,14 @@ smallpt 两臂均为 1,168,614,398，证明现有 successor layout 已吸收所�
 
 ## 下一步
 
-1. 当前正式 smallpt 的已覆盖 link 约 6.7%。region/cycle link tail 约 2.1%，其中
+1. 当前正式 smallpt 的已覆盖 link 约 6.8%。region/cycle link tail 约 2.1%，其中
    acquire poll 与跨本块 cold stub 的目标跳转不可直接删除；
-   八条 return-L1 静态序列约 1.42%，其中 `AND + ADD + LDP + CMP + CSEL + BR` 没有
+   八条 return-L1 静态序列约 1.43%，其中 `AND + ADD + LDP + CMP + CSEL + BR` 没有
    明确的基础 ISA 融合机会。公开 host exit 仍仅 139 次。剩余 `SetLocation` 均为动态
    目标或后面仍有观察点，不能继承块尾常量证明。
-2. 剩余 `SetHostFPR` 约为 30,193,585（2.792%），其中完整写约 8,317,804（0.769%）。
-   low-64 `LoadMemory` 与 high-64 zero 分别余 10,641,609 / 10,093,484；相邻池中约
+2. 剩余 `SetHostFPR` 约为 30,193,585（2.815%），其中完整写约 8,317,804（0.776%）。
+   low-64 `LoadMemory` 与 high-64 zero 分别余 10,641,609（0.992%）/ 10,093,484
+   （0.941%）；相邻池中约
    8.29M 次因 fault/alias/fixed-home 门拒绝，不为继续扩池放宽精确状态边界。
 3. CoreMark 的 8/16-bit truncation 仍要求 consumer-specific 物理高位证明，并保留 U16
    CallLambda 回归门。
