@@ -584,6 +584,11 @@ ARM64 emitter 分别维护并复算同一 producer 集合；既有 observer、fi
 
 ## 否决项
 
+把所有窄 `TEST` 的 `And -> Or(0)` 扩成直接 `And` flags producer，并把两侧 low extract 都
+绑定到原寄存器的原型没有通过 no-growth 门。8 秒上限下的 496-PC 共同样本中，29 个 PC
+缩短但 31 个增长，静态净减少仅 13 条；retained formal exact-version 子集只减少 623 条
+加权指令。IR 缩短扰动了 RA 排布，收益远低于复杂度，原型已完整回退。
+
 直接放开 Linux AFP scalar insert 曾使 c-ray host 134,666,060→132,076,475，
 但 smallpt 输出与 FEX 分离；单独关闭 scalar tie 后仍是同一错误输出，证明问题在 scalar
 insert 契约而非 RA tie。该原型已完整删除。
