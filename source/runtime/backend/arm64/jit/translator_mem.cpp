@@ -1096,19 +1096,22 @@ void JitTranslator::EmitGetHostGPR(ir::Inst* inst) {
             reg_index == 21 || reg_index == 22 || reg_index == 23 ||
             reg_index == 29;
     if (offset == 0 && pin_ext_reg &&
-        inst->GetUses() == 1 && value_size <= sizeof(u32)) {
+        inst->GetUses() != 0 && value_size <= sizeof(u32)) {
         auto& list = cur_block->GetInstList();
         for (auto it = std::next(list.iterator_to(*inst)); it != list.end(); ++it) {
             if (it->GetOp() == ir::OpCode::SetHostGPR &&
                 it->GetArg<ir::Imm>(1).Get() == reg_index) {
                 break;  // the materialized read must retain snapshot semantics
             }
-            bool names_value = false;
+            u32 named_uses = 0;
             for (auto used : it->GetValues()) {
-                names_value |= used.Def() == inst;
+                named_uses += used.Def() == inst;
             }
-            if (!names_value) {
+            if (named_uses == 0) {
                 continue;
+            }
+            if (named_uses != inst->GetUses()) {
+                break;
             }
             // Narrow And/Xor reads stay fused for the callee-saved pins
             // (22/23/29) below level 3 — the W56-proven shape. The x6-x9
@@ -1127,7 +1130,11 @@ void JitTranslator::EmitGetHostGPR(ir::Inst* inst) {
                     (value_size == sizeof(u8) || value_size == sizeof(u16)) &&
                     it->GetOp() == ir::OpCode::ZeroExtend32 &&
                     it->GetArg<ir::Value>(0).Def() == inst;
-            if (direct_alu || direct_caller_pin_alu || direct_extend) {
+            const bool direct_sign_extend =
+                    reg_index >= 19 && it->GetOp() == ir::OpCode::SignExtend &&
+                    it->GetArg<ir::Value>(0).Def() == inst;
+            if (direct_alu || direct_caller_pin_alu || direct_extend ||
+                direct_sign_extend) {
                 fused_pin_gpr_reads.emplace(inst, static_cast<u16>(reg_index));
                 return;
             }

@@ -427,7 +427,11 @@ void JitTranslator::EmitBitExtract(ir::Inst* inst) {
 void JitTranslator::EmitSignExtend(ir::Inst* inst) {
     auto value = inst->GetArg<ir::Value>(0);
     auto result = context.R(ir::Value{inst});
-    auto src = context.W(value);
+    auto fused = value.Def() ? fused_pin_gpr_reads.find(value.Def())
+                             : fused_pin_gpr_reads.end();
+    auto src = fused != fused_pin_gpr_reads.end()
+            ? WRegister(fused->second)
+            : context.W(value);
     switch (ir::GetValueSizeByte(value.Type())) {
         case 1:
             __ Sxtb(result, src);
