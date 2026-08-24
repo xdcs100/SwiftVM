@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`b1e501e`** `perf: publish zero FPR lanes from the zero register`
+- Code tip: **`215a059`** `perf: elide shared zero store materialization`
 - Tracked tree is clean before the documentation commit. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -48,6 +48,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 | `523d679` | Write consumer-proven compact FCMP ordering directly into the PF/AF carrier and remove the separate publish insert |
 | `e1257d6` | Stop emitting host instructions for semantic IR Nops while preserving decode/translate metadata effects |
 | `b1e501e` | Let single-use integer zero values publish directly into fixed FPR lanes from `wzr/xzr` |
+| `215a059` | Elide a shared integer zero when every use is a compatible uniform, memory or fixed-FPR store |
 
 Hot files:
 
@@ -167,19 +168,20 @@ Validation for `ff42917`:
   1,047,523 passed / 45 failed assertions. The unsafe generic prototype had added one U16 helper
   failure; the final consumer whitelist removes it.
 
-Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9d49` / `b3998d5` / `3ec9582` / `e74e734` / `030f52d` / `97009a3` / `f99eabf` / `b692fca` / `c15a712` / `2f2fb88` / `523d679` / `e1257d6` / `b1e501e`:
+Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9d49` / `b3998d5` / `3ec9582` / `e74e734` / `030f52d` / `97009a3` / `f99eabf` / `b692fca` / `c15a712` / `2f2fb88` / `523d679` / `e1257d6` / `b1e501e` / `215a059`:
 
 - Current formal smallpt is `smallpt_wh_x64 8 128 96`; do not substitute the fixed 1024×768
   `smallpt_x64` when updating the formal FEX ratio.
 - Formal smallpt default-region host:
-  `1,321,651,162 → 1,303,939,990 → 1,297,980,655 → 1,296,969,640 → 1,246,900,800 → 1,201,575,549 → 1,201,372,215 → 1,199,466,420 → 1,187,471,711 → 1,168,614,398 → 1,165,502,656 → 1,163,020,553 → 1,141,267,073 → 1,126,372,521 → 1,096,331,217 → 1,081,436,665 → 1,072,445,284 → 1,068,863,253`;
-  cumulative `-252,787,909` (`-19.1267%`), spill 0 throughout. The arrows are full-NZCV
+  `1,321,651,162 → 1,303,939,990 → 1,297,980,655 → 1,296,969,640 → 1,246,900,800 → 1,201,575,549 → 1,201,372,215 → 1,199,466,420 → 1,187,471,711 → 1,168,614,398 → 1,165,502,656 → 1,163,020,553 → 1,141,267,073 → 1,126,372,521 → 1,096,331,217 → 1,081,436,665 → 1,072,445,284 → 1,068,863,253 → 1,064,572,872`;
+  cumulative `-257,078,290` (`-19.4513%`), spill 0 throughout. The arrows are full-NZCV
   compaction, VecZip resident publication, retained RSB target reuse, static-exit direct-link,
   default return-L1, cycle-polled successor layout, paired indirect-L1 state loading, then live
   resident-FPR publication, scalar-load FPR fusion, scalar-sqrt resident publication, then
   legacy scalar-binary resident publication, direct absolute-address materialization, compact
   FCMP non-NZCV publication, trailing static-location cold publication, compact FCMP carrier
-  publication, semantic Nop elision, then zero-register FPR lane publication.
+  publication, semantic Nop elision, zero-register FPR lane publication, then shared zero-store
+  materialization elision.
   `7110d20` is neutral here but saves
   452,646,984 on fixed 1024×768
   smallpt.
@@ -262,11 +264,16 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   Formal smallpt is `-3,582,031` (`-0.3340%`) with 41 PCs smaller and none larger. Formal c-ray
   equal-entry is `-114,264,417` with 144 PCs smaller and none larger; STREAM is `-46` across 5
   shrinking PCs. CoreMark is effectively neutral and keeps CRC `0x382f`. All spill/oracle gates pass.
+- Shared zero-store elision accepts multiple uses only when the complete global use count is closed
+  by same-block StoreUniform, StoreMemory or SetHostFPR value operands. Formal smallpt is
+  `-4,290,381` (`-0.4014%`) with 74 PCs smaller and none larger. Formal c-ray equal-entry is
+  `-114,750,206` with 142 PCs smaller and none larger; STREAM is `-5` and CoreMark is neutral.
+  PPM, IDAT, STREAM, CRC and spill gates remain exact.
 - FEX-aligned RE=0 same-harness refresh for formal smallpt: SVM host/guest
-  `3.335622 → 3.267832`; the landed stages fold this to about `2.691001`. With unchanged FEX
-  `1.549`, ratio is `2.153× → 1.737×`. The earlier
+  `3.335622 → 3.267832`; the landed stages fold this to about `2.680199`. With unchanged FEX
+  `1.549`, ratio is `2.153× → 1.730×`. The earlier
   2.180× table used a different retained unit-formation artifact, so quote the current gap as
-  approximately 1.73–1.80× rather than mixing the two raw tables.
+  approximately 1.72–1.79× rather than mixing the two raw tables.
 - PPM SHA-256 remains
   `fe96f7e48295b27c8df8236294052d138c3ed130b81d022739907fe6b2cde5aa`; prior equal-entry
   c-ray IDAT remains `54256cb4b3c6313a65ea12ebb7b81e30`, 64-spp formal c-ray is
@@ -303,6 +310,10 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   on both. Baseline/candidate FLAGS twelve-grid and the 1664-unit/11-guest fingerprint match.
   Fixed-seed Orb remains 191 passed / 35 existing failed cases, now 44 failed assertions with no
   new failure category.
+- Shared zero-store elision extends the Mac matrix to 537 assertions. Helper-fault is 38/0;
+  FPR/flags focus and COMIS 3,482 assertions pass on Orb. Baseline/candidate FLAGS twelve-grid,
+  zero-store OFF/ON six-grid and the 1664-unit/11-guest fingerprint are identical. Fixed-seed Orb
+  remains 191 passed / 35 existing failed cases / 44 failed assertions.
 - RSB/indirect structure focus passes 26 assertions, including the paired state/cache load and
   no-target dispatcher path. A temporary mismatched-return probe passes default, both L1-off RSB
   frames, FLAGS-off and interpreter paths and was deleted. Mac and Orb builds pass.
@@ -358,8 +369,10 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   both producers are single-use, the high value is exactly U64 zero, and the load-to-publication
   window contains no fault/helper, local-control, target-home access, or overlapping mapped FPR.
   Emit the D-register load at the original fault site and reprove the complete plan there.
-- A zero-register fixed-FPR publication requires one unspilled integer `LoadImm(0)` with exactly one
-  use. Multi-use, pseudo-observed, spilled, floating and nonzero values must retain materialization.
+- A zero-register store value must be an unspilled integer `LoadImm(0)`. Multiple uses are allowed
+  only when the inclusive global use count exactly equals same-block StoreUniform, StoreMemory or
+  SetHostFPR value operands. Cross-block, address, arithmetic, pseudo, floating and nonzero uses
+  retain materialization.
 
 ## Failed / do not retry
 
@@ -388,6 +401,8 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 | Terminal-tail cycle success branch | formal smallpt bit-identical at `1,168,614,398`; safe target-bound pool is empty after successor layout, fully reverted |
 | Same-value carry-polarity publication dedup | equal-entry smallpt only `-23,703` (`-0.0022%`), with 137 PCs larger, 17 smaller and changed unit formation; fully reverted |
 | Generalized legacy scalar resident-left chain | formal smallpt byte-identical at `1,072,445,284`; exact `GetHostFPR` origin is not the remaining limiter, fully reverted |
+| Generated TestZero/TestNotZero local condition | FLAGS=1 transparent window still saves only 919 formal smallpt instructions; fully reverted |
+| Zero-register `SetHostGPR` publication | smallpt / c-ray equal-entry only `-1` / `-22`; existing GPR coalescing already absorbs it, fully reverted |
 
 ## Next ready (pick one, measure, revert on 124/134)
 
@@ -396,9 +411,9 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
    roughly 1.44% remaining return-L1 static sequences separately; `AND + ADD + LDP + CMP + CSEL + BR`
    has no obvious base-ISA fusion. Public host exit executes only 139 times. The remaining
    `SetLocation` tail is dynamic or has a later observer and must not inherit the trailing-constant proof.
-2. **Remaining FPR publication** — SetHostFPR is about 30,193,585 (`2.825%`), with about
-   8,317,804 (`0.778%`) full writes. Low-load/high-zero remain 10,641,609 (`0.996%`) /
-   10,093,484 (`0.944%`); the independent high-zero materialization is gone. About 8.29M adjacent
+2. **Remaining FPR publication** — SetHostFPR is about 30,193,585 (`2.836%`), with about
+   8,317,804 (`0.781%`) full writes. Low-load/high-zero remain 10,641,609 (`1.000%`) /
+   10,093,484 (`0.948%`); all-compatible high-zero materialization is gone. About 8.29M adjacent
    candidates were rejected by exact fault/alias/home gates and must not be recovered heuristically.
 3. **CoreMark remaining truncations** — raw BitExtract is no longer a pool. Only reopen 8/16-bit
    cases with a consumer-specific physical-high proof and the U16 helper regression in the gate.
