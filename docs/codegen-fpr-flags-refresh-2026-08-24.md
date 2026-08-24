@@ -500,6 +500,23 @@ level 2 下降 10.18%，因此不翻默认。
 984,381,707 和 1.600× 的正式标题数据。Mac 增量构建通过；3 个新用例与 3 个相邻 GPR
 回归共 6 cases / 429 assertions 通过，未运行完整套件。
 
+### Indexed-shuffle resident publication
+
+提交 `2634fe4` 将 `VecShuffle32Indexed` 纳入完整 V128 resident-home publication。RA 与
+ARM64 emitter 分别维护并复算同一 producer 集合；既有 observer、fixed-home、live-range
+和冲突门不变。该 op 的普通 `TBL` 与已证明的 0x4e `EXT` lowering 均允许结果和 source
+别名，因此 producer 可以直接写入目标 home，尾部 `ORR` publication 消失。
+
+- bounded `4 8 6` 全写 census 在改动前观察到 267 个静态 copy、4,826 次加权执行；
+  `VecShuffle32Indexed` 占 221 次，改动后该池全部消失；
+- 严格 A/B 的 PC/version 均为 2,757 / 3,597，host/entry 与 top-20 覆盖 100%，PPM
+  逐字一致、spill 为 0、无增长 PC，common host `580,841 -> 580,620`，减少 221
+  （0.038048%）；
+- 剩余 census 由 scalar64 FP producer 的 4,024 次和 `BitCast` 的 559 次主导。前者受
+  legacy 高 lane merge 与多 use 限制，不做通用白名单；下一步先追 `BitCast` 根来源。
+
+该阶段只运行短基准和定向测试，没有运行长 benchmark 或完整 suite；临时 census 已删除。
+
 ## 否决项
 
 直接放开 Linux AFP scalar insert 曾使 c-ray host 134,666,060→132,076,475，
@@ -641,6 +658,10 @@ saved-flags compound CondSet 的 `HI/LS` 与 `GE/LT` 两指令原型通过 88-as
 - 200 轮 `smc_mt_stress` 为 host_fails/guest_lost/timeouts = 0/0/0。
 - Catch 与 fuzz seed 同为 424242 时，最新 Orb tree 为 191 passed / 35 个既有 failed
   cases / 44 个失败断言；失败 case 数和类别不变，仍是既有配置敏感与 fuzz 类别。
+- indexed-shuffle publication 的 resident-XMM accepted/conflict 矩阵通过 854 assertions，
+  scalar fixed-home tie 通过 90，PSHUFD 全 immediate golden model 通过 6,914；VEX.128
+  directed 通过 76，固定 seed 424242 的 256-iteration fuzz 通过。SSE batch-B directed
+  通过 210，既有 JIT/interpreter differential 仍精确为 392 个 divergence。
 - smallpt_wh PPM SHA-256 两臂均为
   `fe96f7e48295b27c8df8236294052d138c3ed130b81d022739907fe6b2cde5aa`；
   原 equal-entry c-ray sample 的 IDAT MD5 两臂均为
@@ -668,6 +689,9 @@ saved-flags compound CondSet 的 `HI/LS` 与 `GE/LT` 两指令原型通过 88-as
    （0.952%）；所有 use 都兼容的 high-zero 常量物化已经消除，剩余数值是 publication IR 次数。
    相邻池中约
    8.29M 次因 fault/alias/fixed-home 门拒绝，不为继续扩池放宽精确状态边界。
+   bounded short-run 全写 census 的 4,826 次 copy 中，scalar64 FP producer 占 4,024，
+   `BitCast` 占 559，`VecShuffle32Indexed` 的 221 已全部关闭。下一项先分类 `BitCast`
+   producer root；没有根来源与 alias 证明前不放宽白名单。
 4. identity `[base+imm]`、`[base+index]` 与 access-size 匹配的 scaled index 已直接进入
    memory emitter。剩余复合 EA 涉及 bias/32-bit wrapping、shift 或 AArch64 不可编码的
    scale；只有同时给出 encoding 与 wrap 证明才扩展。

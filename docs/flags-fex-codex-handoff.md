@@ -445,6 +445,17 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   suite was run. A complete bounded pair census found 105 adjacent publications: all are GPR64 +
   high-zero, 43 use the existing load fusion and 62 use value fusion, for 4,004 weighted pair
   executions; no adjacent pair remains unmatched. The temporary census output was removed.
+- `2634fe4` extends resident full-home publication to `VecShuffle32Indexed`. The allocation pass
+  and ARM64 emitter independently restrict the same producer set; the existing live-range,
+  observer, fixed-home and conflict gates remain unchanged. `TBL` and the proven `EXT` lowering
+  are alias-safe when their result is allocated directly in the resident home. The strict local
+  `4 8 6` A/B keeps the same 2,757-PC / 3,597-version sets, 100% host/entry and top-20 coverage,
+  byte-identical PPM, zero spills and no growing PC, while common host falls `580,841 -> 580,620`
+  (`-221`, `-0.038048%`). The resident-XMM matrix now includes both accepted and conflicting
+  indexed-shuffle publications and passes 854 assertions; PSHUFD all-immediate coverage passes
+  6,914 assertions, directed VEX.128 passes 76, and fixed-seed 256-iteration VEX.128 fuzz passes.
+  The pre-existing SSE batch-B JIT/interpreter divergence count remains exactly 392. No long
+  benchmark or full suite was run.
 - FEX-aligned RE=0 same-harness refresh for formal smallpt: SVM host/guest
   `3.335622 → 3.267832`; the landed stages fold this to about `2.478306`. With unchanged FEX
   `1.549`, ratio is `2.153× → 1.600×`. The earlier
@@ -669,6 +680,11 @@ candidate changes unit/version formation and must pass a future formal gate befo
    8,317,804 (`0.785%`) full writes. Low-load/high-zero remain 10,641,609 (`1.004%`) /
    10,093,484 (`0.952%`); all-compatible high-zero materialization is gone. About 8.29M adjacent
    candidates were rejected by exact fault/alias/home gates and must not be recovered heuristically.
+   A bounded short-run full-write census found 4,826 weighted explicit copies before the indexed
+   shuffle stage: scalar64 FP producers account for 4,024, `BitCast` for 559 and
+   `VecShuffle32Indexed` for 221. The indexed-shuffle pool is now closed. Audit the `BitCast` roots
+   before changing its producer classification; do not broadly whitelist the scalar merge-home
+   shapes.
 5. **Remaining composite EA** — identity `[base+imm]`, `[base+index]` and matching scaled-index
    forms are now direct. Remaining materialized forms involve bias/32-bit wrapping, shifts or an
    AArch64-unencodable scale; require an exact encoding and wrap proof before extending the gate.
