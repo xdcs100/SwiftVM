@@ -464,6 +464,19 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   14 assertions. Fixed-seed 256-iteration ALU and mixed fuzz retain their exact pre-existing
   88 / 106 divergence counts on both arms. A matching callee-saved `Add` extension saved only 51
   (`0.008789%`) and was removed. No long benchmark or full suite was run.
+- `5f9ebac` removes the redundant preparation copy in the narrow `Sub` NZCV path when the emitted
+  right operand is exactly `LSL #0`: the existing U8/U16 sign-bit alignment is folded directly
+  into `SUBS`'s shifted-register operand. Other shifts, immediates, composites and `Add` keep their
+  old paths. The strict `4 8 6` A/B keeps all shape, coverage, PPM and spill gates exact and reduces
+  common host `580,290 -> 573,037` (`-7,253`, `-1.249892%`); ten PCs shrink by one instruction and
+  none grow. Pinned-GPR focus passes 16 assertions; flags elimination, SaveCV and CondSet pass
+  32 / 4 / 62. Fixed-seed ALU/mixed fuzz retain the exact baseline 88 / 106 divergences.
+- `993acce` admits `SignExtend` to the existing last-use GPR publication proof. `SXTB`, `SXTH` and
+  `SXTW` write a fresh alias-safe destination, while the unchanged input-live, conflict and observer
+  gates decide whether it may be the fixed home. The strict screen remains same-shape and exact,
+  with common host `573,037 -> 569,108` (`-3,929`, `-0.685645%`), eight shrinking PCs and none
+  growing. The expanded producer matrix passes 367 assertions and pinned-GPR focus passes 16;
+  fixed-seed mov/extend and mixed fuzz retain the exact baseline 98 / 106 divergences.
 - FEX-aligned RE=0 same-harness refresh for formal smallpt: SVM host/guest
   `3.335622 → 3.267832`; the landed stages fold this to about `2.478306`. With unchanged FEX
   `1.549`, ratio is `2.153× → 1.600×`. The earlier
@@ -677,7 +690,10 @@ candidate changes unit/version formation and must pass a future formal gate befo
    register renaming, not another fixed-home peephole. Direct ordinary StoreMemory payload reads
    and callee-saved `Sub` reads are closed. Continue only with another measured consumer that can
    read the fixed home directly while retaining snapshot, width and helper-clobber proofs; the
-   same `Add` extension was only `-51` and is closed, not a generally safe GetHost elimination.
+   same `Add` extension was only `-51` and is closed. A current bounded emitted-write census has
+   31,705 weighted `SetHostGPR` instructions: 13,002 are `GetHostGPR`-root guest copies, while the
+   3,944 `SignExtend` pool is now closed. Recount roots after each landed stage; do not treat the
+   remaining total as a generally safe GetHost elimination.
 3. **smallpt remaining link** — covered link is now about 6.6%. Region/cycle tails are about
    2.1%; their acquire poll and branch across per-block cold stubs are load-bearing. Audit the
    roughly 1.26% remaining return-L1 static sequences separately; address formation is now one

@@ -533,6 +533,34 @@ ARM64 emitter 分别维护并复算同一 producer 集合；既有 observer、fi
 
 该阶段没有新增开关，没有运行长 benchmark 或完整 suite。
 
+### Narrow subtraction shifted-operand alignment
+
+提交 `5f9ebac` 只处理窄 `Sub` 的实测 `LSL #0` 右操作数：原路径先把该 operand 复制到
+临时 W 寄存器，再以 U8/U16 的 sign-bit shift 送入 `SUBS`；现在直接把既有寄存器编码成
+`SUBS ..., LSL #24/#16`。非零 shift、immediate、composite 与 `Add` 均保持旧路径。
+
+- 轻量 full short-run emitter census 在改动前将 56,852 条加权 host instruction 归到
+  `Sub`，其中 span-4/5 热点由该准备 copy 主导；
+- 严格 `4 8 6` A/B 的 shape、100% coverage、PPM、spill 与 no-growth 门全部保持，common
+  host `580,290 -> 573,037`，减少 7,253（1.249892%）；十个 PC 各缩短一条；
+- pinned-GPR focus 通过 16 assertions，flags elimination / SaveCV / CondSet 分别通过
+  32 / 4 / 62；固定 seed 424242 的 ALU/mixed fuzz 在两臂均为既有 88 / 106 divergence。
+
+### Sign-extension fixed-home publication
+
+提交 `993acce` 把 `SignExtend` 纳入既有 last-use GPR publication producer 集。RA 与 emitter
+仍独立维护同一分类，输入活跃、fixed-home 冲突、observer 和 publication 窗口证明不变；
+`SXTB/SXTH/SXTW` 的目的与源允许别名，结果可直接写入 fixed home。
+
+- 严格 `4 8 6` A/B 保持 2,757 PC / 3,597 version、100% coverage、PPM、零 spill 和无增长
+  PC，common host `573,037 -> 569,108`，减少 3,929（0.685645%）；八个 PC 缩短；
+- expanded GPR producer accepted/conflict/emission 矩阵通过 367 assertions，pinned-GPR
+  focus 通过 16；固定 seed mov/extend 与 mixed fuzz 在两臂均保持 98 / 106 个既有差异；
+- 同阶段 SetHostGPR 根 census 的 31,705 次实际发码中，13,002 次 `GetHostGPR` 根是不同
+  guest home 之间的真实复制；`SignExtend` 的 3,944 次池已经关闭。
+
+两个阶段都没有新增开关，没有运行长 benchmark 或完整 suite；临时 census 已删除。
+
 ## 否决项
 
 直接放开 Linux AFP scalar insert 曾使 c-ray host 134,666,060→132,076,475，
@@ -684,9 +712,12 @@ saved-flags compound CondSet 的 `HI/LS` 与 `GE/LT` 两指令原型通过 88-as
   directed 通过 76，固定 seed 424242 的 256-iteration fuzz 通过。SSE batch-B directed
   通过 210，既有 JIT/interpreter differential 仍精确为 392 个 divergence。
 - callee-saved pinned `Sub` 的 U8/U16/U32 结构门将 pinned-GPR focus 扩为 6 cases /
-  14 assertions；固定 seed 424242 的 256-iteration ALU/mixed fuzz 在基线与候选均为
+  16 assertions，并覆盖窄 `Sub` 不再产生 shifted-operand preparation；flags elimination、
+  SaveCV、CondSet 分别通过 32 / 4 / 62。固定 seed 424242 的 256-iteration ALU/mixed fuzz 为
   88 / 106 个既有 divergence。scratch-price focus 的 U64 large-imm 项在两臂同样为
   24/25，属于既有过时期望，不是本阶段回归。
+- `SignExtend` 扩展后的 GPR producer accepted/conflict/emission 矩阵通过 367 assertions；
+  固定 seed mov/extend 与 mixed fuzz 在基线/候选均保持 98 / 106 个既有 divergence。
 - smallpt_wh PPM SHA-256 两臂均为
   `fe96f7e48295b27c8df8236294052d138c3ed130b81d022739907fe6b2cde5aa`；
   原 equal-entry c-ray sample 的 IDAT MD5 两臂均为
@@ -703,7 +734,9 @@ saved-flags compound CondSet 的 `HI/LS` 与 `GE/LT` 两指令原型通过 88-as
 1. GPR pin 应按实际 host bytes 而不是 IR 数量判断。level 2 保持 12/16 固定映射；level 3
    的 spill/host 膨胀已经否决。剩余 SetHost 热 move 多数是 guest 架构寄存器之间的真实复制，
    只能继续寻找 consumer 直接读取 fixed home 的形态，不能把真实 `mov` 当 publication 删除。
-   ordinary StoreMemory 与 callee-saved `Sub` 已关闭；同构 `Add` 仅 `-51`，不再扩池。
+   ordinary StoreMemory、callee-saved `Sub`、窄 `Sub` 的 `LSL #0` preparation 和
+   `SignExtend` publication 已关闭；同构 `Add` 仅 `-51`，不再扩池。当前 bounded census
+   的 31,705 次实际 SetHostGPR 发码中，13,002 次 `GetHostGPR` 根是 guest home 间真复制。
 2. 当前正式 smallpt 的已覆盖 link 约 6.6%。region/cycle link tail 约 2.1%，其中
    acquire poll 与跨本块 cold stub 的目标跳转不可直接删除；
    七条 return-L1 静态序列约 1.26%，地址形成已缩为 `BFI`，剩余
