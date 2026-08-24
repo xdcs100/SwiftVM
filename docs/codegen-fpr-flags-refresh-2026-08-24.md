@@ -40,12 +40,13 @@ publication、semantic Nop elision、zero-register FPR lane publication 和 shar
 materialization elision，再加入 simple CondSet saved-flags extraction 和 scaled memory
 displacement encoding、direct single-bit TestFlags extraction 和 PSTATE-preserving zero
 tests，再加入 live-PSTATE CSET materialization 和 negative GetOperand displacement lowering
-以及 aligned L1 BFI address formation、register-offset memory EA preservation 和
-fault-exact stack-push pre-index store 后，按正式 host 权重折算约为 2.522425。
-以未变的 FEX 1.549 为分母，对应 2.153×→1.628×。
+以及 aligned L1 BFI address formation、register-offset memory EA preservation、
+fault-exact stack-push pre-index store 和 same-page constant-address base reuse 后，按正式
+host 权重折算约为 2.478306。
+以未变的 FEX 1.549 为分母，对应 2.153×→1.600×。
 旧表与这次重采的
 unit 形成参数不完全相同，
-因此不直接覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 1.62–1.68×。
+因此不直接覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 1.59–1.65×。
 
 ## 已落地
 
@@ -464,7 +465,21 @@ ZF，既有 3-assertion repro 捕获了该问题；最终证明显式拒绝该�
 - STREAM raw / 等 entry 分别减少 5,508 / 4,228；CoreMark raw / 等 entry 分别减少
   100,077,187 / 100,077,202；validation 与 CRC final `0x382f` 保持一致。
 
-二十八项合计使正式 smallpt 默认 region host 减少 319,745,583（24.1929%）。
+### Same-page constant-address base reuse
+
+提交 `6b10c73` 把绝对地址缓存从“地址逐位相同”推广到“同一 4 KiB guest page”。一个通过
+完整 idle-window 与 scratch 复证的 GPR 保存 page base，后续普通 memory operand 以 AArch64
+scaled/unscaled offset 访问；biased-memory 路径逐次重物化精确 guest 地址。修正后的机制默认
+ON，`SVM_CONST_ADDR_CACHE=0` 可回退。
+
+- 正式 smallpt 1,001,905,579→984,381,707，减少 17,523,872（1.7491%）；47 个共同 PC
+  缩短、0 个增长，unit/version/entry 不变，spill 保持 0；
+- 正式 c-ray raw / 等 entry 分别减少 227,905,071 / 227,602,716，67 个等 entry PC
+  缩短、0 个增长，IDAT MD5 保持 `d0c71130abf3544a86b64417bc488c21`；
+- STREAM raw / 等 entry 分别减少 152 / 216；CoreMark raw / 等 entry 分别减少 147 / 216；
+  validation 与 CRC final `0x382f` 保持一致。
+
+二十九项合计使正式 smallpt 默认 region host 减少 337,269,455（25.5188%）。
 
 ## 否决项
 
@@ -591,6 +606,10 @@ saved-flags compound CondSet 的 `HI/LS` 与 `GE/LT` 两指令原型通过 88-as
   FLAGS 十二格逐字一致，function fingerprint 为 1,657 units / 11 guests 且逐项匹配。
   排除新增三个专项 case 后，同 seed 基线/候选均为 191 passed / 35 个既有 failed cases /
   44 个失败断言，失败位置集合一致；既有 nested-child 波动仍为 44–45。
+- constant-page cache 结构在 Mac/Orb 均通过 16 assertions，覆盖同址、同页不同址、scratch
+  不足和 biased-memory 精确地址回退。Cache OFF/ON FLAGS 十二格与 bounded-bias func_tests
+  逐字一致，function fingerprint 为 1,657 units / 11 guests 且逐项匹配。最终默认 ON 与
+  rollback 套件均为 194 passed / 35 个既有 failed cases / 45 个失败断言，失败位置一致。
 - RSB/indirect 结构测试 26 assertions，覆盖七指令 L1 快路径、无 push 和无目标
   dispatcher 路径；显式改写栈返回地址的临时 probe 在默认、L1-off 两种 RSB frame、
   FLAGS-off 和 interpreter 下均 rc=0，probe 已删除。
@@ -612,9 +631,9 @@ saved-flags compound CondSet 的 `HI/LS` 与 `GE/LT` 两指令原型通过 88-as
 
 ## 下一步
 
-当前 single-version opcode ledger 覆盖正式 smallpt host 执行的约 83.15%。剩余单 op host
-责任最高的是 GetOperand 83.40M、StoreUniform 82.41M、VecFMulScalar64 78.89M、LoadMemory
-76.55M、VecFAddScalar64 58.03M、LoadUniform 56.33M 和 StoreMemory 51.64M。
+当前 single-version opcode ledger 覆盖正式 smallpt host 执行的约 82.85%。剩余单 op host
+责任最高的是 StoreUniform 82.41M、VecFMulScalar64 78.89M、LoadMemory 76.55M、GetOperand
+65.87M、VecFAddScalar64 58.03M、LoadUniform 56.33M 和 StoreMemory 51.64M。
 
 1. 当前正式 smallpt 的已覆盖 link 约 6.6%。region/cycle link tail 约 2.1%，其中
    acquire poll 与跨本块 cold stub 的目标跳转不可直接删除；

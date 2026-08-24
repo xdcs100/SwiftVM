@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`4821182`** `perf: fold stack pushes into pre-index stores`
+- Code tip: **`6b10c73`** `perf: reuse page bases for constant addresses`
 - Tracked tree is clean before the documentation commit. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -58,6 +58,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 | `d9eb980` | Align direct-hash L1 storage and form each 16-byte entry address with one `BFI` |
 | `e2f9527` | Preserve identity-mode `[base + index]` in memory IR and use the AArch64 register-offset encoding directly |
 | `4821182` | Fold fault-exact identity-mode stack pushes into one AArch64 pre-index store; retain biased-memory and base/data-overlap paths |
+| `6b10c73` | Share one materialized 4 KiB guest page base across encodable absolute memory addresses and make the proven path default |
 
 Hot files:
 
@@ -177,13 +178,13 @@ Validation for `ff42917`:
   1,047,523 passed / 45 failed assertions. The unsafe generic prototype had added one U16 helper
   failure; the final consumer whitelist removes it.
 
-Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9d49` / `b3998d5` / `3ec9582` / `e74e734` / `030f52d` / `97009a3` / `f99eabf` / `b692fca` / `c15a712` / `2f2fb88` / `523d679` / `e1257d6` / `b1e501e` / `215a059` / `21000f1` / `0fc245c` / `723ace5` / `8ca4b0b` / `aa7b83d` / `a505485` / `d9eb980` / `e2f9527` / `4821182`:
+Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9d49` / `b3998d5` / `3ec9582` / `e74e734` / `030f52d` / `97009a3` / `f99eabf` / `b692fca` / `c15a712` / `2f2fb88` / `523d679` / `e1257d6` / `b1e501e` / `215a059` / `21000f1` / `0fc245c` / `723ace5` / `8ca4b0b` / `aa7b83d` / `a505485` / `d9eb980` / `e2f9527` / `4821182` / `6b10c73`:
 
 - Current formal smallpt is `smallpt_wh_x64 8 128 96`; do not substitute the fixed 1024×768
   `smallpt_x64` when updating the formal FEX ratio.
 - Formal smallpt default-region host:
-  `1,321,651,162 → 1,303,939,990 → 1,297,980,655 → 1,296,969,640 → 1,246,900,800 → 1,201,575,549 → 1,201,372,215 → 1,199,466,420 → 1,187,471,711 → 1,168,614,398 → 1,165,502,656 → 1,163,020,553 → 1,141,267,073 → 1,126,372,521 → 1,096,331,217 → 1,081,436,665 → 1,072,445,284 → 1,068,863,253 → 1,064,572,872 → 1,060,138,659 → 1,060,040,252 → 1,052,965,418 → 1,047,125,252 → 1,043,588,497 → 1,042,807,357 → 1,040,901,562 → 1,040,846,721 → 1,001,905,579`;
-  cumulative `-319,745,583` (`-24.1929%`), spill 0 throughout. The arrows are full-NZCV
+  `1,321,651,162 → 1,303,939,990 → 1,297,980,655 → 1,296,969,640 → 1,246,900,800 → 1,201,575,549 → 1,201,372,215 → 1,199,466,420 → 1,187,471,711 → 1,168,614,398 → 1,165,502,656 → 1,163,020,553 → 1,141,267,073 → 1,126,372,521 → 1,096,331,217 → 1,081,436,665 → 1,072,445,284 → 1,068,863,253 → 1,064,572,872 → 1,060,138,659 → 1,060,040,252 → 1,052,965,418 → 1,047,125,252 → 1,043,588,497 → 1,042,807,357 → 1,040,901,562 → 1,040,846,721 → 1,001,905,579 → 984,381,707`;
+  cumulative `-337,269,455` (`-25.5188%`), spill 0 throughout. The arrows are full-NZCV
   compaction, VecZip resident publication, retained RSB target reuse, static-exit direct-link,
   default return-L1, cycle-polled successor layout, paired indirect-L1 state loading, then live
   resident-FPR publication, scalar-load FPR fusion, scalar-sqrt resident publication, then
@@ -194,7 +195,7 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   immediate load/store addressing, direct single-bit flag tests, PSTATE-preserving zero tests,
   one-instruction live-PSTATE flag materialization, direct negative-displacement lowering, then
   aligned L1 entry formation with `BFI`, register-offset memory EA preservation, then fault-exact
-  stack-push pre-index stores.
+  stack-push pre-index stores, then same-page constant-address base reuse.
   `7110d20` is neutral here but saves
   452,646,984 on fixed 1024×768
   smallpt.
@@ -338,11 +339,20 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   STREAM raw/equal-entry are `-5,508` / `-4,228`; CoreMark raw/equal-entry are
   `-100,077,187` / `-100,077,202`. PPM, 64-spp c-ray IDAT, STREAM validation, CoreMark CRC and
   spill gates remain exact.
+- Constant-address caching now groups ordinary memory operands by their 4 KiB guest page instead
+  of requiring the exact same address. One allocated page base serves every scaled/unscaled
+  encodable offset in the verified idle-register window; biased memory rematerializes each exact
+  guest address. The corrected cache is default ON with `SVM_CONST_ADDR_CACHE=0` rollback.
+  Formal smallpt is `-17,523,872` (`-1.7491%`) with 47 PCs smaller and none larger; all
+  unit/version/entry counts remain identical. Formal c-ray raw/equal-entry are `-227,905,071` /
+  `-227,602,716` with 67 PCs smaller and none larger. STREAM raw/equal-entry are `-152` / `-216`;
+  CoreMark raw/equal-entry are `-147` / `-216`. PPM, c-ray IDAT, STREAM validation, CoreMark CRC
+  and spill gates remain exact.
 - FEX-aligned RE=0 same-harness refresh for formal smallpt: SVM host/guest
-  `3.335622 → 3.267832`; the landed stages fold this to about `2.522425`. With unchanged FEX
-  `1.549`, ratio is `2.153× → 1.628×`. The earlier
+  `3.335622 → 3.267832`; the landed stages fold this to about `2.478306`. With unchanged FEX
+  `1.549`, ratio is `2.153× → 1.600×`. The earlier
   2.180× table used a different retained unit-formation artifact, so quote the current gap as
-  approximately 1.62–1.68× rather than mixing the two raw tables.
+  approximately 1.59–1.65× rather than mixing the two raw tables.
 - PPM SHA-256 remains
   `fe96f7e48295b27c8df8236294052d138c3ed130b81d022739907fe6b2cde5aa`; prior equal-entry
   c-ray IDAT remains `54256cb4b3c6313a65ea12ebb7b81e30`, 64-spp formal c-ray is
@@ -422,6 +432,11 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   1,657 units / 11 guests. Excluding the three new focused cases, exact baseline/candidate suite
   runs are both 191 passed / 35 existing failed cases / 44 failed assertions with the same failure
   locations; the known nested-child variation remains 44–45.
+- Constant-page cache structure passes 16 assertions on Mac and Orb, including nearby addresses,
+  scratch exhaustion and biased-memory exact-address fallback. Cache OFF/ON FLAGS twelve-grid and
+  bounded-bias func_tests are byte-identical; the function fingerprint matches at 1,657 units /
+  11 guests. Final default-ON and rollback suite runs both return 194 passed / 35 existing failed
+  cases / 45 failed assertions with the same failure locations.
 - RSB/indirect structure focus passes 26 assertions, including the paired state/cache load and
   no-target dispatcher path. A temporary mismatched-return probe passes default, both L1-off RSB
   frames, FLAGS-off and interpreter paths and was deleted. Mac and Orb builds pass.
@@ -519,9 +534,9 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 
 ## Next ready (pick one, measure, revert on 124/134)
 
-The current single-version opcode ledger covers about 83.15% of formal smallpt host execution. The
-largest remaining per-op host responsibilities are GetOperand 83.40M, StoreUniform 82.41M,
-VecFMulScalar64 78.89M, LoadMemory 76.55M, VecFAddScalar64 58.03M, LoadUniform 56.33M and
+The current single-version opcode ledger covers about 82.85% of formal smallpt host execution. The
+largest remaining per-op host responsibilities are StoreUniform 82.41M, VecFMulScalar64 78.89M,
+LoadMemory 76.55M, GetOperand 65.87M, VecFAddScalar64 58.03M, LoadUniform 56.33M and
 StoreMemory 51.64M.
 
 1. **smallpt remaining link** — covered link is now about 6.6%. Region/cycle tails are about

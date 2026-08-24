@@ -175,6 +175,10 @@ flags 专项桶只有 0.03——**真实 flags 成本藏在 Sub/And/Or/BitExtrac
   cray −0.017%(50/50,1076 occ);coremark ≈0(25/25,432 occ)。
   窗口 bug 已收尽可缓存池,但池本身仍是个位数万分比,**不翻默认**。
   指纹门未跑(OFF 路径零变化;ON 翻盘才需要)。
+- **2026-08-24 同页推广已翻盘**(`6b10c73`):分组键从精确地址改为 4 KiB guest page，
+  memory operand 承载 scaled/unscaled offset；smallpt −1.7491%、正式 c-ray equal-entry
+  −227,602,716，零增长 PC。biased-memory 精确重物化、双态指纹/十二格/完整套件均通过，
+  `SVM_CONST_ADDR_CACHE` 默认 ON，`=0` 回退。
 
 **间接 exit / RSB 瘦身**(旧 W-ζ)
 
