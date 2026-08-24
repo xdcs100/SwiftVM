@@ -1263,7 +1263,10 @@ void JitTranslator::EmitSetHostFPR(ir::Inst* inst) {
                "invalid fixed FPR write offset {} size {}", offset, size);
 
     if (!ir::IsFloatValueType(value.Type())) {
-        auto source = context.R(value);
+        const bool zero_gpr = CanUseZeroStoreRegister(value);
+        Register source = zero_gpr
+                ? (size == sizeof(u64) ? Register{xzr} : Register{wzr})
+                : context.R(value);
         const u32 lane = offset / size;
         switch (size) {
             case 1: __ Ins(host_reg.V16B(), lane, source.W()); break;
@@ -1350,14 +1353,7 @@ void JitTranslator::EmitStoreUniform(ir::Inst* inst) {
     s32 offset = offsetof(State, uniform_buffer_begin) + uni.GetOffset();
     const auto value = inst->GetArg<ir::Value>(1);
     auto value_type = value.Type();
-    auto* value_def = value.Def();
-    const bool zero_gpr =
-            context.GetFeatures().zero_store_zr && !context.IsSpilled(value) &&
-            value_def && value_def->GetOp() == ir::OpCode::LoadImm &&
-            value_def->GetUses(false) == 1 &&
-            value_def->GetArg<ir::Imm>(0).Get() == 0 &&
-            !ir::IsFloatValueType(value_type) &&
-            ir::GetValueSizeByte(value_type) <= sizeof(u64);
+    const bool zero_gpr = CanUseZeroStoreRegister(value);
     CPUReg reg = zero_gpr
             ? CPUReg{ir::GetValueSizeByte(value_type) == sizeof(u64)
                              ? Register{xzr}
@@ -1567,14 +1563,7 @@ void JitTranslator::EmitStoreMemory(ir::Inst* inst) {
                            q_access && !fold_host_base,
                            !q_access,
                            structured_guest_ea);
-    auto* value_def = value.Def();
-    const bool zero_gpr =
-            context.GetFeatures().zero_store_zr && !context.IsSpilled(value) &&
-            value_def && value_def->GetOp() == ir::OpCode::LoadImm &&
-            value_def->GetUses(false) == 1 &&
-            value_def->GetArg<ir::Imm>(0).Get() == 0 &&
-            !ir::IsFloatValueType(type) &&
-            ir::GetValueSizeByte(type) <= sizeof(u64);
+    const bool zero_gpr = CanUseZeroStoreRegister(value);
     switch (type) {
         case ir::ValueType::S8:
         case ir::ValueType::U8:

@@ -601,11 +601,7 @@ void JitTranslator::EmitBitCast(ir::Inst* inst) {
 
 void JitTranslator::EmitLoadImm(ir::Inst* inst) {
     auto value = inst->GetArg<ir::Imm>(0);
-    if (context.GetFeatures().zero_store_zr && value.Get() == 0 &&
-        inst->ReturnType() != ir::ValueType::VOID &&
-        !ir::IsFloatValueType(inst->ReturnType()) &&
-        ir::GetValueSizeByte(inst->ReturnType()) <= sizeof(u64) &&
-        inst->GetUses(false) == 1 && !context.IsSpilled(ir::Value{inst})) {
+    if (CanUseZeroStoreRegister(ir::Value{inst})) {
         bool sole_use_is_plain_store = false;
         for (auto& use : cur_block->GetInstList()) {
             if (use.GetOp() == ir::OpCode::StoreUniform &&
@@ -615,6 +611,11 @@ void JitTranslator::EmitLoadImm(ir::Inst* inst) {
             }
             if (use.GetOp() == ir::OpCode::StoreMemory &&
                 use.GetArg<ir::Value>(1).Def() == inst) {
+                sole_use_is_plain_store = true;
+                break;
+            }
+            if (use.GetOp() == ir::OpCode::SetHostFPR &&
+                use.GetArg<ir::Value>(0).Def() == inst) {
                 sole_use_is_plain_store = true;
                 break;
             }

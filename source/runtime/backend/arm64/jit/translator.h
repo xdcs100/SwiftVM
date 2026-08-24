@@ -109,6 +109,7 @@ public:
 
 private:
     void EmitExecutionTrace(u64 guest_rip);
+    [[nodiscard]] bool CanUseZeroStoreRegister(ir::Value value);
     [[nodiscard]] bool ReproveCoalescedHostWrite(ir::Inst* inst) const;
     [[nodiscard]] bool ReproveCoalescedHostRead(ir::Inst* inst) const;
     [[nodiscard]] bool ReproveCoalescedHostFPRWrite(ir::Inst* inst) const;

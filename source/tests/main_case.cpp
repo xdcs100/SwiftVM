@@ -2640,7 +2640,7 @@ TEST_CASE("zero store zr is value-only and fail-closed") {
     using namespace swift::runtime::backend;
     using namespace swift::runtime::ir;
 
-    enum class StoreKind { Uniform, Memory };
+    enum class StoreKind { Uniform, Memory, FixedFPR };
     enum class Cardinality { Single, Multi };
     enum class Observer { None, Save, Branch };
     struct Emitted {
@@ -2679,10 +2679,15 @@ TEST_CASE("zero store zr is value-only and fail-closed") {
         }
         if (kind == StoreKind::Uniform) {
             block->StoreUniform(Uniform{8, type}, stored);
-        } else {
+        } else if (kind == StoreKind::Memory) {
             const auto address = block->LoadImm(Imm{swift::u64{0x100}})
                                          .SetType(ValueType::U64);
             block->StoreMemory(Operand{address}, stored);
+        } else {
+            const auto size = GetValueSizeByte(type);
+            block->AppendInst(OpCode::SetHostFPR, stored, HostRegIndex(24),
+                              Imm{static_cast<swift::u64>(
+                                      sizeof(swift::u128) - size)});
         }
         block->SetTerminal(terminal::ReturnToDispatch{});
         block->ReIdInstr();
@@ -2724,15 +2729,20 @@ TEST_CASE("zero store zr is value-only and fail-closed") {
             const auto begin = line.find_first_not_of(" \t");
             if (begin != std::string_view::npos) line.remove_prefix(begin);
             emitted.moves += line.starts_with("mov ");
-            emitted.zr_stores += line.starts_with(zr_store);
+            emitted.zr_stores += kind == StoreKind::FixedFPR
+                    ? line.starts_with("mov v") &&
+                              (line.find(", wzr") != std::string_view::npos ||
+                               line.find(", xzr") != std::string_view::npos)
+                    : line.starts_with(zr_store);
             emitted.text.append(line);
             emitted.text.push_back('\n');
         }
         return emitted;
     };
 
-    SECTION("StoreUniform StoreMemory x width x zero x cardinality x gate") {
-        constexpr std::array kinds{StoreKind::Uniform, StoreKind::Memory};
+    SECTION("StoreUniform StoreMemory SetHostFPR x width x zero x cardinality x gate") {
+        constexpr std::array kinds{StoreKind::Uniform, StoreKind::Memory,
+                                   StoreKind::FixedFPR};
         constexpr std::array widths{ValueType::U8, ValueType::U16,
                                     ValueType::U32, ValueType::U64};
         constexpr std::array cardinalities{Cardinality::Single,
@@ -2778,7 +2788,8 @@ TEST_CASE("zero store zr is value-only and fail-closed") {
     }
 
     SECTION("pseudo observers keep the LoadImm materialization") {
-        for (const auto kind : {StoreKind::Uniform, StoreKind::Memory}) {
+        for (const auto kind : {StoreKind::Uniform, StoreKind::Memory,
+                                StoreKind::FixedFPR}) {
             for (const auto type : {ValueType::U8, ValueType::U16,
                                     ValueType::U32, ValueType::U64}) {
                 for (const auto observer : {Observer::Save, Observer::Branch}) {
@@ -2800,7 +2811,8 @@ TEST_CASE("zero store zr is value-only and fail-closed") {
     }
 
     SECTION("spilled zero stays byte-identical on the old path") {
-        for (const auto kind : {StoreKind::Uniform, StoreKind::Memory}) {
+        for (const auto kind : {StoreKind::Uniform, StoreKind::Memory,
+                                StoreKind::FixedFPR}) {
             const auto off = run(false, kind, ValueType::U64, true,
                                  Cardinality::Single, Observer::None, true);
             const auto on = run(true, kind, ValueType::U64, true,

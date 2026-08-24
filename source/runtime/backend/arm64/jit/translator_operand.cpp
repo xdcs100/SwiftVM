@@ -5,6 +5,16 @@ namespace swift::runtime::backend::arm64 {
 
 #define __ masm.
 
+bool JitTranslator::CanUseZeroStoreRegister(ir::Value value) {
+    auto* definition = value.Def();
+    return context.GetFeatures().zero_store_zr && !context.IsSpilled(value) &&
+           definition && definition->GetOp() == ir::OpCode::LoadImm &&
+           definition->GetUses(false) == 1 &&
+           definition->GetArg<ir::Imm>(0).Get() == 0 &&
+           !ir::IsFloatValueType(value.Type()) &&
+           ir::GetValueSizeByte(value.Type()) <= sizeof(u64);
+}
+
 MemOperand JitTranslator::EmitMemOperand(ir::Operand& ir_op,
                                          ir::ValueType type,
                                          bool pair,
