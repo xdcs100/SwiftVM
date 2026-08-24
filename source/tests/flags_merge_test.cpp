@@ -95,6 +95,12 @@ std::map<std::string, swift::u32> EmitCarryConsumer() {
     });
 }
 
+std::map<std::string, swift::u32> EmitFlagClear(
+        swift::runtime::ir::Flags flags) {
+    using namespace swift::runtime::ir;
+    return EmitBlock([flags](Block& block) { block.ClearFlags(flags); });
+}
+
 void RequireBitfieldMerge(std::map<std::string, swift::u32>& mnemonics) {
     REQUIRE(mnemonics["mrs"] == 1);
     REQUIRE(mnemonics["ubfx"] == 1);
@@ -140,4 +146,15 @@ TEST_CASE("NZCV restore writes the packed flags register directly") {
 
     REQUIRE(mnemonics["msr"] == 1);
     REQUIRE(mnemonics["and"] == 0);
+}
+
+TEST_CASE("contiguous CV and AF clears share one bitfield clear") {
+    using swift::runtime::ir::Flags;
+    auto compact = EmitFlagClear(Flags::CV | Flags::AuxiliaryCarry);
+    auto split = EmitFlagClear(Flags::Carry | Flags::AuxiliaryCarry);
+
+    REQUIRE(compact["bfc"] == 1);
+    REQUIRE(compact["and"] == 0);
+    REQUIRE(split["bfc"] == 1);
+    REQUIRE(split["and"] == 1);
 }

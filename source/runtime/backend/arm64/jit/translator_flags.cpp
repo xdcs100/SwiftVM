@@ -382,6 +382,8 @@ void JitTranslator::SaveHostFlags(HostFlags host, ir::Flags guest) {
 }
 
 void JitTranslator::ClearFlags(ir::Flags guest) {
+    const auto cv_af = ir::Flags::CV | ir::Flags::AuxiliaryCarry;
+    const bool clear_cv_af = (guest & cv_af) == cv_af;
     if (True(guest & ir::Flags::NZCV)) {
         // ClearFlags is an independent IR write, not merely an annotation on
         // the preceding flag producer. Flag elimination can delete a dead
@@ -405,13 +407,15 @@ void JitTranslator::ClearFlags(ir::Flags guest) {
         if (True(guest & ir::Flags::Zero)) {
             mask &= ~(u64(1) << HostFlagsBit::Z);
         }
-        if (True(guest & ir::Flags::Carry)) {
+        if (!clear_cv_af && True(guest & ir::Flags::Carry)) {
             mask &= ~(u64(1) << HostFlagsBit::C);
         }
-        if (True(guest & ir::Flags::Overflow)) {
+        if (!clear_cv_af && True(guest & ir::Flags::Overflow)) {
             mask &= ~(u64(1) << HostFlagsBit::V);
         }
-        __ And(flags, flags, ForceCast<s64>(mask));
+        if (mask != UINT64_MAX) {
+            __ And(flags, flags, ForceCast<s64>(mask));
+        }
     }
     if (True(guest & ir::Flags::Parity)) {
         const u32 begin = context.CurrentBufferSize();
@@ -428,7 +432,11 @@ void JitTranslator::ClearFlags(ir::Flags guest) {
         const u32 begin = context.CurrentBufferSize();
         // AF is a single bit (carry into bit 4).
         flags_token_af = false;
-        __ Bfc(flags, HostFlagsBit::AuxiliaryCarry, 1);
+        __ Bfc(flags,
+               HostFlagsBit::AuxiliaryCarry,
+               clear_cv_af
+                       ? HostFlagsBit::C - HostFlagsBit::AuxiliaryCarry + 1
+                       : 1);
         RecordPFAFDensity(PFAFDensityKind::AFWrite, begin);
     }
 }
