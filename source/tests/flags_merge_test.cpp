@@ -101,49 +101,6 @@ std::map<std::string, swift::u32> EmitFlagClear(
     return EmitBlock([flags](Block& block) { block.ClearFlags(flags); });
 }
 
-swift::runtime::backend::arm64::DirectLinkSiteInfo EmitDirectFlagsLink() {
-    using namespace swift::runtime;
-    using namespace swift::runtime::backend;
-    using namespace swift::runtime::ir;
-
-    Config config{
-            .loc_start = 0,
-            .loc_end = 1ull << 48,
-            .enable_jit = true,
-            .has_local_operation = false,
-            .backend_isa = kArm64,
-            .global_opts = Optimizations::All,
-    };
-    AddressSpace address_space{config};
-    ModuleConfig module_config{
-            .optimizations = Optimizations::BlockLink,
-    };
-    auto module = address_space.MapModule(
-            LocationDescriptor{0x87a0}, LocationDescriptor{0x87d0}, module_config);
-
-    IntrusivePtr<Block> block{new Block(0, Location{0x87a0})};
-    block->SetEndLocation(Location{0x87a1});
-    auto left = block->LoadUniform<TypedValue<ValueType::U64>>(
-            Uniform{0, ValueType::U64});
-    auto right = block->LoadUniform<TypedValue<ValueType::U64>>(
-            Uniform{8, ValueType::U64});
-    auto result = block->Sub(left, Operand{right}).SetType(ValueType::U64);
-    block->SaveFlags(result, Flags::All);
-    block->SetTerminal(terminal::LinkBlock{Location{0x87c0}});
-    block->ReIdInstr();
-
-    auto features = ResolveFeatureSet(module_config);
-    RegAlloc alloc{block->MaxInstrId(),
-                   address_space.GetTrampolines().GetGPRRegs(),
-                   address_space.GetTrampolines().GetFPRRegs(), features};
-    RegisterAllocPass::Run(block.get(), &alloc, false, features);
-    arm64::JitContext context{module, alloc};
-    arm64::JitTranslator translator{context};
-    translator.Translate(block.get());
-    REQUIRE(context.GetDirectLinkSites().size() == 1);
-    return context.GetDirectLinkSites().front();
-}
-
 void RequireBitfieldMerge(std::map<std::string, swift::u32>& mnemonics) {
     REQUIRE(mnemonics["mrs"] == 1);
     REQUIRE(mnemonics["ubfx"] == 1);
@@ -200,11 +157,4 @@ TEST_CASE("contiguous CV and AF clears share one bitfield clear") {
     REQUIRE(compact["and"] == 0);
     REQUIRE(split["bfc"] == 1);
     REQUIRE(split["and"] == 1);
-}
-
-TEST_CASE("unconditional direct links expose the complete flags commit prefix") {
-    const auto site = EmitDirectFlagsLink();
-
-    REQUIRE(site.flags_commit_bypass_offset.has_value());
-    REQUIRE(*site.flags_commit_bypass_offset < site.code_offset);
 }

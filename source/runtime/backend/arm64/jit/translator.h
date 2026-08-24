@@ -308,7 +308,6 @@ private:
     // Terminals
     void EmitTerminal(const ir::Terminal &terminal,
                       LinkSiteKind direct_link_kind = LinkSiteKind::Unconditional);
-    void EmitBlockLink(ir::Location target, LinkSiteKind direct_link_kind);
     void PrepareRegionEdges(ir::HIRFunction* function);
     void CollectRegionTargets(const ir::Terminal& terminal,
                               std::vector<u64>& targets) const;

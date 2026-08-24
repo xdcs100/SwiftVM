@@ -147,8 +147,7 @@ public:
     [[nodiscard]] std::optional<CodeRegion> GetCodeRegion(CodeRegionId region_id);
     [[nodiscard]] u64 PublishLinkTarget(ir::Location guest,
                                         void* host_pc,
-                                        const void* allocation,
-                                        bool discards_incoming_flags = false);
+                                        const void* allocation);
     // A flushed allocation that never became module/L2-visible may be
     // discarded without an SMC/QSBR transaction, but its center-table owner
     // must still be removed before the bytes are freed.

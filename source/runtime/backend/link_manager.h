@@ -37,7 +37,6 @@ enum class LinkSiteKind : u8 {
 
 inline constexpr size_t kLinkSiteKindCount =
         static_cast<size_t>(LinkSiteKind::Count);
-inline constexpr u32 kInvalidLinkOffset = ~u32{};
 
 struct LinkSiteKey {
     CodeRegionId region_id{};
@@ -60,8 +59,6 @@ struct LinkSiteRecord {
     u64 target_generation{};
     LinkSiteState state{LinkSiteState::Unlinked};
     LinkSiteKind kind{LinkSiteKind::Unconditional};
-    u32 flags_commit_bypass_offset{kInvalidLinkOffset};
-    u32 unlinked_flags_commit{};
 };
 
 // Fully resolved at ordinary publication time. SignalInvalidation never
@@ -71,8 +68,6 @@ struct LinkSignalPatchSite {
     void* rx_site{};
     void* rw_site{};
     u32 unlinked_bl{};
-    u32 flags_commit_bypass_offset{kInvalidLinkOffset};
-    u32 unlinked_flags_commit{};
 };
 
 // Host publication paired with the generation checked by the cold linker.
@@ -84,7 +79,6 @@ struct LinkTargetRecord {
     CodeRegionId region_id{};
     u64 generation{};
     LinkSourceOwner target_owner{};
-    bool discards_incoming_flags{};
 };
 
 struct LinkManagerStats {
@@ -133,8 +127,7 @@ public:
     [[nodiscard]] u64 PublishTarget(u64 guest_target,
                                     void* host_pc = nullptr,
                                     CodeRegionId region_id = 0,
-                                    LinkSourceOwner target_owner = {},
-                                    bool discards_incoming_flags = false);
+                                    LinkSourceOwner target_owner = {});
     [[nodiscard]] std::optional<LinkTargetRecord> QueryTarget(u64 guest_target) const;
     [[nodiscard]] std::optional<u64> QueryTargetGeneration(u64 guest_target) const;
     [[nodiscard]] bool ValidateTargetGeneration(u64 guest_target, u64 generation) const;
@@ -195,7 +188,6 @@ private:
         LinkSourceOwner target_owner{};
         SignalTarget* signal_target{};
         bool active{};
-        bool discards_incoming_flags{};
     };
 
     struct SignalSite {
@@ -266,9 +258,5 @@ private:
                                      void* rx_site,
                                      void* rw_site,
                                      u32 insn);
-[[nodiscard]] bool PatchCodeInstruction(const CodeRegion& region,
-                                        void* rx_site,
-                                        void* rw_site,
-                                        u32 insn);
 
 }  // namespace swift::runtime::backend

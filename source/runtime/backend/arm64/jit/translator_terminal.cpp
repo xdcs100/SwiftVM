@@ -11,49 +11,6 @@ namespace swift::runtime::backend::arm64 {
 
 #define __ masm.
 
-void JitTranslator::EmitBlockLink(ir::Location target,
-                                  LinkSiteKind direct_link_kind) {
-    if (IsRegionInternalEdge(target)) {
-        EmitRegionEdge(target);
-        return;
-    }
-
-    auto* exit = IsSelfEdge(target) && backedge_exit_label
-            ? backedge_exit_label.get()
-            : GetDirectCycleExit(target);
-    backedge_exit_referenced |= exit && exit == backedge_exit_label.get();
-    auto* self_target = IsSelfEdge(target) &&
-                                (backedge_flags_plan || loop_hoist_body_entry)
-            ? LocalBranchTarget(target)
-            : nullptr;
-
-    context.RecordExecCounter(exec_offset_exit_direct);
-
-    std::optional<u32> flags_commit_bypass_offset;
-    if (FlagsRegsEnabled() && !exit && context.CanEmitDirectLink(target)) {
-        context.PrepareDirectLinkFlagsBypass();
-        flags_commit_bypass_offset = context.CurrentBufferSize();
-    }
-    MergeNZCV(flags_audit_block_edge == FlagsRegsAuditEdgeKind::Dispatcher
-                      ? FlagsRegsAuditMergeCause::TerminalDispatcher
-                      : FlagsRegsAuditMergeCause::TerminalInternal,
-              flags_audit_block_edge);
-    if (flags_commit_bypass_offset &&
-        *flags_commit_bypass_offset == context.CurrentBufferSize()) {
-        flags_commit_bypass_offset.reset();
-    }
-
-    const u32 link_before = context.CurrentBufferSize();
-    context.Forward(target,
-                    exit,
-                    self_target,
-                    direct_link_kind,
-                    flags_commit_bypass_offset);
-    RecordBoundaryRange(BoundarySubsequence::LinkTail,
-                        link_before,
-                        context.CurrentBufferSize());
-}
-
 void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
                                  LinkSiteKind direct_link_kind) {
     VisitVariant<void>(terminal, [this, direct_link_kind](auto term) {
@@ -90,9 +47,53 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
             __ Str(ipw, MemOperand(state, state_offset_halt_reason));
             __ Ret();
         } else if constexpr (std::is_same_v<T, ir::terminal::LinkBlock>) {
-            EmitBlockLink(term.next, direct_link_kind);
+            if (IsRegionInternalEdge(term.next)) {
+                EmitRegionEdge(term.next);
+                return;
+            }
+            MergeNZCV(flags_audit_block_edge ==
+                                      FlagsRegsAuditEdgeKind::Dispatcher
+                              ? FlagsRegsAuditMergeCause::TerminalDispatcher
+                              : FlagsRegsAuditMergeCause::TerminalInternal,
+                      flags_audit_block_edge);
+            context.RecordExecCounter(exec_offset_exit_direct);
+            auto* exit = IsSelfEdge(term.next) && backedge_exit_label
+                    ? backedge_exit_label.get()
+                    : GetDirectCycleExit(term.next);
+            backedge_exit_referenced |=
+                    exit && exit == backedge_exit_label.get();
+            auto* self_target = IsSelfEdge(term.next) &&
+                                        (backedge_flags_plan || loop_hoist_body_entry)
+                    ? LocalBranchTarget(term.next)
+                    : nullptr;
+            const u32 link_before = context.CurrentBufferSize();
+            context.Forward(term.next, exit, self_target, direct_link_kind);
+            RecordBoundaryRange(BoundarySubsequence::LinkTail, link_before,
+                                context.CurrentBufferSize());
         } else if constexpr (std::is_same_v<T, ir::terminal::LinkBlockFast>) {
-            EmitBlockLink(term.next, direct_link_kind);
+            if (IsRegionInternalEdge(term.next)) {
+                EmitRegionEdge(term.next);
+                return;
+            }
+            MergeNZCV(flags_audit_block_edge ==
+                                      FlagsRegsAuditEdgeKind::Dispatcher
+                              ? FlagsRegsAuditMergeCause::TerminalDispatcher
+                              : FlagsRegsAuditMergeCause::TerminalInternal,
+                      flags_audit_block_edge);
+            context.RecordExecCounter(exec_offset_exit_direct);
+            auto* exit = IsSelfEdge(term.next) && backedge_exit_label
+                    ? backedge_exit_label.get()
+                    : GetDirectCycleExit(term.next);
+            backedge_exit_referenced |=
+                    exit && exit == backedge_exit_label.get();
+            auto* self_target = IsSelfEdge(term.next) &&
+                                        (backedge_flags_plan || loop_hoist_body_entry)
+                    ? LocalBranchTarget(term.next)
+                    : nullptr;
+            const u32 link_before = context.CurrentBufferSize();
+            context.Forward(term.next, exit, self_target, direct_link_kind);
+            RecordBoundaryRange(BoundarySubsequence::LinkTail, link_before,
+                                context.CurrentBufferSize());
         } else if constexpr (std::is_same_v<T, ir::terminal::PopRSBHint>) {
             // A retained return target uses the inline L1 path. Without that
             // target an L1 module returns to the dispatcher; only modules that

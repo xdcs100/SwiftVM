@@ -355,8 +355,7 @@ std::optional<CodeRegion> Module::GetCodeRegion(CodeRegionId region_id) {
 
 u64 Module::PublishLinkTarget(ir::Location guest,
                               void* host_pc,
-                              const void* allocation,
-                              bool discards_incoming_flags) {
+                              const void* allocation) {
     if (!IsDirectLinkConfigured()) {
         return 0;
     }
@@ -366,8 +365,7 @@ u64 Module::PublishLinkTarget(ir::Location guest,
         return 0;
     }
     return address_space.GetLinkManager().PublishTarget(
-            guest.Value(), host_pc, region->id, {this, allocation},
-            discards_incoming_flags);
+            guest.Value(), host_pc, region->id, {this, allocation});
 }
 
 void Module::DiscardLinkSource(const void* allocation) {

@@ -358,17 +358,6 @@ void SmcTracker::DelinkTargets(AddressSpace& space,
             auto* trampoline = region->rx_base + region->trampoline_offset;
             const auto branch = EncodeBL(trampoline - rx_site);
             ASSERT(branch);
-            if (record.flags_commit_bypass_offset != kInvalidLinkOffset) {
-                auto* bypass_rx =
-                        region->rx_base + record.flags_commit_bypass_offset;
-                auto* bypass_rw =
-                        region->rw_base + record.flags_commit_bypass_offset;
-                ASSERT_MSG(PatchCodeInstruction(*region,
-                                                bypass_rx,
-                                                bypass_rw,
-                                                record.unlinked_flags_commit),
-                           "failed to restore flags-commit bypass before target retirement");
-            }
             ASSERT_MSG(PatchDirectBranch(*region, rx_site, rw_site, *branch),
                        "failed to restore direct-link site before target retirement");
             patched_any = true;
