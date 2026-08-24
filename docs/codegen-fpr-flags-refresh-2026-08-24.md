@@ -40,12 +40,12 @@ publication、semantic Nop elision、zero-register FPR lane publication 和 shar
 materialization elision，再加入 simple CondSet saved-flags extraction 和 scaled memory
 displacement encoding、direct single-bit TestFlags extraction 和 PSTATE-preserving zero
 tests，再加入 live-PSTATE CSET materialization 和 negative GetOperand displacement lowering
-以及 aligned L1 BFI address formation、register-offset memory EA preservation 后，按正式
-host 权重折算约为 2.620464。
-以未变的 FEX 1.549 为分母，对应 2.153×→1.692×。
+以及 aligned L1 BFI address formation、register-offset memory EA preservation 和
+fault-exact stack-push pre-index store 后，按正式 host 权重折算约为 2.522425。
+以未变的 FEX 1.549 为分母，对应 2.153×→1.628×。
 旧表与这次重采的
 unit 形成参数不完全相同，
-因此不直接覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 1.68–1.75×。
+因此不直接覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 1.62–1.68×。
 
 ## 已落地
 
@@ -451,7 +451,20 @@ ZF，既有 3-assertion repro 捕获了该问题；最终证明显式拒绝该�
 - STREAM 等 entry 减少 111；CoreMark 等 entry 减少 640,298，66 个 PC 缩短、0 个增长，
   validation 与 CRC final `0x382f` 保持一致。
 
-二十七项合计使正式 smallpt 默认 region host 减少 280,804,441（21.2465%）。
+### Fault-exact stack-push pre-index stores
+
+提交 `4821182` 对连续的 `Sub(RSP,size) -> StoreMemory -> SetHostGPR(RSP)` 做严格后端证明，
+在 identity 模式下以单条 AArch64 pre-index store 完成地址递减、存储和 RSP 发布。同步异常
+发生在基址写回之前；biased-memory 和 base/data overlap（`push rsp`）继续走原路径。
+
+- 正式 smallpt 1,040,846,721→1,001,905,579，减少 38,941,142（3.7413%）；228 个共同
+  PC 缩短、0 个增长，unit/version/entry 不变，spill 保持 0；
+- 正式 c-ray raw / 等 entry 分别减少 401,378,477 / 400,778,948，1,108 个等 entry PC
+  缩短、0 个增长，IDAT MD5 保持 `d0c71130abf3544a86b64417bc488c21`；
+- STREAM raw / 等 entry 分别减少 5,508 / 4,228；CoreMark raw / 等 entry 分别减少
+  100,077,187 / 100,077,202；validation 与 CRC final `0x382f` 保持一致。
+
+二十八项合计使正式 smallpt 默认 region host 减少 319,745,583（24.1929%）。
 
 ## 否决项
 
@@ -574,6 +587,10 @@ saved-flags compound CondSet 的 `HI/LS` 与 `GE/LT` 两指令原型通过 88-as
   FLAGS 十二格逐字一致。候选自一致为 1,657 units / 11 guests；unit/decoded-block 总量
   不变，六个 guest 的 aggregate IR 合计减少 152。顶层 seed 424242 保持 191 passed /
   35 个既有 failed cases / 45 个失败断言，失败文件集合不变。
+- stack-push 结构与 fault recovery 在 Mac/Orb 均通过 3 cases / 13 assertions；基线/候选
+  FLAGS 十二格逐字一致，function fingerprint 为 1,657 units / 11 guests 且逐项匹配。
+  排除新增三个专项 case 后，同 seed 基线/候选均为 191 passed / 35 个既有 failed cases /
+  44 个失败断言，失败位置集合一致；既有 nested-child 波动仍为 44–45。
 - RSB/indirect 结构测试 26 assertions，覆盖七指令 L1 快路径、无 push 和无目标
   dispatcher 路径；显式改写栈返回地址的临时 probe 在默认、L1-off 两种 RSB frame、
   FLAGS-off 和 interpreter 下均 rc=0，probe 已删除。
@@ -595,8 +612,8 @@ saved-flags compound CondSet 的 `HI/LS` 与 `GE/LT` 两指令原型通过 88-as
 
 ## 下一步
 
-当前 single-version opcode ledger 覆盖正式 smallpt host 执行的约 83.77%。剩余单 op host
-责任最高的是 GetOperand 83.35M、StoreUniform 82.41M、VecFMulScalar64 78.89M、LoadMemory
+当前 single-version opcode ledger 覆盖正式 smallpt host 执行的约 83.15%。剩余单 op host
+责任最高的是 GetOperand 83.40M、StoreUniform 82.41M、VecFMulScalar64 78.89M、LoadMemory
 76.55M、VecFAddScalar64 58.03M、LoadUniform 56.33M 和 StoreMemory 51.64M。
 
 1. 当前正式 smallpt 的已覆盖 link 约 6.6%。region/cycle link tail 约 2.1%，其中
