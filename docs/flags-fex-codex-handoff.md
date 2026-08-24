@@ -60,6 +60,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 | `4821182` | Fold fault-exact identity-mode stack pushes into one AArch64 pre-index store; retain biased-memory and base/data-overlap paths |
 | `6b10c73` | Share one materialized 4 KiB guest page base across encodable absolute memory addresses and make the proven path default |
 | `e10fec4` | Let one audited consumer reuse a pinned W view for every operand occurrence and feed callee-saved pinned values directly into sign extension |
+| `2d86a6e` | Screen candidates with bounded short shape runs and retained formal weights before promoting them to long benchmarks |
 
 Hot files:
 
@@ -76,10 +77,25 @@ Hot files:
 - `translator_operand.cpp` — shared zero-store register eligibility and scaled/unscaled memory operand formation
 - `translator_alu_vec_fp.cpp` — scalar-unary merge emission and redundant self-copy suppression
 - `svm_config.h` — `flags_regs` default true; `region_edges` bounded64
+- `tools/svm-linux-cq/quick_shape.py` / `weighted_diff.py` — bounded short shape capture and formal-weight comparison
+
+## Fast benchmark screening
+
+Do not run formal smallpt/c-ray/CoreMark/STREAM for every candidate. Use
+`docs/codegen-benchmark-fast-path.md` and commit `2d86a6e` first: capture baseline and candidate
+shapes with the same short input, apply retained formal entries through the strict PC/version join,
+require at least 99.9% host-weight coverage plus all top-20 PCs, and compare the short oracle
+byte-for-byte.
+
+The calibrated smallpt screen is `smallpt_wh_x64 4 8 6`: 7.2–8.4 seconds on Orb, 99.983053%
+formal host-weight coverage and top-20 20/20. Arguments below 4 are invalid because this guest
+divides spp by four and executes zero samples. The screen runs without `SVM_DENSITY_PROF`,
+`SVM_PROF=2` or `SVM_EXEC_PROF`; only the existing hot-shape collector is enabled.
 
 ## Honest density (coremark `0x0 0x0 0x66 20000 7 1 2000`)
 
-Measure on Orb **without** `SVM_EXEC_PROF` (it inflates host). Always:
+This is a promoted-stage/formal gate, not an iteration gate. Measure on Orb **without**
+`SVM_EXEC_PROF` (it inflates host):
 
 ```
 timeout 45 env -u SVM_JIT_CACHE $SVM $FT          # checksum 9f52b7d59285dbe5, rc=101
