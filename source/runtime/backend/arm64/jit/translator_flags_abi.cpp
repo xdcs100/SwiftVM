@@ -34,7 +34,9 @@ void JitTranslator::EmitFlagsPublishedVeneer(ir::Block* block) {
         return;
     }
     __ Bind(published);
-    if (!TargetKillsIncomingFlags(block->GetStartLocation())) {
+    if (TargetKillsIncomingFlags(block->GetStartLocation())) {
+        context.MarkIncomingFlagsDiscarded(block->GetStartLocation().Value());
+    } else {
         UnparkFlagsHot();
     }
     // Land before the entry counter so L2 visits match FLAGS=0 published

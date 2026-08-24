@@ -290,6 +290,89 @@ TEST_CASE("direct-link patch epoch synchronizes each runtime before publication"
     tracker.UnregisterRuntime(token_b);
 }
 
+TEST_CASE("region linker bypasses dead incoming flags and restores both sites",
+          "[direct-link][trampoline][flags]") {
+    for (const bool discards_incoming_flags : {false, true}) {
+        DYNAMIC_SECTION("discard=" << discards_incoming_flags) {
+            std::vector<UniformMapDesc> descriptors;
+            auto config = TestConfig(descriptors);
+            LinkManager manager;
+            CodeCache cache{config, 1u << 20, FeatureSet{}};
+            const int return_stub{};
+            const int dispatcher_stub{};
+            REQUIRE(cache.InitializeRegionTrampoline(
+                    manager,
+                    const_cast<int*>(&return_stub),
+                    const_cast<int*>(&dispatcher_stub)));
+
+            auto code = cache.AllocCode(128);
+            REQUIRE(code);
+            constexpr u32 kFlagsCommit = 0;
+            constexpr u32 kSite = 16;
+            constexpr u32 kTarget = 64;
+
+            MacroAssembler flags_commit;
+            flags_commit.Mrs(x11, NZCV);
+            CopyAssembler(*code, kFlagsCommit, flags_commit);
+            const u32 unlinked_flags_commit =
+                    LoadInsn(code->rw_data + kFlagsCommit);
+            const auto unlinked_branch = EncodeBL(
+                    static_cast<u8*>(cache.GetRegionTrampoline()) -
+                    (code->exec_data + kSite));
+            REQUIRE(unlinked_branch);
+            std::memcpy(code->rw_data + kSite,
+                        &*unlinked_branch,
+                        sizeof(*unlinked_branch));
+            code->Flush();
+
+            const int owner_module{};
+            const int owner_allocation{};
+            const LinkSiteKey key{cache.GetRegion().id, code->offset + kSite};
+            const LinkSignalPatchSite patch{
+                    .region = cache.GetRegion(),
+                    .rx_site = code->exec_data + kSite,
+                    .rw_site = code->rw_data + kSite,
+                    .unlinked_bl = *unlinked_branch,
+                    .flags_commit_bypass_offset = code->offset + kFlagsCommit,
+                    .unlinked_flags_commit = unlinked_flags_commit,
+            };
+            REQUIRE(manager.RegisterSite(
+                    key,
+                    kGuestTarget,
+                    {&owner_module, &owner_allocation},
+                    &patch));
+            REQUIRE(manager.PublishTarget(kGuestTarget,
+                                          code->exec_data + kTarget,
+                                          cache.GetRegion().id,
+                                          {},
+                                          discards_incoming_flags) != 0);
+
+            TestState state{config.uniform_buffer_size};
+            auto* context = cache.GetRegionLinkContext();
+            REQUIRE(RegionLinkTrampolineSlow(
+                            context, state.state, code->exec_data + kSite) ==
+                    code->exec_data + kTarget);
+            REQUIRE(DecodeBranchTarget(code->exec_data + kSite,
+                                       LoadInsn(code->exec_data + kSite)) ==
+                    reinterpret_cast<uintptr_t>(code->exec_data + kTarget));
+            if (discards_incoming_flags) {
+                REQUIRE(DecodeBranchTarget(
+                                code->exec_data + kFlagsCommit,
+                                LoadInsn(code->exec_data + kFlagsCommit)) ==
+                        reinterpret_cast<uintptr_t>(code->exec_data + kTarget));
+            } else {
+                REQUIRE(LoadInsn(code->exec_data + kFlagsCommit) ==
+                        unlinked_flags_commit);
+            }
+
+            REQUIRE(manager.SignalInvalidateTarget(kGuestTarget).linked_sites == 1);
+            REQUIRE(LoadInsn(code->exec_data + kSite) == *unlinked_branch);
+            REQUIRE(LoadInsn(code->exec_data + kFlagsCommit) ==
+                    unlinked_flags_commit);
+        }
+    }
+}
+
 TEST_CASE("region linker caches Far state and preserves dispatcher fallback",
           "[direct-link][trampoline][far]") {
     std::vector<UniformMapDesc> descriptors;

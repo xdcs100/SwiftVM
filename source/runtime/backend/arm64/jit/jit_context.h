@@ -6,6 +6,7 @@
 
 #include <map>
 #include <optional>
+#include <unordered_set>
 #include <vector>
 #include "aarch64/macro-assembler-aarch64.h"
 #include "base/common_funcs.h"
@@ -32,6 +33,7 @@ struct DirectLinkSiteInfo {
     u32 code_offset{};
     u64 guest_target{};
     LinkSiteKind kind{LinkSiteKind::Unconditional};
+    std::optional<u32> flags_commit_bypass_offset{};
 };
 
 class JitContext : DeleteCopyAndMove {
@@ -94,13 +96,17 @@ public:
     void Forward(ir::Location location,
                  Label* backedge_exit = nullptr,
                  Label* self_target = nullptr,
-                 LinkSiteKind direct_link_kind = LinkSiteKind::Unconditional);
+                 LinkSiteKind direct_link_kind = LinkSiteKind::Unconditional,
+                 std::optional<u32> flags_commit_bypass_offset = std::nullopt);
     void ForwardLocal(ir::Location location,
                       Label* cycle_exit = nullptr,
                       bool fallthrough = false,
                       Label* local_target = nullptr);
     [[nodiscard]] bool CanBypassDispatcher(ir::Location location) const;
     [[nodiscard]] bool CanEmitDirectLink(ir::Location location) const;
+    void PrepareDirectLinkFlagsBypass();
+    void MarkIncomingFlagsDiscarded(LocationDescriptor location);
+    [[nodiscard]] bool DiscardsIncomingFlags(LocationDescriptor location) const;
     [[nodiscard]] bool HasDirectLinkSites() const {
         return !pending_direct_link_sites.empty();
     }
@@ -259,7 +265,9 @@ private:
     void RecordHotSpillReload();
     void RecordHotSpillWriteback();
     [[nodiscard]] bool EmitDirectLink(ir::Location location,
-                                      LinkSiteKind kind);
+                                      LinkSiteKind kind,
+                                      std::optional<u32> flags_commit_bypass_offset =
+                                              std::nullopt);
 
     // --- RegAlloc::MEM (spilled value) support ---------------------------
     // A value the linear scan could not keep in a host register lives in
@@ -357,6 +365,7 @@ private:
     // Internal taken edges still use internal_labels after the counter, matching
     // FLAGS=0.
     std::map<LocationDescriptor, Label> counted_entry_labels;
+    std::unordered_set<LocationDescriptor> incoming_flags_discarded;
     // value id -> scratch reg code for the current instruction's spilled
     // def (repeated def accesses within one instruction must return the
     // same register); cleared at every TickIR.

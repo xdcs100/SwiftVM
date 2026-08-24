@@ -536,7 +536,8 @@ bool JitContext::ForwardStatic(ir::Location location,
 void JitContext::Forward(ir::Location location,
                          Label* backedge_exit,
                          Label* self_target,
-                         LinkSiteKind direct_link_kind) {
+                         LinkSiteKind direct_link_kind,
+                         std::optional<u32> flags_commit_bypass_offset) {
     ASSERT(cur_block);
     // Block exit: land any pending spill write-back before the transfer
     // (a spilled value defined by the block's last instruction may be live
@@ -568,7 +569,9 @@ void JitContext::Forward(ir::Location location,
 
         const bool self_module_forward{module == target_module};
         const ModuleConfig& module_config{module->GetModuleConfig()};
-        if (EmitDirectLink(location, direct_link_kind)) {
+        if (EmitDirectLink(location,
+                           direct_link_kind,
+                           flags_commit_bypass_offset)) {
             return;
         }
 
@@ -619,12 +622,16 @@ void JitContext::Forward(ir::Location location,
     }
 }
 
-bool JitContext::EmitDirectLink(ir::Location location, LinkSiteKind kind) {
+bool JitContext::EmitDirectLink(
+        ir::Location location,
+        LinkSiteKind kind,
+        std::optional<u32> flags_commit_bypass_offset) {
     if (!CanEmitDirectLink(location)) {
         return false;
     }
     pending_direct_link_sites.push_back(
-            {CurrentBufferSize(), location.Value(), kind});
+            {CurrentBufferSize(), location.Value(), kind,
+             flags_commit_bypass_offset});
     RecordFlagsRegsAudit(FlagsRegsAuditMergeCause::TerminalInternal,
                          FlagsRegsAuditEdgeKind::DirectSlow,
                          FlagsRegsAuditCost::PackInstructions,
@@ -670,6 +677,18 @@ bool JitContext::CanEmitDirectLink(ir::Location location) const {
     const auto target_module = module->GetAddressSpace().GetModule(location.Value());
     return target_module == module &&
            module->GetModuleConfig().HasOpt(Optimizations::BlockLink);
+}
+
+void JitContext::PrepareDirectLinkFlagsBypass() {
+    FlushSpillWrites();
+}
+
+void JitContext::MarkIncomingFlagsDiscarded(LocationDescriptor location) {
+    incoming_flags_discarded.insert(location);
+}
+
+bool JitContext::DiscardsIncomingFlags(LocationDescriptor location) const {
+    return incoming_flags_discarded.contains(location);
 }
 
 void JitContext::ReturnToDispatcher(const Register& location) {
@@ -993,6 +1012,11 @@ u8* JitContext::Flush(const CodeBuffer& code_cache) {
         auto* emitted = masm.GetBuffer()->GetStartAddress<u8*>();
         for (const auto& pending : pending_direct_link_sites) {
             ASSERT(static_cast<size_t>(pending.code_offset) + sizeof(u32) <= code_cache.size);
+            ASSERT(!pending.flags_commit_bypass_offset ||
+                   (static_cast<size_t>(*pending.flags_commit_bypass_offset) +
+                                    sizeof(u32) <=
+                            code_cache.size &&
+                    *pending.flags_commit_bypass_offset < pending.code_offset));
             auto* rx_site = code_cache.exec_data + pending.code_offset;
             const auto branch = EncodeBL(trampoline - rx_site);
             ASSERT(branch);
@@ -1001,11 +1025,22 @@ u8* JitContext::Flush(const CodeBuffer& code_cache) {
                     region.id,
                     code_cache.offset + pending.code_offset,
             };
+            u32 flags_commit_bypass_offset{kInvalidLinkOffset};
+            u32 unlinked_flags_commit{};
+            if (pending.flags_commit_bypass_offset) {
+                flags_commit_bypass_offset =
+                        code_cache.offset + *pending.flags_commit_bypass_offset;
+                std::memcpy(&unlinked_flags_commit,
+                            emitted + *pending.flags_commit_bypass_offset,
+                            sizeof(unlinked_flags_commit));
+            }
             const LinkSignalPatchSite signal_patch{
                     .region = region,
                     .rx_site = rx_site,
                     .rw_site = code_cache.rw_data + pending.code_offset,
                     .unlinked_bl = *branch,
+                    .flags_commit_bypass_offset = flags_commit_bypass_offset,
+                    .unlinked_flags_commit = unlinked_flags_commit,
             };
             ASSERT(module->GetAddressSpace().GetLinkManager().RegisterSite(
                     key, pending.guest_target, owner, &signal_patch, pending.kind));

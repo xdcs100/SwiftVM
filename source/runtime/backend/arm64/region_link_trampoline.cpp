@@ -29,6 +29,45 @@ namespace {
     return context.dispatcher;
 }
 
+[[nodiscard]] bool PatchLinkTarget(const CodeRegion& region,
+                                   const void* rx_site,
+                                   const LinkSiteRecord& site,
+                                   const LinkTargetRecord& target,
+                                   u32 direct_branch) {
+    auto* primary_rx = const_cast<void*>(rx_site);
+    auto* primary_rw = SiteRxToRw(region, rx_site);
+    if (!primary_rw) {
+        return false;
+    }
+
+    u32 unlinked_primary{};
+    std::memcpy(&unlinked_primary, rx_site, sizeof(unlinked_primary));
+    if (!PatchDirectBranch(region,
+                           primary_rx,
+                           primary_rw,
+                           direct_branch)) {
+        return false;
+    }
+    if (!target.discards_incoming_flags ||
+        site.flags_commit_bypass_offset == kInvalidLinkOffset) {
+        return true;
+    }
+
+    auto* bypass_rx = region.rx_base + site.flags_commit_bypass_offset;
+    auto* bypass_rw = region.rw_base + site.flags_commit_bypass_offset;
+    const auto bypass_branch = EncodeB(static_cast<u8*>(target.host_pc) - bypass_rx);
+    if (bypass_branch &&
+        PatchDirectBranch(region, bypass_rx, bypass_rw, *bypass_branch)) {
+        return true;
+    }
+
+    ASSERT(PatchDirectBranch(region,
+                             primary_rx,
+                             primary_rw,
+                             unlinked_primary));
+    return false;
+}
+
 }  // namespace
 
 extern "C" void* RegionLinkTrampolineSlow(RegionLinkContext* context,
@@ -78,13 +117,12 @@ extern "C" void* RegionLinkTrampolineSlow(RegionLinkContext* context,
             return ReturnToDispatcher(*context, state, site);
         }
         const bool linked = context->manager->MarkLinked(
-                key, target->generation, [&](const LinkSiteRecord&) {
-                    auto* rw_site = SiteRxToRw(*context->region, rx_site);
-                    return rw_site && PatchDirectBranch(
-                                              *context->region,
-                                              const_cast<void*>(rx_site),
-                                              rw_site,
-                                              *branch);
+                key, target->generation, [&](const LinkSiteRecord& record) {
+                    return PatchLinkTarget(*context->region,
+                                           rx_site,
+                                           record,
+                                           *target,
+                                           *branch);
                 });
         if (linked) {
             return target->host_pc;

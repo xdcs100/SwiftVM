@@ -978,7 +978,10 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
             {
                 PerfScope2 perf_pub_l2{GetPerfStats2().publish_l2};
                 (void)module->PublishLinkTarget(
-                        ir::Location{guest}, buffer.exec_data + offset, buffer.exec_data);
+                        ir::Location{guest},
+                        buffer.exec_data + offset,
+                        buffer.exec_data,
+                        emitted_context->DiscardsIncomingFlags(guest));
                 mutable_address_space.PushCodeCache(guest, buffer.exec_data + offset);
             }
             cache_blocks.push_back({guest,
