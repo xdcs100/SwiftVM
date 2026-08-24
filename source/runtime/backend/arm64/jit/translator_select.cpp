@@ -58,17 +58,20 @@ void JitTranslator::PrepareBooleanSelects(ir::Block* block) {
     direct_cond_selects.clear();
     std::unordered_map<ir::Inst*, u32> eligible_constant_uses;
     for (auto& inst : block->GetInstList()) {
+        if (inst.GetOp() == ir::OpCode::Select) {
+            auto* condition = inst.GetArg<ir::Value>(0).Def();
+            if (condition && condition->GetOp() == ir::OpCode::CondSet &&
+                condition->GetUses(false) == 1) {
+                direct_cond_selects.emplace(&inst, condition->GetArg<ir::Cond>(0));
+                disable_instructions.set(condition->Id());
+            }
+        }
         if (!IsBooleanIdentitySelect(&inst)) {
             continue;
         }
         normalized_bool_selects.insert(&inst);
         ++eligible_constant_uses[inst.GetArg<ir::Value>(1).Def()];
         ++eligible_constant_uses[inst.GetArg<ir::Value>(2).Def()];
-        auto* condition = inst.GetArg<ir::Value>(0).Def();
-        if (condition->GetOp() == ir::OpCode::CondSet && condition->GetUses() == 1) {
-            direct_cond_selects.emplace(&inst, condition->GetArg<ir::Cond>(0));
-            disable_instructions.set(condition->Id());
-        }
     }
     for (const auto& [constant, uses] : eligible_constant_uses) {
         if (constant->GetUses() == uses) {
@@ -85,13 +88,24 @@ void JitTranslator::EmitSelect(ir::Inst* inst) {
     auto false_value = inst->GetArg<ir::Value>(2);
     auto result = context.R(ir::Value{inst});
     if (auto direct = direct_cond_selects.find(inst); direct != direct_cond_selects.end()) {
+        const bool identity = normalized_bool_selects.contains(inst);
+        auto emit_direct = [&] {
+            if (identity) {
+                __ Cset(result.W(), MapCond(direct->second));
+            } else {
+                __ Csel(result,
+                        context.R(true_value),
+                        context.R(false_value),
+                        MapCond(direct->second));
+            }
+        };
         if (save_in_nzcv && nzcv_dirty) {
-            __ Cset(result.W(), MapCond(direct->second));
-            MergeNZCV();
-        } else if (!TryEmitCondSetFromFlags(inst, direct->second)) {
+            emit_direct();
+        } else if (!identity || !TryEmitCondSetFromFlags(inst, direct->second)) {
             LoadNZCVFromFlags();
-            __ Cset(result.W(), MapCond(direct->second));
+            emit_direct();
         }
+        MergeNZCV();
         return;
     }
     auto local = LocalConditionFor(cond);
