@@ -37,11 +37,11 @@ live resident-FPR publication、scalar-load FPR fusion、scalar-sqrt resident pu
 legacy scalar-binary resident publication、direct absolute-address materialization 和 compact
 FCMP PF/AF publication、trailing static-location cold publication、compact FCMP carrier
 publication、semantic Nop elision、zero-register FPR lane publication 和 shared zero-store
-materialization elision 后，按正式 host 权重折算约为 2.680199。以未变的 FEX 1.549
-为分母，对应 2.153×→1.730×。
+materialization elision，再加入 simple CondSet saved-flags extraction 后，按正式 host 权重
+折算约为 2.669035。以未变的 FEX 1.549 为分母，对应 2.153×→1.723×。
 旧表与这次重采的
 unit 形成参数不完全相同，
-因此不直接覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 1.72–1.79×。
+因此不直接覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 1.71–1.78×。
 
 ## 已落地
 
@@ -348,7 +348,20 @@ use 数精确闭合；跨块、地址复用、算术/pseudo observer、spill、�
 - STREAM 等 entry 减少 5，14 个共同 PC 缩短、0 个增长并保持 `Solution Validates`；
   CoreMark 等 entry 为 0，CRC final 保持 `0x382f`。
 
-十九项合计使正式 smallpt 默认 region host 减少 257,078,290（19.4513%）。
+### Simple CondSet saved-flags extraction
+
+提交 `21000f1` 在 x26 为权威状态时直接提取 EQ/NE、CS/CC、MI/PL、VS/VC。正向条件用
+一条 `UBFX`，反向条件追加一条 `EOR`；host PSTATE 仍存活或条件为 HI/LS、GE/LT、GT/LE
+时继续使用既有 NZCV 恢复路径，没有新增开关或兼容兜底。
+
+- 正式 smallpt 1,064,572,872→1,060,138,659，减少 4,434,213（0.4165%）；3,364 个
+  unit 和 3,613 个 version 完全一致，101 个共同 PC 缩短、0 个增长，spill 0→0；
+- 320×240、64-spp c-ray 等 entry 减少 21,411,778，293 个共同 PC 缩短、0 个增长，
+  IDAT MD5 保持 `d0c71130abf3544a86b64417bc488c21`；
+- STREAM/CoreMark 等 entry 分别减少 2,168 / 2,210，均为 53 个共同 PC 缩短、0 个增长，
+  并保持 `Solution Validates` / CRC final `0x382f`。
+
+二十项合计使正式 smallpt 默认 region host 减少 261,512,503（19.7868%）。
 
 ## 否决项
 
@@ -375,6 +388,10 @@ TestZero/TestNotZero 的 generated local condition 即使允许 FLAGS=1 下跨
 `LoadImm + StoreUniform + AdvancePC`，正式 smallpt 也仅减少 919，收益不成比例；原型
 已完整删除。`LoadImm(0) → SetHostGPR` 已被既有 GPR coalescer 吸收，smallpt / c-ray
 等 entry 仅为 -1 / -22，同样完整删除。
+
+透明 `BitCast` 零值存储图证明通过既有 537-assertion 矩阵，但正式 smallpt 的 3,364 个
+unit 与 c-ray 的所有等 entry PC 均逐字不变，说明剩余零物化不受该透明节点限制；原型已
+完整删除。
 
 ## 验证
 
@@ -424,6 +441,11 @@ TestZero/TestNotZero 的 generated local condition 即使允许 FLAGS=1 下跨
   3,482 assertions 在 Orb 通过；基线/候选 FLAGS 十二格、zero-store OFF/ON 六格和
   1664-unit/11-guest fingerprint 全部一致。Orb 固定 seed 全量保持 191 passed / 35 个
   既有 failed cases / 44 个失败断言。
+- simple CondSet 结构矩阵在 Mac/Orb 均通过 62 assertions，flags focus、SaveCV 和 COMIS
+  分别通过 46 / 4 / 3,482 assertions；基线/候选 FLAGS 十二格逐字一致，helper-fault 为
+  38/0，1664-unit/11-guest fingerprint 全部一致。顶层 seed 424242 的重复运行保持
+  191 passed / 35 个既有 failed cases；嵌套子进程 seed 会使既有 config/fuzz 失败断言在
+  44–45 间波动，没有新增失败类别。
 - RSB/indirect 结构测试 26 assertions，覆盖八指令 L1 快路径、无 push 和无目标
   dispatcher 路径；显式改写栈返回地址的临时 probe 在默认、L1-off 两种 RSB frame、
   FLAGS-off 和 interpreter 下均 rc=0，probe 已删除。
@@ -445,16 +467,22 @@ TestZero/TestNotZero 的 generated local condition 即使允许 FLAGS=1 下跨
 
 ## 下一步
 
+当前 single-version opcode ledger 覆盖正式 smallpt host 执行的 84.54%。剩余单 op host
+责任最高的是 GetOperand 84.18M、StoreUniform 82.41M、VecFMulScalar64 78.89M、LoadMemory
+76.55M、VecFAddScalar64 58.03M、LoadUniform 56.33M 和 StoreMemory 51.74M。
+
 1. 当前正式 smallpt 的已覆盖 link 约 6.8%。region/cycle link tail 约 2.1%，其中
    acquire poll 与跨本块 cold stub 的目标跳转不可直接删除；
    八条 return-L1 静态序列约 1.44%，其中 `AND + ADD + LDP + CMP + CSEL + BR` 没有
    明确的基础 ISA 融合机会。公开 host exit 仍仅 139 次。剩余 `SetLocation` 均为动态
    目标或后面仍有观察点，不能继承块尾常量证明。
-2. 剩余 `SetHostFPR` 约为 30,193,585（2.836%），其中完整写约 8,317,804（0.781%）。
-   low-64 `LoadMemory` 与 high-64 zero 分别余 10,641,609（1.000%）/ 10,093,484
-   （0.948%）；所有 use 都兼容的 high-zero 常量物化已经消除，剩余数值是 publication IR 次数。
+2. 剩余 `SetHostFPR` 约为 30,193,585（2.848%），其中完整写约 8,317,804（0.785%）。
+   low-64 `LoadMemory` 与 high-64 zero 分别余 10,641,609（1.004%）/ 10,093,484
+   （0.952%）；所有 use 都兼容的 high-zero 常量物化已经消除，剩余数值是 publication IR 次数。
    相邻池中约
    8.29M 次因 fault/alias/fixed-home 门拒绝，不为继续扩池放宽精确状态边界。
-3. CoreMark 的 8/16-bit truncation 仍要求 consumer-specific 物理高位证明，并保留 U16
+3. simple CondSet 的八种单 bit 条件已经闭合。HI/LS、GE/LT、GT/LE 需要组合逻辑；没有
+   严格少于现有三条指令的实测 lowering 前，不扩展直接提取。
+4. CoreMark 的 8/16-bit truncation 仍要求 consumer-specific 物理高位证明，并保留 U16
    CallLambda 回归门。
-4. SHA 必须先换成能真正进入 hashing 的合法 workload；不使用当前 PageFatal 前的路径计数。
+5. SHA 必须先换成能真正进入 hashing 的合法 workload；不使用当前 PageFatal 前的路径计数。
