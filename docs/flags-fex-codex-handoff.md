@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`8ca4b0b`** `perf: preserve PSTATE across zero tests`
+- Code tip: **`aa7b83d`** `perf: materialize live flag tests with CSET`
 - Tracked tree is clean before the documentation commit. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -53,6 +53,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 | `0fc245c` | Encode identity-mode `[base + imm]` accesses with AArch64 scaled load/store offsets when possible |
 | `723ace5` | Materialize single-bit N/Z/C/V `TestFlags` values with direct bit extraction while preserving live PSTATE |
 | `8ca4b0b` | Materialize zero/nonzero without clobbering pending PSTATE on straight-line IR paths |
+| `aa7b83d` | Read a live PSTATE single-bit flag directly with non-clobbering `CSET` |
 
 Hot files:
 
@@ -172,13 +173,13 @@ Validation for `ff42917`:
   1,047,523 passed / 45 failed assertions. The unsafe generic prototype had added one U16 helper
   failure; the final consumer whitelist removes it.
 
-Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9d49` / `b3998d5` / `3ec9582` / `e74e734` / `030f52d` / `97009a3` / `f99eabf` / `b692fca` / `c15a712` / `2f2fb88` / `523d679` / `e1257d6` / `b1e501e` / `215a059` / `21000f1` / `0fc245c` / `723ace5` / `8ca4b0b`:
+Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9d49` / `b3998d5` / `3ec9582` / `e74e734` / `030f52d` / `97009a3` / `f99eabf` / `b692fca` / `c15a712` / `2f2fb88` / `523d679` / `e1257d6` / `b1e501e` / `215a059` / `21000f1` / `0fc245c` / `723ace5` / `8ca4b0b` / `aa7b83d`:
 
 - Current formal smallpt is `smallpt_wh_x64 8 128 96`; do not substitute the fixed 1024×768
   `smallpt_x64` when updating the formal FEX ratio.
 - Formal smallpt default-region host:
-  `1,321,651,162 → 1,303,939,990 → 1,297,980,655 → 1,296,969,640 → 1,246,900,800 → 1,201,575,549 → 1,201,372,215 → 1,199,466,420 → 1,187,471,711 → 1,168,614,398 → 1,165,502,656 → 1,163,020,553 → 1,141,267,073 → 1,126,372,521 → 1,096,331,217 → 1,081,436,665 → 1,072,445,284 → 1,068,863,253 → 1,064,572,872 → 1,060,138,659 → 1,060,040,252 → 1,052,965,418 → 1,047,125,252`;
-  cumulative `-274,525,910` (`-20.7714%`), spill 0 throughout. The arrows are full-NZCV
+  `1,321,651,162 → 1,303,939,990 → 1,297,980,655 → 1,296,969,640 → 1,246,900,800 → 1,201,575,549 → 1,201,372,215 → 1,199,466,420 → 1,187,471,711 → 1,168,614,398 → 1,165,502,656 → 1,163,020,553 → 1,141,267,073 → 1,126,372,521 → 1,096,331,217 → 1,081,436,665 → 1,072,445,284 → 1,068,863,253 → 1,064,572,872 → 1,060,138,659 → 1,060,040,252 → 1,052,965,418 → 1,047,125,252 → 1,043,588,497`;
+  cumulative `-278,062,665` (`-21.0390%`), spill 0 throughout. The arrows are full-NZCV
   compaction, VecZip resident publication, retained RSB target reuse, static-exit direct-link,
   default return-L1, cycle-polled successor layout, paired indirect-L1 state loading, then live
   resident-FPR publication, scalar-load FPR fusion, scalar-sqrt resident publication, then
@@ -186,7 +187,8 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   FCMP non-NZCV publication, trailing static-location cold publication, compact FCMP carrier
   publication, semantic Nop elision, zero-register FPR lane publication, shared zero-store
   materialization elision, direct simple-condition extraction from saved flags, then scaled
-  immediate load/store addressing, direct single-bit flag tests, then PSTATE-preserving zero tests.
+  immediate load/store addressing, direct single-bit flag tests, PSTATE-preserving zero tests,
+  then one-instruction live-PSTATE flag materialization.
   `7110d20` is neutral here but saves
   452,646,984 on fixed 1024×768
   smallpt.
@@ -298,11 +300,16 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   `-21,374,140`; layout growth contributes only 278 dynamic instructions. STREAM is `-472`, while
   CoreMark's `+79,936` is a 0.0015% layout-level change with exact CRC. All output and spill gates
   remain exact.
+- Live-PSTATE single-bit `TestFlags` now uses one non-clobbering `CSET` instead of `MRS + UBFX`;
+  x26-backed tests keep their one-instruction `UBFX`. Formal smallpt is `-3,536,755` (`-0.3378%`)
+  with 74 PCs smaller and none larger. Formal c-ray equal-entry is `-16,348,046` with 148 PCs
+  smaller; the sole larger common PC has zero entries. STREAM/CoreMark equal-entry are `-30` /
+  `-3,740,015`, and every output/spill gate remains exact.
 - FEX-aligned RE=0 same-harness refresh for formal smallpt: SVM host/guest
-  `3.335622 → 3.267832`; the landed stages fold this to about `2.636272`. With unchanged FEX
-  `1.549`, ratio is `2.153× → 1.702×`. The earlier
+  `3.335622 → 3.267832`; the landed stages fold this to about `2.627368`. With unchanged FEX
+  `1.549`, ratio is `2.153× → 1.696×`. The earlier
   2.180× table used a different retained unit-formation artifact, so quote the current gap as
-  approximately 1.69–1.76× rather than mixing the two raw tables.
+  approximately 1.68–1.75× rather than mixing the two raw tables.
 - PPM SHA-256 remains
   `fe96f7e48295b27c8df8236294052d138c3ed130b81d022739907fe6b2cde5aa`; prior equal-entry
   c-ray IDAT remains `54256cb4b3c6313a65ea12ebb7b81e30`, 64-spp formal c-ray is
@@ -358,6 +365,9 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 - The existing zero-rotate repro passes 3 assertions on Mac and Orb. Flags focus and COMIS remain
   green, FLAGS twelve-grid, helper-fault 38/0 and the 1664-unit/11-guest fingerprint match. Fixed
   top-level seed 424242 returns to 191 passed / 35 existing failed cases / 45 failed assertions.
+- Flags focus, the zero-rotate repro and COMIS remain green on Mac and Orb. Baseline/candidate
+  FLAGS twelve-grid and the 1664-unit/11-guest fingerprint match; fixed top-level seed 424242
+  remains 191 passed / 35 existing failed cases / 45 failed assertions.
 - RSB/indirect structure focus passes 26 assertions, including the paired state/cache load and
   no-target dispatcher path. A temporary mismatched-return probe passes default, both L1-off RSB
   frames, FLAGS-off and interpreter paths and was deleted. Mac and Orb builds pass.
@@ -453,7 +463,7 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 
 ## Next ready (pick one, measure, revert on 124/134)
 
-The current single-version opcode ledger covers 83.69% of formal smallpt host execution. The
+The current single-version opcode ledger covers about 83.64% of formal smallpt host execution. The
 largest remaining per-op host responsibilities are GetOperand 84.18M, StoreUniform 82.41M,
 VecFMulScalar64 78.89M, LoadMemory 76.55M, VecFAddScalar64 58.03M, LoadUniform 56.33M and
 StoreMemory 51.64M.

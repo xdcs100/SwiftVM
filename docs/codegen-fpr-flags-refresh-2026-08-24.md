@@ -39,11 +39,11 @@ FCMP PF/AF publication、trailing static-location cold publication、compact FCM
 publication、semantic Nop elision、zero-register FPR lane publication 和 shared zero-store
 materialization elision，再加入 simple CondSet saved-flags extraction 和 scaled memory
 displacement encoding、direct single-bit TestFlags extraction 和 PSTATE-preserving zero
-tests 后，按正式 host 权重折算约为 2.636272。以未变的 FEX 1.549 为分母，对应
-2.153×→1.702×。
+tests，再加入 live-PSTATE CSET materialization 后，按正式 host 权重折算约为 2.627368。
+以未变的 FEX 1.549 为分母，对应 2.153×→1.696×。
 旧表与这次重采的
 unit 形成参数不完全相同，
-因此不直接覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 1.69–1.76×。
+因此不直接覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 1.68–1.75×。
 
 ## 已落地
 
@@ -401,7 +401,19 @@ ZF，既有 3-assertion repro 捕获了该问题；最终证明显式拒绝该�
 - STREAM 等 entry 减少 472；CoreMark 等 entry 增加 79,936（0.0015% 布局波动），
   `Solution Validates` 与 CRC final `0x382f` 保持一致。
 
-二十三项合计使正式 smallpt 默认 region host 减少 274,525,910（20.7714%）。
+### Live-PSTATE CSET materialization
+
+提交 `aa7b83d` 将 PSTATE 为权威状态的单 bit `TestFlags` 从 `MRS + UBFX` 缩为一条
+不会修改 NZCV 的 `CSET`；x26 为权威状态时仍使用单条 `UBFX`。
+
+- 正式 smallpt 1,047,125,252→1,043,588,497，减少 3,536,755（0.3378%）；74 个共同
+  PC 缩短、0 个增长，unit/version/entry 与 spill 均一致；
+- c-ray 等 entry 减少 16,348,046，148 个共同 PC 缩短；唯一增长 PC 的 entries 为 0，
+  IDAT MD5 保持 `d0c71130abf3544a86b64417bc488c21`；
+- STREAM/CoreMark 等 entry 分别减少 30 / 3,740,015，并保持 `Solution Validates` /
+  CRC final `0x382f`。
+
+二十四项合计使正式 smallpt 默认 region host 减少 278,062,665（21.0390%）。
 
 ## 否决项
 
@@ -501,6 +513,9 @@ XMM fault sink 和 XMM1-11 驻留均已启用；XMM0 有既有墙钟回退证据
 - 既有 zero-rotate repro 在 Mac/Orb 均通过 3 assertions；flags focus、COMIS、FLAGS
   十二格、helper-fault 38/0 与 1664-unit/11-guest fingerprint 全部保持。顶层 seed
   424242 恢复为 191 passed / 35 个既有 failed cases / 45 个失败断言。
+- flags focus、zero-rotate repro 与 COMIS 在 Mac/Orb 保持通过；基线/候选 FLAGS 十二格和
+  1664-unit/11-guest fingerprint 一致。顶层 seed 424242 保持 191 passed / 35 个既有
+  failed cases / 45 个失败断言。
 - RSB/indirect 结构测试 26 assertions，覆盖八指令 L1 快路径、无 push 和无目标
   dispatcher 路径；显式改写栈返回地址的临时 probe 在默认、L1-off 两种 RSB frame、
   FLAGS-off 和 interpreter 下均 rc=0，probe 已删除。
@@ -522,7 +537,7 @@ XMM fault sink 和 XMM1-11 驻留均已启用；XMM0 有既有墙钟回退证据
 
 ## 下一步
 
-当前 single-version opcode ledger 覆盖正式 smallpt host 执行的 83.69%。剩余单 op host
+当前 single-version opcode ledger 覆盖正式 smallpt host 执行的约 83.64%。剩余单 op host
 责任最高的是 GetOperand 84.18M、StoreUniform 82.41M、VecFMulScalar64 78.89M、LoadMemory
 76.55M、VecFAddScalar64 58.03M、LoadUniform 56.33M 和 StoreMemory 51.64M。
 
