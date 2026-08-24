@@ -156,7 +156,11 @@ MemOperand JitTranslator::EmitMemOperand(ir::Operand& ir_op,
         auto right = ir_op.GetRight();
         if (right.IsImm()) {
             auto imm = right.imm.GetSigned();
-            bool can_imm = pair ? __ IsImmLSPair(imm, access_size) : __ IsImmLSUnscaled(imm);
+            bool can_imm = pair ? __ IsImmLSPair(imm, access_size)
+                                : __ IsImmLSUnscaled(imm);
+            if (!use_memory_base && !pair && ir_op.GetOp() == ir::OperandOp::Plus) {
+                can_imm |= __ IsImmLSScaled(imm, access_size);
+            }
             if (can_imm) {
                 if (ir_op.GetOp() == ir::OperandOp::Plus) {
                     if (use_memory_base) {
