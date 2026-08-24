@@ -20,6 +20,7 @@ using namespace swift::runtime::ir;
 enum class PinnedReadShape {
     SelfAnd,
     SignExtend,
+    StoreMemory,
 };
 
 std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read) {
@@ -39,9 +40,13 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read) 
     if (shape == PinnedReadShape::SelfAnd) {
         auto result = block->And(value, Operand{value}).SetType(ValueType::U32);
         block->SaveFlags(result, Flags::Negate | Flags::Zero | Flags::Parity);
-    } else {
+    } else if (shape == PinnedReadShape::SignExtend) {
         auto result = block->SignExtend(value).SetType(ValueType::U64);
         block->StoreUniform(Uniform{8, ValueType::U64}, result);
+    } else {
+        auto address = block->LoadImm(Imm{swift::u64{0x1000}})
+                               .SetType(ValueType::U64);
+        block->StoreMemory(Operand{address}, value);
     }
     if (reuse_read) {
         block->StoreUniform(Uniform{0, ValueType::U32}, value);
@@ -100,4 +105,15 @@ TEST_CASE("pinned GPR sign extension reads the fixed W view directly") {
     const auto lines = EmitPinnedRead(PinnedReadShape::SignExtend, false);
     REQUIRE(Count(lines, "ubfx ", "x22") == 0);
     REQUIRE(Count(lines, "sxtw ", "w22") == 1);
+}
+
+TEST_CASE("pinned GPR memory store reads the fixed W view directly") {
+    const auto lines = EmitPinnedRead(PinnedReadShape::StoreMemory, false);
+    REQUIRE(Count(lines, "ubfx ", "x22") == 0);
+    REQUIRE(Count(lines, "str w22", "[") == 1);
+}
+
+TEST_CASE("a reused pinned GPR memory value keeps the read move") {
+    const auto lines = EmitPinnedRead(PinnedReadShape::StoreMemory, true);
+    REQUIRE(Count(lines, "ubfx ", "x22") == 1);
 }

@@ -1133,8 +1133,11 @@ void JitTranslator::EmitGetHostGPR(ir::Inst* inst) {
             const bool direct_sign_extend =
                     reg_index >= 19 && it->GetOp() == ir::OpCode::SignExtend &&
                     it->GetArg<ir::Value>(0).Def() == inst;
+            const bool direct_store =
+                    named_uses == 1 && it->GetOp() == ir::OpCode::StoreMemory &&
+                    it->GetArg<ir::Value>(1).Def() == inst;
             if (direct_alu || direct_caller_pin_alu || direct_extend ||
-                direct_sign_extend) {
+                direct_sign_extend || direct_store) {
                 fused_pin_gpr_reads.emplace(inst, static_cast<u16>(reg_index));
                 return;
             }
@@ -1578,18 +1581,30 @@ void JitTranslator::EmitStoreMemory(ir::Inst* inst) {
                            structured_guest_ea,
                            inst);
     const bool zero_gpr = CanUseZeroStoreRegister(value);
+    const auto store_w = [&]() -> WRegister {
+        if (zero_gpr) {
+            return wzr;
+        }
+        if (value.Def()) {
+            if (auto it = fused_pin_gpr_reads.find(value.Def());
+                it != fused_pin_gpr_reads.end()) {
+                return WRegister(it->second);
+            }
+        }
+        return context.W(value);
+    };
     switch (type) {
         case ir::ValueType::S8:
         case ir::ValueType::U8:
-            __ Strb(zero_gpr ? wzr : context.W(value), vixl_operand);
+            __ Strb(store_w(), vixl_operand);
             break;
         case ir::ValueType::S16:
         case ir::ValueType::U16:
-            __ Strh(zero_gpr ? wzr : context.W(value), vixl_operand);
+            __ Strh(store_w(), vixl_operand);
             break;
         case ir::ValueType::S32:
         case ir::ValueType::U32:
-            __ Str(zero_gpr ? wzr : context.W(value), vixl_operand);
+            __ Str(store_w(), vixl_operand);
             break;
         case ir::ValueType::S64:
         case ir::ValueType::U64:
