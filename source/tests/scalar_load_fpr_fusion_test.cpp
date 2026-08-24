@@ -99,9 +99,11 @@ TEST_CASE("scalar memory load and zero-high publication use one D-register load"
     REQUIRE(Count(fused, "mov v17.d") == 0);
     REQUIRE(Count(fallback, "ldr d17") == 0);
     REQUIRE(Count(fallback, "mov v17.d") == 2);
+    REQUIRE(Count(fallback, "fmov d17") == 0);
     REQUIRE(fused.size() + 3 == fallback.size());
     REQUIRE(Count(observed, "ldr d17") == 0);
-    REQUIRE(Count(observed, "mov v17.d") == 2);
+    REQUIRE(Count(observed, "mov v17.d") == 0);
+    REQUIRE(Count(observed, "fmov d17") == 1);
 }
 
 TEST_CASE("faulting scalar memory load leaves the resident XMM home unchanged") {

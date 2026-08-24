@@ -752,7 +752,7 @@ JitTranslator::PrepareBlockState(ir::Block* block) {
     disable_instructions.resize(
             std::max<size_t>(disable_instructions.size(), block->MaxInstrId()));
     PrepareBooleanSelects(block);
-    PrepareScalarLoadFPRFusions(block);
+    PrepareScalarFPRPublications(block);
     backedge_flags_plan = PlanBackedgeFlags(block);
     if (backedge_flags_plan) {
         if (backedge_flags_plan->polarity_load) {

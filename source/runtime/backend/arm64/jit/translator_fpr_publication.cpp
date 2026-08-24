@@ -46,37 +46,41 @@ bool IsFusionBarrier(ir::OpCode op) {
 
 }  // namespace
 
+bool JitTranslator::ReproveScalarFPRPublication(
+        const ScalarFPRPublication& publication) const {
+    if (!publication.low_store || !publication.high_store || !publication.zero ||
+        publication.low_store->GetOp() != ir::OpCode::SetHostFPR ||
+        publication.high_store->GetOp() != ir::OpCode::SetHostFPR ||
+        publication.zero->GetOp() != ir::OpCode::LoadImm ||
+        publication.zero->ReturnType() != ir::ValueType::U64 ||
+        publication.zero->GetArg<ir::Imm>(0).Get() != 0 ||
+        publication.target < 16 || publication.target > 31 ||
+        publication.low_store->GetArg<ir::Imm>(1).Get() != publication.target ||
+        publication.high_store->GetArg<ir::Imm>(1).Get() != publication.target ||
+        publication.low_store->GetArg<ir::Imm>(2).Get() != 0 ||
+        publication.high_store->GetArg<ir::Imm>(2).Get() != sizeof(u64) ||
+        publication.high_store->GetArg<ir::Value>(0).Def() != publication.zero ||
+        publication.zero->GetUses(false) != 1 ||
+        publication.low_store->Id() + 1 != publication.high_store->Id()) {
+        return false;
+    }
+    auto& list = cur_block->GetInstList();
+    auto high_it = list.iterator_to(*publication.low_store);
+    ++high_it;
+    return high_it != list.end() && high_it.operator->() == publication.high_store;
+}
+
 bool JitTranslator::ReproveScalarLoadFPRFusion(
-        ir::Inst* load, const ScalarLoadFPRFusion& fusion) const {
+        ir::Inst* load, const ScalarFPRPublication& fusion) const {
     if (!load || load->GetOp() != ir::OpCode::LoadMemory ||
         load->ReturnType() != ir::ValueType::U64 ||
-        !fusion.low_store || !fusion.high_store || !fusion.zero ||
-        fusion.low_store->GetOp() != ir::OpCode::SetHostFPR ||
-        fusion.high_store->GetOp() != ir::OpCode::SetHostFPR ||
-        fusion.zero->GetOp() != ir::OpCode::LoadImm ||
-        fusion.zero->ReturnType() != ir::ValueType::U64 ||
-        fusion.zero->GetArg<ir::Imm>(0).Get() != 0 ||
-        fusion.target < 16 || fusion.target > 31 ||
-        fusion.low_store->GetArg<ir::Imm>(1).Get() != fusion.target ||
-        fusion.high_store->GetArg<ir::Imm>(1).Get() != fusion.target ||
-        fusion.low_store->GetArg<ir::Imm>(2).Get() != 0 ||
-        fusion.high_store->GetArg<ir::Imm>(2).Get() != sizeof(u64) ||
+        !ReproveScalarFPRPublication(fusion) ||
         fusion.low_store->GetArg<ir::Value>(0).Def() != load ||
-        fusion.high_store->GetArg<ir::Value>(0).Def() != fusion.zero ||
-        load->GetUses(false) != 1 || fusion.zero->GetUses(false) != 1 ||
-        load->Id() >= fusion.low_store->Id() ||
-        fusion.low_store->Id() + 1 != fusion.high_store->Id()) {
+        load->GetUses(false) != 1 || load->Id() >= fusion.low_store->Id()) {
         return false;
     }
 
     auto& list = cur_block->GetInstList();
-    auto low_it = list.iterator_to(*fusion.low_store);
-    auto high_it = low_it;
-    ++high_it;
-    if (high_it == list.end() || high_it.operator->() != fusion.high_store) {
-        return false;
-    }
-
     for (auto& scan : list) {
         if (scan.Id() <= load->Id() || scan.Id() > fusion.high_store->Id() ||
             &scan == fusion.low_store || &scan == fusion.high_store ||
@@ -119,8 +123,23 @@ bool JitTranslator::ReproveScalarLoadFPRFusion(
     return true;
 }
 
-void JitTranslator::PrepareScalarLoadFPRFusions(ir::Block* block) {
+bool JitTranslator::ReproveScalarValueFPRFusion(
+        ir::Inst* low_store, const ScalarFPRPublication& fusion) const {
+    if (!low_store || low_store != fusion.low_store ||
+        !ReproveScalarFPRPublication(fusion)) {
+        return false;
+    }
+    const auto low = low_store->GetArg<ir::Value>(0);
+    if (!low.Defined() || ir::IsFloatValueType(low.Type()) ||
+        ir::GetValueSizeByte(low.Type()) != sizeof(u64)) {
+        return false;
+    }
+    return true;
+}
+
+void JitTranslator::PrepareScalarFPRPublications(ir::Block* block) {
     scalar_load_fpr_fusions.clear();
+    scalar_value_fpr_fusions.clear();
     auto& list = block->GetInstList();
     for (auto low_it = list.begin(); low_it != list.end(); ++low_it) {
         auto* low = low_it.operator->();
@@ -142,13 +161,19 @@ void JitTranslator::PrepareScalarLoadFPRFusions(ir::Block* block) {
         }
         auto* load = low->GetArg<ir::Value>(0).Def();
         auto* zero = high->GetArg<ir::Value>(0).Def();
-        ScalarLoadFPRFusion fusion{
+        ScalarFPRPublication fusion{
                 .low_store = low,
                 .high_store = high,
                 .zero = zero,
                 .target = static_cast<u16>(target),
         };
         if (!ReproveScalarLoadFPRFusion(load, fusion)) {
+            if (!ReproveScalarValueFPRFusion(low, fusion)) {
+                continue;
+            }
+            scalar_value_fpr_fusions.emplace(low, fusion);
+            disable_instructions.set(zero->Id());
+            disable_instructions.set(high->Id());
             continue;
         }
         scalar_load_fpr_fusions.emplace(load, fusion);

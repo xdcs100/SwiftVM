@@ -128,16 +128,20 @@ private:
     };
     [[nodiscard]] std::optional<PreIndexMemoryUpdate>
     MatchPreIndexMemoryUpdate(ir::Inst* update) const;
-    struct ScalarLoadFPRFusion {
+    struct ScalarFPRPublication {
         ir::Inst* low_store{};
         ir::Inst* high_store{};
         ir::Inst* zero{};
         u16 target{};
     };
-    void PrepareScalarLoadFPRFusions(ir::Block* block);
+    void PrepareScalarFPRPublications(ir::Block* block);
     void PrepareBooleanSelects(ir::Block* block);
+    [[nodiscard]] bool ReproveScalarFPRPublication(
+            const ScalarFPRPublication& publication) const;
     [[nodiscard]] bool ReproveScalarLoadFPRFusion(
-            ir::Inst* load, const ScalarLoadFPRFusion& fusion) const;
+            ir::Inst* load, const ScalarFPRPublication& publication) const;
+    [[nodiscard]] bool ReproveScalarValueFPRFusion(
+            ir::Inst* low_store, const ScalarFPRPublication& publication) const;
     [[nodiscard]] bool ReprovePshufd4eExtConstant(ir::Inst* inst) const;
     [[nodiscard]] bool ReprovePshufd4eExtShuffle(ir::Inst* inst) const;
     [[nodiscard]] bool ReproveWidthChainBridge(ir::Inst* inst) const;
@@ -517,7 +521,8 @@ private:
     // Narrow mapped reads whose single audited consumer can use the pinned W
     // register directly (for example CL masking and U32 XOR).
     std::map<ir::Inst*, u16> fused_pin_gpr_reads{};
-    std::map<ir::Inst*, ScalarLoadFPRFusion> scalar_load_fpr_fusions{};
+    std::map<ir::Inst*, ScalarFPRPublication> scalar_load_fpr_fusions{};
+    std::map<ir::Inst*, ScalarFPRPublication> scalar_value_fpr_fusions{};
     ir::Flags flags_set{};
     ir::Flags flags_clear{};
     bool save_in_nzcv{true};

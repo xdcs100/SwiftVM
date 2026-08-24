@@ -1264,6 +1264,15 @@ void JitTranslator::EmitSetHostGPR(ir::Inst* inst) {
 }
 
 void JitTranslator::EmitSetHostFPR(ir::Inst* inst) {
+    if (auto fusion = scalar_value_fpr_fusions.find(inst);
+        fusion != scalar_value_fpr_fusions.end()) {
+        ASSERT_MSG(ReproveScalarValueFPRFusion(inst, fusion->second),
+                   "scalar FPR value fusion proof diverged at IR {}", inst->Id());
+        const auto value = inst->GetArg<ir::Value>(0);
+        const auto source = CanUseZeroStoreRegister(value) ? xzr : context.X(value);
+        __ Fmov(VRegister::GetQRegFromCode(fusion->second.target).D(), source);
+        return;
+    }
     if (context.IsHostWriteCoalesced(inst->Id())) {
         ASSERT_MSG(ReproveCoalescedHostFPRWrite(inst),
                    "SetHostFPR coalescing proof diverged at IR {}", inst->Id());
