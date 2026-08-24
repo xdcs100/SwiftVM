@@ -2641,7 +2641,7 @@ TEST_CASE("zero store zr is value-only and fail-closed") {
     using namespace swift::runtime::ir;
 
     enum class StoreKind { Uniform, Memory, FixedFPR };
-    enum class Cardinality { Single, Multi };
+    enum class Cardinality { Single, CompatibleStores, IncompatibleUse };
     enum class Observer { None, Save, Branch };
     struct Emitted {
         swift::u32 bytes{};
@@ -2673,21 +2673,33 @@ TEST_CASE("zero store zr is value-only and fail-closed") {
         } else if (observer == Observer::Branch) {
             block->AppendInst(OpCode::BranchOnlyFlags, stored, Flags::NZCV);
         }
-        if (cardinality == Cardinality::Multi) {
+        if (cardinality == Cardinality::IncompatibleUse) {
             const auto other = block->Add(stored, Operand{Imm{1u}}).SetType(type);
             block->StoreUniform(Uniform{24, type}, other);
         }
         if (kind == StoreKind::Uniform) {
             block->StoreUniform(Uniform{8, type}, stored);
+            if (cardinality == Cardinality::CompatibleStores) {
+                block->StoreUniform(Uniform{24, type}, stored);
+            }
         } else if (kind == StoreKind::Memory) {
             const auto address = block->LoadImm(Imm{swift::u64{0x100}})
                                          .SetType(ValueType::U64);
             block->StoreMemory(Operand{address}, stored);
+            if (cardinality == Cardinality::CompatibleStores) {
+                block->StoreMemory(Operand{address}, stored);
+            }
         } else {
             const auto size = GetValueSizeByte(type);
             block->AppendInst(OpCode::SetHostFPR, stored, HostRegIndex(24),
                               Imm{static_cast<swift::u64>(
                                       sizeof(swift::u128) - size)});
+            if (cardinality == Cardinality::CompatibleStores) {
+                block->AppendInst(
+                        OpCode::SetHostFPR, stored, HostRegIndex(24),
+                        Imm{static_cast<swift::u64>(
+                                sizeof(swift::u128) - 2 * size)});
+            }
         }
         block->SetTerminal(terminal::ReturnToDispatch{});
         block->ReIdInstr();
@@ -2746,7 +2758,8 @@ TEST_CASE("zero store zr is value-only and fail-closed") {
         constexpr std::array widths{ValueType::U8, ValueType::U16,
                                     ValueType::U32, ValueType::U64};
         constexpr std::array cardinalities{Cardinality::Single,
-                                           Cardinality::Multi};
+                                           Cardinality::CompatibleStores,
+                                           Cardinality::IncompatibleUse};
         for (const auto kind : kinds) {
             for (const auto type : widths) {
                 for (const bool zero : {false, true}) {
@@ -2768,12 +2781,16 @@ TEST_CASE("zero store zr is value-only and fail-closed") {
                             REQUIRE(on.bytes == off.bytes);
                             REQUIRE(on.text == off.text);
                             REQUIRE(on.zr_stores == 0);
-                        } else if (cardinality == Cardinality::Single) {
+                        } else if (cardinality != Cardinality::IncompatibleUse) {
+                            const swift::u32 expected_stores =
+                                    cardinality == Cardinality::CompatibleStores
+                                    ? 2
+                                    : 1;
                             REQUIRE(on.bytes + vixl::aarch64::kInstructionSize ==
                                     off.bytes);
                             REQUIRE(on.moves + 1 == off.moves);
                             REQUIRE(off.zr_stores == 0);
-                            REQUIRE(on.zr_stores == 1);
+                            REQUIRE(on.zr_stores == expected_stores);
                         } else {
                             REQUIRE(on.bytes == off.bytes);
                             REQUIRE(on.moves == off.moves);

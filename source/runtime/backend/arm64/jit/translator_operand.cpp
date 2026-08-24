@@ -7,12 +7,27 @@ namespace swift::runtime::backend::arm64 {
 
 bool JitTranslator::CanUseZeroStoreRegister(ir::Value value) {
     auto* definition = value.Def();
-    return context.GetFeatures().zero_store_zr && !context.IsSpilled(value) &&
-           definition && definition->GetOp() == ir::OpCode::LoadImm &&
-           definition->GetUses(false) == 1 &&
-           definition->GetArg<ir::Imm>(0).Get() == 0 &&
-           !ir::IsFloatValueType(value.Type()) &&
-           ir::GetValueSizeByte(value.Type()) <= sizeof(u64);
+    if (!context.GetFeatures().zero_store_zr || context.IsSpilled(value) ||
+        !definition || definition->GetOp() != ir::OpCode::LoadImm ||
+        definition->GetArg<ir::Imm>(0).Get() != 0 ||
+        ir::IsFloatValueType(value.Type()) ||
+        ir::GetValueSizeByte(value.Type()) > sizeof(u64)) {
+        return false;
+    }
+
+    u32 compatible_uses = 0;
+    for (auto& use : cur_block->GetInstList()) {
+        if ((use.GetOp() == ir::OpCode::StoreUniform ||
+             use.GetOp() == ir::OpCode::StoreMemory) &&
+            use.GetArg<ir::Value>(1).Def() == definition) {
+            ++compatible_uses;
+        } else if (use.GetOp() == ir::OpCode::SetHostFPR &&
+                   use.GetArg<ir::Value>(0).Def() == definition) {
+            ++compatible_uses;
+        }
+    }
+    return compatible_uses != 0 &&
+           compatible_uses == definition->GetUses(false);
 }
 
 MemOperand JitTranslator::EmitMemOperand(ir::Operand& ir_op,

@@ -602,27 +602,7 @@ void JitTranslator::EmitBitCast(ir::Inst* inst) {
 void JitTranslator::EmitLoadImm(ir::Inst* inst) {
     auto value = inst->GetArg<ir::Imm>(0);
     if (CanUseZeroStoreRegister(ir::Value{inst})) {
-        bool sole_use_is_plain_store = false;
-        for (auto& use : cur_block->GetInstList()) {
-            if (use.GetOp() == ir::OpCode::StoreUniform &&
-                use.GetArg<ir::Value>(1).Def() == inst) {
-                sole_use_is_plain_store = true;
-                break;
-            }
-            if (use.GetOp() == ir::OpCode::StoreMemory &&
-                use.GetArg<ir::Value>(1).Def() == inst) {
-                sole_use_is_plain_store = true;
-                break;
-            }
-            if (use.GetOp() == ir::OpCode::SetHostFPR &&
-                use.GetArg<ir::Value>(0).Def() == inst) {
-                sole_use_is_plain_store = true;
-                break;
-            }
-        }
-        if (sole_use_is_plain_store) {
-            return;
-        }
+        return;
     }
     auto result = context.R(ir::Value{inst});
     __ Mov(result, value.Get());
