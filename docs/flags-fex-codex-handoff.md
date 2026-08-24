@@ -61,6 +61,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 | `6b10c73` | Share one materialized 4 KiB guest page base across encodable absolute memory addresses and make the proven path default |
 | `e10fec4` | Let one audited consumer reuse a pinned W view for every operand occurrence and feed callee-saved pinned values directly into sign extension |
 | `7620306` | Store a sole narrow pinned GPR read directly from its fixed W home while preserving snapshot and address-use semantics |
+| `e2fe71c` | Normalize carry to a Direct cross-block ABI on FlagM hosts and remove the polarity-byte publication path |
 | `2d86a6e` | Screen candidates with bounded short shape runs and retained formal weights before promoting them to long benchmarks |
 
 Hot files:
@@ -387,6 +388,18 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   Mac-to-retained-Orb host coverage is only 98.362170%, below the 99.9% promotion gate, so this is
   recorded as a directional screen rather than a formal result. Focused validation passes 5 cases /
   8 assertions.
+- A bounded StoreUniform census found that stores are 7.331% of the current local `4 8 6` host
+  account and `ThreadContext64::carry_inverted` alone is 36.64% of them, or 2.686% of total host.
+  Inverted/direct publications split 63.56%/36.44%. On FlagM hosts the decoder now keeps carry
+  Direct across units: sub-family producers emit `CFINV`, add-family producers publish nothing,
+  conditional carry paths merge back to Direct, and block-entry CF consumers no longer load the
+  polarity byte. Non-FlagM hosts keep the old byte ABI. The temporary census output was removed.
+  The short PPM stays byte-identical, but the candidate changes unit formation from 3,242 PCs /
+  3,494 versions to 2,757 PCs / 3,597 versions. The strict common-PC join covers only 37.091% and
+  6/20 top PCs, so the raw `host_dynamic` change (`2,245,710 -> 593,133`) is not a promotable
+  weighted result. Focused IR validation passes 4 assertions; func_tests passes JIT/interpreter,
+  region-off, flags-regs-off and CFINV-off with checksum `9f52b7d59285dbe5`; branch-only passes all
+  six grids and helper-fault passes 38/38. No long benchmark or full suite was run.
 - FEX-aligned RE=0 same-harness refresh for formal smallpt: SVM host/guest
   `3.335622 → 3.267832`; the landed stages fold this to about `2.478306`. With unchanged FEX
   `1.549`, ratio is `2.153× → 1.600×`. The earlier
@@ -505,6 +518,10 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 - An ordinary `StoreMemory` may read a pinned W home directly only when an offset-zero U8/U16/U32
   `GetHostGPR` has exactly that store-value use and no intervening write to the home. Address uses,
   later uses, U64 values and TSO stores keep the snapshot instruction.
+- FlagM units keep host C equal to x86 CF at every cross-block boundary. `InvertCarry` after a
+  sub-family producer is part of that canonicalization, not a removable polarity toggle. Direct
+  carry cannot use the inverted-carry `HI/LS` folding rule. Non-FlagM hosts still persist and load
+  `carry_inverted`.
 - A low32 copy may skip `BitExtract` only when its sole use is the immediately following
   `ZeroExtend32To64`; the wrapper must still emit a W move and keep all later uses.
 - A width round trip may substitute the original U32 SSA only for
@@ -577,35 +594,40 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 ## Next ready (pick one, measure, revert on 124/134)
 
 The current single-version opcode ledger covers about 82.85% of formal smallpt host execution. The
-largest remaining per-op host responsibilities are StoreUniform 82.41M, VecFMulScalar64 78.89M,
+pre-canonical-carry largest per-op responsibilities were StoreUniform 82.41M, VecFMulScalar64 78.89M,
 LoadMemory 76.55M, GetOperand 65.87M, VecFAddScalar64 58.03M, LoadUniform 56.33M and
-StoreMemory 51.64M.
+StoreMemory 51.64M. Do not subtract the local short carry census from these formal values: the
+candidate changes unit/version formation and must pass a future formal gate before the ledger is rebased.
 
-1. **Pinned GPR residuals** — keep level 2 as the performance default. Recount actual emitted bytes,
+1. **Canonical carry formal gate** — the largest StoreUniform subpool is closed on FlagM and the
+   short oracle is exact, but strict short coverage is only 37.091%. The next promoted-stage run
+   must remeasure unit formation and guest-normalized host density; do not quote the raw short
+   `host_dynamic` reduction as the FEX gap improvement.
+2. **Pinned GPR residuals** — keep level 2 as the performance default. Recount actual emitted bytes,
    not GetHost/SetHost IR. The largest remaining SetHost moves in the retained log implement real
    guest copies such as `mov rbp,rdi` and `mov rbx,rdx`; deleting them requires architectural
    register renaming, not another fixed-home peephole. Direct ordinary StoreMemory payload reads
    are closed. Continue only with another consumer that can read the fixed home directly while
    retaining snapshot, width and helper-clobber proofs; narrow Sub is the next measured candidate,
    not a generally safe GetHost elimination.
-2. **smallpt remaining link** — covered link is now about 6.6%. Region/cycle tails are about
+3. **smallpt remaining link** — covered link is now about 6.6%. Region/cycle tails are about
    2.1%; their acquire poll and branch across per-block cold stubs are load-bearing. Audit the
    roughly 1.26% remaining return-L1 static sequences separately; address formation is now one
    `BFI`, and `LDP + CMP + CSEL + BR` has no obvious base-ISA fusion. Public host exit executes
    only 139 times. The remaining
    `SetLocation` tail is dynamic or has a later observer and must not inherit the trailing-constant proof.
-3. **Remaining FPR publication** — SetHostFPR is about 30,193,585 (`2.848%`), with about
+4. **Remaining FPR publication** — SetHostFPR is about 30,193,585 (`2.848%`), with about
    8,317,804 (`0.785%`) full writes. Low-load/high-zero remain 10,641,609 (`1.004%`) /
    10,093,484 (`0.952%`); all-compatible high-zero materialization is gone. About 8.29M adjacent
    candidates were rejected by exact fault/alias/home gates and must not be recovered heuristically.
-4. **Remaining composite EA** — identity `[base+imm]`, `[base+index]` and matching scaled-index
+5. **Remaining composite EA** — identity `[base+imm]`, `[base+index]` and matching scaled-index
    forms are now direct. Remaining materialized forms involve bias/32-bit wrapping, shifts or an
    AArch64-unencodable scale; require an exact encoding and wrap proof before extending the gate.
-5. **CoreMark remaining truncations** — raw BitExtract is no longer a pool. Only reopen 8/16-bit
+6. **CoreMark remaining truncations** — raw BitExtract is no longer a pool. Only reopen 8/16-bit
    cases with a consumer-specific physical-high proof and the U16 helper regression in the gate.
-6. **SHA valid workload first** — fix or replace the current OpenSSL guest path that PageFatals before hashing, then redo the boundary census. Do not bypass guest fault semantics.
-7. **PF/AF dedicated GPR is closed** until a new canonical park/recovery carrier yields a nonzero mechanical saving; the current audit is strictly negative.
-7. **Do not** grow the default region window again for coremark (64 == 128). Other benches might still want 128 **after** the lazy fix.
+7. **SHA valid workload first** — fix or replace the current OpenSSL guest path that PageFatals before hashing, then redo the boundary census. Do not bypass guest fault semantics.
+8. **PF/AF dedicated GPR is closed** until a new canonical park/recovery carrier yields a nonzero mechanical saving; the current audit is strictly negative.
+9. **Do not** grow the default region window again for coremark (64 == 128). Other benches might still want 128 **after** the lazy fix.
 
 ## Orb loop
 
