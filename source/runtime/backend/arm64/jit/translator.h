@@ -197,11 +197,20 @@ private:
 
     void PlacementPoint(const char* kind, u64 guest_pc);
 
+    struct BackedgeCarryPlan {
+        bool canonical{};
+        u8 inverted{};
+        ir::Inst* load{};
+        ir::Inst* store{};
+        ir::Inst* marker{};
+    };
+
     struct BackedgeFlagsPlan {
         bool optimized{true};
         // dead_successor=true 是 region 单边 flags-dead 形态：热边目标在
         // 任意观察点前完整覆写 flags，因此不需要跨块 recipe/双入口。
         bool dead_successor{};
+        bool canonical_carry{};
         bool self_is_then{};
         ir::Location self_target{};
         ir::Location cold_target{};
@@ -233,6 +242,10 @@ private:
 
     [[nodiscard]] std::unique_ptr<BackedgeFlagsPlan>
     PlanBackedgeFlags(ir::Block* block);
+    [[nodiscard]] std::optional<BackedgeCarryPlan> PlanBackedgeCarry(
+            ir::Block* block, ir::Inst* final_save, ir::Inst* condition,
+            bool dead_successor);
+    [[nodiscard]] bool CanonicalCarryEnabled() const;
     [[nodiscard]] bool TargetKillsIncomingFlags(ir::Location target) const;
     [[nodiscard]] bool PlanRegionBranchPFAF(BackedgeFlagsPlan& plan,
                                             ir::Inst* producer) const;

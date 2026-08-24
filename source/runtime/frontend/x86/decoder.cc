@@ -259,6 +259,9 @@ X64Decoder::X64Decoder(VAddr start,
     addr_mask = is_64bit ? UINT64_MAX : UINT32_MAX;
     flags_cfinv_supported_ =
             True(arm64_features & runtime::Arm64Features::FlagM);
+    if (FlagsCfinvEnabled()) {
+        carry_ = CarryPolarity::Direct;
+    }
     flags_fcmp_compact_ = features_.flags_fcmp_compact &&
                           True(arm64_features & runtime::Arm64Features::AXFlag);
     sse_afp_nan_ = sse_afp_nan;
@@ -1374,9 +1377,21 @@ ir::Value X64Decoder::CarryValue() {
 void X64Decoder::StorePolarity(bool inverted) {
     swift::runtime::PerfLoweringPartScope2 perf{
             swift::runtime::PerfLoweringPart2::Flags};
+    if (FlagsCfinvEnabled()) {
+        if (inverted) {
+            __ InvertCarry();
+        }
+        carry_ = CarryPolarity::Direct;
+        return;
+    }
     // StoreUniform uses the value's width, not the Uniform declaration's
     // width. Keep this byte-typed so it cannot overwrite the adjacent DF byte.
     __ StoreUniform(PolarityUniform(), __ LoadImm(ir::Imm(u8(inverted ? 1 : 0))));
+}
+
+void X64Decoder::MergeConditionalCarryPolarity() {
+    carry_ = FlagsCfinvEnabled() ? CarryPolarity::Direct
+                                 : CarryPolarity::Unknown;
 }
 
 ir::Value X64Decoder::DirectionValue() {

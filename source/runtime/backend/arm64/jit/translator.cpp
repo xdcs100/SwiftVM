@@ -757,7 +757,9 @@ JitTranslator::PrepareBlockState(ir::Block* block) {
         if (backedge_flags_plan->polarity_load) {
             disable_instructions.set(backedge_flags_plan->polarity_load->Id());
         }
-        disable_instructions.set(backedge_flags_plan->polarity_store->Id());
+        if (backedge_flags_plan->polarity_store) {
+            disable_instructions.set(backedge_flags_plan->polarity_store->Id());
+        }
     }
     backedge_exit_referenced = false;
     backedge_exit_label =

@@ -342,8 +342,8 @@ u32 X64Decoder::DecodeUserlandRaw(const u8* code, size_t available) {
         // ADOX uses OF as an independent unsigned carry bit. Materialize OF
         // and the old architectural CF before borrowing host C for Adc. After
         // the carry-out is materialized, restore CF and write ONLY OF. This
-        // deliberately converts the preserved CF representation to Direct,
-        // updating carry_inverted with it; no other flag bit is rewritten.
+        // deliberately converts the preserved CF representation to Direct;
+        // no other flag bit is rewritten.
         auto old_of = __ TestFlags(ir::Flags::Overflow).SetType(ir::ValueType::U8);
         auto old_cf = CarryValue();
         __ SetCarry(old_of);

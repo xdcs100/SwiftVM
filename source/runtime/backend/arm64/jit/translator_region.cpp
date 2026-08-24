@@ -485,6 +485,77 @@ bool JitTranslator::EmitRegionCondition(
     }
     return true;
 }
+bool JitTranslator::CanonicalCarryEnabled() const {
+    return GetSvmConfig().flags_cfinv &&
+            True(context.GetConfig().arm64_features & Arm64Features::FlagM);
+}
+
+std::optional<JitTranslator::BackedgeCarryPlan>
+JitTranslator::PlanBackedgeCarry(ir::Block* block, ir::Inst* final_save,
+                                 ir::Inst* condition, bool dead_successor) {
+    BackedgeCarryPlan plan{.canonical = CanonicalCarryEnabled(),
+                           .marker = final_save};
+    if (plan.canonical) {
+        for (auto& inst : block->GetInstList()) {
+            if (inst.Id() > final_save->Id() &&
+                inst.Id() < condition->Id() &&
+                inst.GetOp() == ir::OpCode::InvertCarry) {
+                plan.marker = &inst;
+            }
+        }
+        return plan;
+    }
+
+    constexpr u32 kCarryOffset = offsetof(swift::x86::ThreadContext64,
+                                          carry_inverted);
+    for (auto& inst : block->GetInstList()) {
+        if (inst.Id() <= final_save->Id() ||
+            inst.GetOp() != ir::OpCode::StoreUniform) {
+            continue;
+        }
+        const auto uniform = inst.GetArg<ir::Uniform>(0);
+        if (uniform.GetOffset() != kCarryOffset ||
+            uniform.GetType() != ir::ValueType::U8) {
+            continue;
+        }
+        auto value = inst.GetArg<ir::Value>(1);
+        auto* def = value.Def();
+        if (!def || def->GetOp() != ir::OpCode::LoadImm ||
+            value.Type() != ir::ValueType::U8 ||
+            (!dead_successor && def->GetUses() != 1)) {
+            if (GetSvmConfig().dump_ir) {
+                fmt::print(stderr,
+                           "[backedge-proof] {:#x} reject polarity value def={} op={} type={} uses={}\n",
+                           block->GetStartLocation().Value(), def != nullptr,
+                           def ? static_cast<u32>(def->GetOp()) : UINT32_MAX,
+                           static_cast<u32>(value.Type()),
+                           def ? def->GetUses() : UINT32_MAX);
+            }
+            return std::nullopt;
+        }
+        const u64 immediate = def->GetArg<ir::Imm>(0).Get();
+        if (immediate > 1) {
+            return std::nullopt;
+        }
+        plan.store = &inst;
+        plan.load = def;
+        plan.marker = &inst;
+        plan.inverted = static_cast<u8>(immediate);
+    }
+    if (!plan.store || !plan.load || plan.store->Id() >= condition->Id()) {
+        if (GetSvmConfig().dump_ir) {
+            fmt::print(stderr,
+                       "[backedge-proof] {:#x} reject polarity store={} load={} cond={}\n",
+                       block->GetStartLocation().Value(),
+                       plan.store ? plan.store->Id() : UINT32_MAX,
+                       plan.load ? plan.load->Id() : UINT32_MAX,
+                       condition->Id());
+        }
+        return std::nullopt;
+    }
+    return plan;
+}
+
 std::unique_ptr<JitTranslator::BackedgeFlagsPlan>
 JitTranslator::PlanBackedgeFlags(ir::Block* block) {
     if ((!backedge_flags && !region_branch_flags) || !block) {
@@ -561,55 +632,9 @@ JitTranslator::PlanBackedgeFlags(ir::Block* block) {
         return nullptr;
     }
 
-    ir::Inst* polarity_store = nullptr;
-    ir::Inst* polarity_load = nullptr;
-    u8 polarity = 0;
-    constexpr u32 kCarryOffset = offsetof(swift::x86::ThreadContext64,
-                                          carry_inverted);
-    for (auto& inst : block->GetInstList()) {
-        if (inst.Id() <= final_save->Id() ||
-            inst.GetOp() != ir::OpCode::StoreUniform) {
-            continue;
-        }
-        const auto uniform = inst.GetArg<ir::Uniform>(0);
-        if (uniform.GetOffset() != kCarryOffset ||
-            uniform.GetType() != ir::ValueType::U8) {
-            continue;
-        }
-        auto value = inst.GetArg<ir::Value>(1);
-        auto* def = value.Def();
-        if (!def || def->GetOp() != ir::OpCode::LoadImm ||
-            value.Type() != ir::ValueType::U8 ||
-            (!dead_successor && def->GetUses() != 1)) {
-            if (GetSvmConfig().dump_ir) {
-                fmt::print(stderr,
-                           "[backedge-proof] {:#x} reject polarity value def={} op={} type={} uses={}\n",
-                           block->GetStartLocation().Value(),
-                           def != nullptr,
-                           def ? static_cast<u32>(def->GetOp()) : UINT32_MAX,
-                           static_cast<u32>(value.Type()),
-                           def ? def->GetUses() : UINT32_MAX);
-            }
-            return nullptr;
-        }
-        const u64 immediate = def->GetArg<ir::Imm>(0).Get();
-        if (immediate > 1) {
-            return nullptr;
-        }
-        polarity_store = &inst;
-        polarity_load = def;
-        polarity = static_cast<u8>(immediate);
-    }
-    if (!polarity_store || !polarity_load ||
-        polarity_store->Id() >= condition.Def()->Id()) {
-        if (GetSvmConfig().dump_ir) {
-            fmt::print(stderr,
-                       "[backedge-proof] {:#x} reject polarity store={} load={} cond={}\n",
-                       block->GetStartLocation().Value(),
-                       polarity_store ? polarity_store->Id() : UINT32_MAX,
-                       polarity_load ? polarity_load->Id() : UINT32_MAX,
-                       condition.Def()->Id());
-        }
+    auto carry_plan = PlanBackedgeCarry(
+            block, final_save, condition.Def(), dead_successor);
+    if (!carry_plan) {
         return nullptr;
     }
 
@@ -652,7 +677,7 @@ JitTranslator::PlanBackedgeFlags(ir::Block* block) {
     // guest PC and consuming the already-live local condition only.
     ir::Inst* final_advance = nullptr;
     for (auto& inst : block->GetInstList()) {
-        if (inst.Id() <= polarity_store->Id()) {
+        if (inst.Id() <= carry_plan->marker->Id()) {
             continue;
         }
         if (inst.GetOp() != ir::OpCode::AdvancePC &&
@@ -681,15 +706,18 @@ JitTranslator::PlanBackedgeFlags(ir::Block* block) {
 
     auto plan = std::make_unique<BackedgeFlagsPlan>();
     plan->dead_successor = dead_successor;
+    plan->canonical_carry = carry_plan->canonical;
     plan->self_is_then = dead_successor ? then_dead : then_self;
     plan->self_target = dead_successor
             ? (then_dead ? *then_target : *else_target)
             : self;
     plan->cold_target = plan->self_is_then ? *else_target : *then_target;
-    plan->carry_inverted = polarity;
+    plan->carry_inverted = carry_plan->inverted;
     plan->requested = GuestNZCVToHost(final_requested & ir::Flags::NZCV);
-    plan->polarity_load = polarity_load->GetUses() == 1 ? polarity_load : nullptr;
-    plan->polarity_store = polarity_store;
+    plan->polarity_load = carry_plan->load && carry_plan->load->GetUses() == 1
+            ? carry_plan->load
+            : nullptr;
+    plan->polarity_store = carry_plan->store;
     plan->final_save = final_save;
     plan->final_advance = final_advance;
     (void)PlanRegionBranchPFAF(*plan, lazy_producer);
@@ -705,12 +733,14 @@ JitTranslator::PlanBackedgeFlags(ir::Block* block) {
 }
 
 void JitTranslator::EmitBackedgeMaterialize(const BackedgeFlagsPlan& plan) {
-    __ Mov(ipw1, plan.carry_inverted);
-    __ Strb(ipw1,
-            MemOperand(state,
-                       state_offset_uniform_buffer +
-                               offsetof(swift::x86::ThreadContext64,
-                                        carry_inverted)));
+    if (!plan.canonical_carry) {
+        __ Mov(ipw1, plan.carry_inverted);
+        __ Strb(ipw1,
+                MemOperand(state,
+                           state_offset_uniform_buffer +
+                                   offsetof(swift::x86::ThreadContext64,
+                                            carry_inverted)));
+    }
     const u64 requested = static_cast<u64>(plan.requested);
     u64 keep = ~requested;
     __ Mrs(ip0, NZCV);
@@ -789,12 +819,14 @@ bool JitTranslator::EmitBackedgeFlagsTerminal(const ir::Terminal& terminal) {
         // Static proof and emitter state disagreed. Recreate the omitted
         // polarity write, commit through the ordinary path, and let the
         // generic terminal keep this block correct (but unoptimized).
-        __ Mov(ipw1, plan.carry_inverted);
-        __ Strb(ipw1,
-                MemOperand(state,
-                           state_offset_uniform_buffer +
-                                   offsetof(swift::x86::ThreadContext64,
-                                            carry_inverted)));
+        if (!plan.canonical_carry) {
+            __ Mov(ipw1, plan.carry_inverted);
+            __ Strb(ipw1,
+                    MemOperand(state,
+                               state_offset_uniform_buffer +
+                                       offsetof(swift::x86::ThreadContext64,
+                                                carry_inverted)));
+        }
         MergeNZCV(FlagsRegsAuditMergeCause::TerminalInternal,
                   FlagsRegsAuditEdgeKind::RegionInternal);
         EmitRegionBranchPFAF(plan);
@@ -885,22 +917,24 @@ void JitTranslator::EmitBackedgeColdPaths() {
     // block's compile-time polarity before reconstructing host NZCV: a fault
     // before the first producer must see the same local ABI on an external
     // first iteration as it does after a self edge.
-    Label polarity_ready;
-    __ Ldrb(ipw0,
-            MemOperand(state,
-                       state_offset_uniform_buffer +
-                               offsetof(swift::x86::ThreadContext64,
-                                        carry_inverted)));
-    __ Cmp(ipw0, plan.carry_inverted);
-    __ B(&polarity_ready, eq);
-    __ Eor(flags, flags, static_cast<u64>(HostFlags::C));
-    __ Bind(&polarity_ready);
-    __ Mov(ipw0, plan.carry_inverted);
-    __ Strb(ipw0,
-            MemOperand(state,
-                       state_offset_uniform_buffer +
-                               offsetof(swift::x86::ThreadContext64,
-                                        carry_inverted)));
+    if (!plan.canonical_carry) {
+        Label polarity_ready;
+        __ Ldrb(ipw0,
+                MemOperand(state,
+                           state_offset_uniform_buffer +
+                                   offsetof(swift::x86::ThreadContext64,
+                                            carry_inverted)));
+        __ Cmp(ipw0, plan.carry_inverted);
+        __ B(&polarity_ready, eq);
+        __ Eor(flags, flags, static_cast<u64>(HostFlags::C));
+        __ Bind(&polarity_ready);
+        __ Mov(ipw0, plan.carry_inverted);
+        __ Strb(ipw0,
+                MemOperand(state,
+                           state_offset_uniform_buffer +
+                                   offsetof(swift::x86::ThreadContext64,
+                                            carry_inverted)));
+    }
     __ And(ip0, flags, static_cast<u64>(HostFlags::NZCV));
     __ Msr(NZCV, ip0);
     __ B(plan.local_entry.get());

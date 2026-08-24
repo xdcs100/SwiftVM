@@ -259,12 +259,9 @@ struct ThreadContext64 {
     // intentionally not modelled, so CPUID.PKU stays clear; unconditional
     // RDPKRU/WRPKRU users still observe a coherent, reset-zero register.
     u32 pkru{};
-    // Cross-block carry polarity: the sticky flags store the host (ARM)
-    // carry, which after a sub-family op is the INVERSE of the x86 CF. The
-    // decoder tracks the polarity within a block but cannot know it at block
-    // entry, so every carry-defining op also records it here; CF consumers
-    // (jcc / setcc / cmov / lahf / adc / sbb) XOR the stored host carry with
-    // this byte to recover the architectural CF across block boundaries.
+    // Non-FlagM cross-block carry polarity. FlagM units normalize host C to
+    // x86 CF and leave this byte zero; other hosts persist the producer's raw
+    // representation so later CF consumers can recover the architectural bit.
     // 0 = stored C == x86 CF, 1 = stored C == NOT x86 CF.
     u8 carry_inverted{};
     // Architectural DF, kept separately from the lazy arithmetic flags.

@@ -1027,6 +1027,9 @@ bool JitTranslator::FoldCcFromCarryTest(ir::Inst* test_flags) {
     if (!FlagsRegsEnabled() || !cur_block || !test_flags) {
         return false;
     }
+    if (CanonicalCarryEnabled()) {
+        return false;
+    }
     if (test_flags->GetArg<ir::Flags>(0) != ir::Flags::Carry) {
         return false;
     }

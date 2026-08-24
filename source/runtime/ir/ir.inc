@@ -116,10 +116,9 @@ INST(ClearFlags, Void, Flags)
 // flag is derived rather than produced by a host flag-setting op (shift CF/OF).
 INST(SetCarry, Void, Value)
 INST(SetOverflow, Void, Value)
-// Toggle the current carry representation in place.  The x86 frontend uses
-// this only inside one translation unit to normalize a known carry polarity
-// before ADC/SBB; the ARM64 backend lowers it to FEAT_FLAGM CFINV and the
-// interpreter toggles its virtual host-C bit.
+// Toggle the current carry representation in place. FlagM units use this to
+// keep a Direct cross-block carry ABI and to normalize ADC/SBB inputs; the
+// interpreter toggles the matching virtual host-C bit.
 INST(InvertCarry, Void)
 // Publish VecFCmp's result to the unchanged x86 flags ABI, clearing OF/SF/AF
 // as UCOMIS/COMIS require.  Imm records the unit-local lowering selected by

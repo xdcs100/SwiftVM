@@ -1806,24 +1806,40 @@ TEST_CASE("Uniform elimination preserves rotate-by-zero carry polarity load") {
     } memory;
 
     const auto address = reinterpret_cast<VAddr>(code.data());
-    Block block{0, Location{address}};
-    Assembler assembler{&block};
-    X64Decoder decoder{address, &memory, &assembler, true,
-                       Arm64Features::None, false, false, FeatureSet{}};
-    decoder.Decode();
-
-    UniformInfo info{.uniform_size = sizeof(ThreadContext64)};
-    UniformEliminationPass::Run(&block, info, FeatureSet{});
-
     const auto polarity_offset = offsetof(ThreadContext64, carry_inverted);
-    size_t polarity_loads = 0;
-    for (auto& inst : block.GetInstList()) {
-        if (inst.GetOp() == OpCode::LoadUniform &&
-            inst.GetArg<Uniform>(0).GetOffset() == polarity_offset) {
-            polarity_loads++;
+    struct Shape {
+        size_t polarity_loads{};
+        size_t polarity_stores{};
+        size_t carry_inverts{};
+    };
+    auto decode = [&](Arm64Features arm64_features) {
+        Block block{0, Location{address}};
+        Assembler assembler{&block};
+        X64Decoder decoder{address, &memory, &assembler, true,
+                           arm64_features, false, false, FeatureSet{}};
+        decoder.Decode();
+
+        UniformInfo info{.uniform_size = sizeof(ThreadContext64)};
+        UniformEliminationPass::Run(&block, info, FeatureSet{});
+
+        Shape shape;
+        for (auto& inst : block.GetInstList()) {
+            if ((inst.GetOp() == OpCode::LoadUniform ||
+                 inst.GetOp() == OpCode::StoreUniform) &&
+                inst.GetArg<Uniform>(0).GetOffset() == polarity_offset) {
+                shape.polarity_loads += inst.GetOp() == OpCode::LoadUniform;
+                shape.polarity_stores += inst.GetOp() == OpCode::StoreUniform;
+            }
+            shape.carry_inverts += inst.GetOp() == OpCode::InvertCarry;
         }
-    }
-    REQUIRE(polarity_loads == 1);
+        return shape;
+    };
+
+    REQUIRE(decode(Arm64Features::None).polarity_loads == 1);
+    const auto canonical = decode(Arm64Features::FlagM);
+    REQUIRE(canonical.polarity_loads == 0);
+    REQUIRE(canonical.polarity_stores == 0);
+    REQUIRE(canonical.carry_inverts >= 1);
 }
 
 TEST_CASE("narrow rotate compact recognizes only the verified U16 immediate-eight DAG") {

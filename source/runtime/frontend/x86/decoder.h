@@ -492,13 +492,10 @@ private:
 
     enum class ArithOp { Add, Adc, Sub, Sbb };
 
-    // ARM flag-setting arithmetic always reports C as NOT-borrow, so after a
-    // sub-family op the stored carry has the inverse of the x86 CF semantics.
-    // The backend offers no way to rewrite a single flag bit, so the decoder
-    // tracks the polarity of the stored carry and compensates at CF consumers
-    // (jcc / setcc / cmov / adc / sbb / lahf). Valid within a translation
-    // block; resets to Unknown at block entry (best effort across blocks, see
-    // report).
+    // ARM subtraction reports C as NOT-borrow. FlagM hosts normalize that bit
+    // immediately and keep a Direct cross-block representation. Other hosts
+    // track producer polarity within the block and persist it for later CF
+    // consumers.
     enum class CarryPolarity { Unknown, Direct, Inverted };
 
     // left (op) right at the given x86 width with flags per flag_mask. For
@@ -512,17 +509,17 @@ private:
             ir::Value left, ir::Value right, ArithOp op, u32 width, ir::Flags flag_mask,
             bool terminal_compare = false);
 
-    // Current CF as a 0/1 value, honoring the tracked carry polarity (and
-    // the runtime polarity byte at block entry).
+    // Current CF as a 0/1 value, honoring the tracked carry polarity and the
+    // non-FlagM runtime polarity byte.
     ir::Value CarryValue();
 
-    // Runtime carry polarity byte (ThreadContext64::carry_inverted): written
-    // by every carry-defining op so CF consumers in LATER blocks can recover
-    // the architectural CF from the stored host carry.
+    // Non-FlagM runtime carry polarity byte. FlagM hosts normalize C in place
+    // and keep the cross-block representation Direct.
     static ir::Uniform PolarityUniform() {
         return ir::Uniform{offsetof(ThreadContext64, carry_inverted), ir::ValueType::U8};
     }
     void StorePolarity(bool inverted);
+    void MergeConditionalCarryPolarity();
     static ir::Uniform DirectionUniform() {
         return ir::Uniform{offsetof(ThreadContext64, direction), ir::ValueType::U8};
     }

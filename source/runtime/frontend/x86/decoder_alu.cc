@@ -904,16 +904,14 @@ void X64Decoder::DecodeShift(_DInst& insn, int kind) {
     }
     __ SetOverflow(of);
 
-    StorePolarity(false);  // CF stored Direct; skipped with the update when count == 0
+    StorePolarity(false);  // CF becomes Direct only when the update executes
     if (immediate_fast) {
         carry_ = CarryPolarity::Direct;
     } else {
         __ BindLabel(skip_flags);
-        // The shift count is runtime-dependent: count == 0 preserves the previous
-        // carry and its polarity, count != 0 sets CF Direct. The frontend cannot know
-        // which at decode time, so mark the polarity unknown and let consumers
-        // normalize through the runtime polarity byte (stored above for count != 0).
-        carry_ = CarryPolarity::Unknown;
+        // Both conditional paths stay Direct under the FlagM ABI. Other hosts
+        // recover the selected representation from the runtime polarity byte.
+        MergeConditionalCarryPolarity();
     }
 
     Dst(insn, op0, result);
@@ -968,7 +966,7 @@ void X64Decoder::DecodeDoubleShift(_DInst& insn, bool right) {
     __ SetOverflow(__ Xor(old_msb, ir::Operand{new_msb}));
     StorePolarity(false);
     __ BindLabel(skip_flags);
-    carry_ = CarryPolarity::Unknown;
+    MergeConditionalCarryPolarity();
     Dst(insn, op0, result);
 }
 
@@ -1049,7 +1047,7 @@ void X64Decoder::DecodeRotateCarry(_DInst& insn, bool left) {
     __ SetOverflow(of);
     StorePolarity(false);
     __ BindLabel(skip_flags);
-    carry_ = CarryPolarity::Unknown;
+    MergeConditionalCarryPolarity();
     Dst(insn, op0, result);
 }
 
@@ -1395,11 +1393,11 @@ void X64Decoder::DecodeRotate(_DInst& insn, bool left) {
         of = __ Xor(msb, ir::Operand{msb2});
     }
     __ SetOverflow(of);
-    StorePolarity(false);  // CF stored Direct; skipped with the update when count == 0
+    StorePolarity(false);  // CF becomes Direct only when the update executes
     if (!compact) {
         __ BindLabel(skip_flags);
-        // Count is runtime-dependent (0 preserves the prior carry), so mark unknown.
-        carry_ = CarryPolarity::Unknown;
+        // Count zero preserves the incoming representation; nonzero sets Direct.
+        MergeConditionalCarryPolarity();
     } else {
         // The immediate compact form is statically non-zero and stores direct CF.
         carry_ = CarryPolarity::Direct;
