@@ -36,11 +36,11 @@ boundary 22.116%、uniform 6.522%、flags IR 2.506%；FPR state 为 5.484%，
 live resident-FPR publication、scalar-load FPR fusion、scalar-sqrt resident publication、
 legacy scalar-binary resident publication、direct absolute-address materialization 和 compact
 FCMP PF/AF publication、trailing static-location cold publication、compact FCMP carrier
-publication 和 semantic Nop elision 后，按正式 host 权重折算约为 2.700019。以未变的
-FEX 1.549 为分母，对应 2.153×→1.743×。
+publication、semantic Nop elision 和 zero-register FPR lane publication 后，按正式 host
+权重折算约为 2.691001。以未变的 FEX 1.549 为分母，对应 2.153×→1.737×。
 旧表与这次重采的
 unit 形成参数不完全相同，
-因此不直接覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 1.74–1.81×。
+因此不直接覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 1.73–1.80×。
 
 ## 已落地
 
@@ -318,7 +318,22 @@ backend 中不可观察的 host 指令。代码池放置与对齐使用独立的
 - STREAM 与 CoreMark 等 entry 分别减少 1,390 / 57,725,341，221 / 280 个共同 PC
   缩短、0 个增长，分别保持 `Solution Validates` 与 CRC final `0x382f`。
 
-十七项合计使正式 smallpt 默认 region host 减少 249,205,878（18.8556%）。
+### Zero-register FPR lane publication
+
+提交 `b1e501e` 扩展既有默认开启的 `zero_store_zr`：单用、未 spill 的整数
+`LoadImm(0)` 若唯一消费者是 `SetHostFPR`，不再先把零物化到普通 GPR；固定 FPR lane
+直接从 `wzr/xzr` 写入。共享 helper 同时统一 StoreUniform、StoreMemory 和 SetHostFPR 的
+资格判断；multi-use、pseudo observer、spill 和非零值继续走原路径，没有新增机制开关。
+
+- 正式 smallpt 1,072,445,284→1,068,863,253，减少 3,582,031（0.3340%）；41 个共同
+  PC 缩短、0 个增长，entries、units、spill 和 PPM 均一致；
+- 320×240、64-spp c-ray 等 entry 减少 114,264,417，144 个共同 PC 缩短、0 个增长，
+  IDAT MD5 保持 `d0c71130abf3544a86b64417bc488c21`；
+- STREAM 等 entry 减少 46，5 个共同 PC 缩短、0 个增长并保持 `Solution Validates`；
+  CoreMark 等 entry 为 -23，只有冷布局级的 6 缩短 / 1 增长，按中性处理，CRC final
+  保持 `0x382f`。
+
+十八项合计使正式 smallpt 默认 region host 减少 252,787,909（19.1267%）。
 
 ## 否决项
 
@@ -336,6 +351,10 @@ smallpt 两臂均为 1,168,614,398，证明现有 successor layout 已吸收所�
 同值 carry 极性发布去重在本地回归通过，但正式 smallpt 等 entry 仅减少 23,703
 （0.0022%），同时 137 个 PC 增长、17 个缩短且 units/entries 改变，不具备稳定收益；
 原型已完整删除。
+
+把 legacy scalar-binary 的固定左源从精确 `GetHostFPR` 放宽到任意同 resident home 的
+SSA 链后，正式 smallpt 两臂均为 1,072,445,284，3,364 个共同 PC 全部 byte-identical；
+该条件不是剩余 publication 的限制来源，原型已完整删除。
 
 ## 验证
 
@@ -375,6 +394,11 @@ smallpt 两臂均为 1,168,614,398，证明现有 successor layout 已吸收所�
   assertions。固定 seed 全量保持 191 passed / 35 个既有失败和相同的 45 个失败断言位置；
   基线/候选 FLAGS 十二格逐字一致，clone futex/lock 四格均 rc=0，fingerprint 仍为
   1664 units / 11 guests。
+- zero-register FPR lane publication 将既有 zero-store fail-closed 矩阵扩为 405 assertions，
+  Mac 全部通过；FPR publication/fault focus 的 4 + 2 + 3 + 2 + 7 + 5 assertions 和 flags
+  46 assertions 在 Mac/Orb 均通过，COMIS 两端均通过 3,482 assertions。基线/候选 FLAGS
+  十二格逐字一致，fingerprint 保持 1664 units / 11 guests；Orb 固定 seed 全量仍为
+  191 passed / 35 个既有 failed cases，当前为 44 个失败断言且没有新增失败类别。
 - RSB/indirect 结构测试 26 assertions，覆盖八指令 L1 快路径、无 push 和无目标
   dispatcher 路径；显式改写栈返回地址的临时 probe 在默认、L1-off 两种 RSB frame、
   FLAGS-off 和 interpreter 下均 rc=0，probe 已删除。
@@ -386,7 +410,7 @@ smallpt 两臂均为 1,168,614,398，证明现有 successor layout 已吸收所�
   cycle successor layout 的 function fingerprint 对基线保持 1664 units / 11 guests 一致。
 - 200 轮 `smc_mt_stress` 为 host_fails/guest_lost/timeouts = 0/0/0。
 - Catch 与 fuzz seed 同为 424242 时，最新 Orb tree 为 191 passed / 35 个既有 failed
-  cases / 45 个失败断言；失败 case 数和类别不变，仍是既有配置敏感与 fuzz 类别。
+  cases / 44 个失败断言；失败 case 数和类别不变，仍是既有配置敏感与 fuzz 类别。
 - smallpt_wh PPM SHA-256 两臂均为
   `fe96f7e48295b27c8df8236294052d138c3ed130b81d022739907fe6b2cde5aa`；
   原 equal-entry c-ray sample 的 IDAT MD5 两臂均为
@@ -398,12 +422,13 @@ smallpt 两臂均为 1,168,614,398，证明现有 successor layout 已吸收所�
 
 1. 当前正式 smallpt 的已覆盖 link 约 6.8%。region/cycle link tail 约 2.1%，其中
    acquire poll 与跨本块 cold stub 的目标跳转不可直接删除；
-   八条 return-L1 静态序列约 1.43%，其中 `AND + ADD + LDP + CMP + CSEL + BR` 没有
+   八条 return-L1 静态序列约 1.44%，其中 `AND + ADD + LDP + CMP + CSEL + BR` 没有
    明确的基础 ISA 融合机会。公开 host exit 仍仅 139 次。剩余 `SetLocation` 均为动态
    目标或后面仍有观察点，不能继承块尾常量证明。
-2. 剩余 `SetHostFPR` 约为 30,193,585（2.815%），其中完整写约 8,317,804（0.776%）。
-   low-64 `LoadMemory` 与 high-64 zero 分别余 10,641,609（0.992%）/ 10,093,484
-   （0.941%）；相邻池中约
+2. 剩余 `SetHostFPR` 约为 30,193,585（2.825%），其中完整写约 8,317,804（0.778%）。
+   low-64 `LoadMemory` 与 high-64 zero 分别余 10,641,609（0.996%）/ 10,093,484
+   （0.944%）；high-zero 的独立常量物化已经消除，剩余数值是 publication IR 次数。
+   相邻池中约
    8.29M 次因 fault/alias/fixed-home 门拒绝，不为继续扩池放宽精确状态边界。
 3. CoreMark 的 8/16-bit truncation 仍要求 consumer-specific 物理高位证明，并保留 U16
    CallLambda 回归门。
