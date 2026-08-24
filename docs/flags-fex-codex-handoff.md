@@ -430,15 +430,17 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   raised BMI JIT/interpreter divergences from 324 to 327 by skipping this publication boundary and
   was fully reverted. No long benchmark or full suite was run.
 - Adjacent non-float low-64/high-zero `SetHostFPR` publication now emits one `FMOV D,X` at the
-  original publication point. The high zero must be a sole-use U64 constant, both stores must be
+  original publication point. The high zero must be a U64 constant, both stores must be
   adjacent lanes of the same resident home, and the existing fault-sensitive `LDR D` fusion keeps
   priority. A zero low value clears the complete home with `EOR V,V,V` rather than requesting the
   macro-level forbidden `FMOV D,XZR`. This recovers rejected scalar-load shapes without moving
-  their load or fault point. The
+  their load or fault point. A shared high-zero constant is suppressed only after every one of its
+  uses belongs to a fused publication; any other user retains materialization. The
   strict local `4 8 6` A/B has identical 2,757-PC / 3,597-version sets, 100% host/entry and top-20
-  coverage, byte-identical PPM, zero spills and common host `583,155 -> 582,442` (`-713`,
-  `-0.122266%`) with no growing PC. FPR publication/fault, resident-XMM, scalar SSE, COMIS and
-  directed/fuzzed VEX.128 validation pass 5,613 assertions. The pre-existing SSE batch-B
+  coverage, byte-identical PPM, zero spills and common host `583,155 -> 580,841` (`-2,314`,
+  `-0.396807%`) with no growing PC. Shared-zero coverage contributes `-1,601` (`-0.274877%`)
+  beyond the sole-use form. FPR publication/fault, resident-XMM, scalar SSE, COMIS and
+  directed/fuzzed VEX.128 validation pass 5,616 assertions. The pre-existing SSE batch-B
   JIT/interpreter divergence count remains exactly 392 on both arms. No long benchmark or full
   suite was run.
 - FEX-aligned RE=0 same-harness refresh for formal smallpt: SVM host/guest
@@ -450,7 +452,7 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   `fe96f7e48295b27c8df8236294052d138c3ed130b81d022739907fe6b2cde5aa`; prior equal-entry
   c-ray IDAT remains `54256cb4b3c6313a65ea12ebb7b81e30`, 64-spp formal c-ray is
   `d0c71130abf3544a86b64417bc488c21`, and STREAM validates.
-- Scalar-load structure/fault tests pass 3 cases / 17 assertions and VEX.128 move differential
+- Scalar-load structure/fault tests pass 4 cases / 20 assertions and VEX.128 move differential
   passes at seed 424242 on Mac and Orb. Live-publication tests pass 3 cases / 9 assertions. Existing FPR focus passes
   10 + 794 + 90 + 27 assertions. Scalar-sqrt publication passes 2 shapes / 6 assertions; after
   legacy scalar-binary coverage the current FPR focus is 9 cases / 125 assertions on Mac and Orb.
