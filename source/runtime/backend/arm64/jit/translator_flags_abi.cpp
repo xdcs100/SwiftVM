@@ -34,7 +34,9 @@ void JitTranslator::EmitFlagsPublishedVeneer(ir::Block* block) {
         return;
     }
     __ Bind(published);
-    UnparkFlagsHot();
+    if (!TargetKillsIncomingFlags(block->GetStartLocation())) {
+        UnparkFlagsHot();
+    }
     // Land before the entry counter so L2 visits match FLAGS=0 published
     // entries. Internal taken edges still target the post-counter label.
     __ B(context.GetCountedEntryLabel(block->GetStartLocation().Value()));
