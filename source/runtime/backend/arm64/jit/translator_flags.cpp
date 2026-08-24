@@ -1084,6 +1084,33 @@ void JitTranslator::EmitTestFlags(ir::Inst* inst) {
     }
     auto result = context.W(ir::Value{inst});
     auto nzcv_mask = static_cast<u32>(GuestNZCVToHost(test));
+    std::optional<u32> host_bit;
+    switch (test) {
+        case ir::Flags::Carry:
+            host_bit = HostFlagsBit::C;
+            break;
+        case ir::Flags::Overflow:
+            host_bit = HostFlagsBit::V;
+            break;
+        case ir::Flags::Zero:
+            host_bit = HostFlagsBit::Z;
+            break;
+        case ir::Flags::Negate:
+            host_bit = HostFlagsBit::N;
+            break;
+        default:
+            break;
+    }
+    if (host_bit) {
+        if (save_in_nzcv && nzcv_dirty) {
+            const auto scratch = context.GetSharedTmpX();
+            __ Mrs(scratch, NZCV);
+            __ Ubfx(result, scratch.W(), *host_bit, 1);
+        } else {
+            __ Ubfx(result, flags.W(), *host_bit, 1);
+        }
+        return;
+    }
     bool first{true};
     const auto scratch = context.GetSharedTmpX();
     // JA/JBE are And(TestFlags(CF), CondSet(NE)). Tst clobbers host NZCV.
