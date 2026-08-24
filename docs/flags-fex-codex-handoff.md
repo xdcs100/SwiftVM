@@ -477,6 +477,20 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   with common host `573,037 -> 569,108` (`-3,929`, `-0.685645%`), eight shrinking PCs and none
   growing. The expanded producer matrix passes 367 assertions and pinned-GPR focus passes 16;
   fixed-seed mov/extend and mixed fuzz retain the exact baseline 98 / 106 divergences.
+- `5a47163` collapses narrow logical flag identities. U8/U16 `TEST reg,reg` no longer builds a
+  redundant `And`; a zero-immediate `Or` with no data observer publishes flags from its input, and
+  the exact low `BitExtract -> Or(0)` chain may share the source register because the flag emitter
+  discards all physical high bits. U8/U16 NZ uses one shifted `ADDS`; U32/U64 uses `TST`. A bounded
+  no-detail `4 8 6` host-dump A/B has the same 556 observed PCs, 193 shrinking PCs, no growth and
+  `-937` static instructions. Its exact-version intersection covers 12.038773% of the retained
+  formal host weight and already removes 43,721,205 weighted instructions (`-0.221854%` of the
+  complete formal total), so this is a lower bound rather than a new formal ratio. Hot unit
+  `0x419287` falls `260 B -> 240 B`, removing all five instructions around `test dil,dil` beyond the
+  single NZ producer. The short PPM is byte-identical at SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. Two strict collector runs
+  hit the 15-second hard limit and produced no records; they were not extended or retried. Logical
+  shape plus flags/SaveCV/CondSet focus passes 120 assertions; fixed-seed ALU/mixed fuzz remains at
+  the documented 88 / 106 existing divergences. No long benchmark or full suite was run.
 - FEX-aligned RE=0 same-harness refresh for formal smallpt: SVM host/guest
   `3.335622 → 3.267832`; the landed stages fold this to about `2.478306`. With unchanged FEX
   `1.549`, ratio is `2.153× → 1.600×`. The earlier
@@ -606,9 +620,11 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 - A width round trip may substitute the original U32 SSA only for
   `BitExtract(ZeroExtend32To64(v32), 0, 32)` with one ordinary same-block consumer inside the
   128-IR window.
-- Same-width extraction is restricted to a U32 result and an audited W-reading consumer. U8/U16,
-  pseudo and opaque calls must retain the real extract because backend physical high bits are not
-  implied by the narrow IR type.
+- Same-width extraction is restricted to a U32 result and an audited W-reading consumer. U8/U16
+  normally retain the real extract because backend physical high bits are not implied by the narrow
+  IR type. The only narrow exception is the immediate, sole-use low extract feeding a no-data-use
+  `Or(0)` flag identity: its shifted NZ producer discards every physical high bit, and both the RA
+  tie and emitter shape must remain exact. Pseudo and opaque calls always retain the extract.
 - A static `SetLocation` exit may emit a direct-link site only for the existing same-module,
   non-self, BlockLink-enabled region contract. The cycle poll remains before the site; unavailable
   regions, cross-module targets and disabled BlockLink keep the inline L2/dispatcher fallback.

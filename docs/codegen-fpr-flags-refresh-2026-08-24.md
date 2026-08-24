@@ -561,6 +561,27 @@ ARM64 emitter 分别维护并复算同一 producer 集合；既有 observer、fi
 
 两个阶段都没有新增开关，没有运行长 benchmark 或完整 suite；临时 census 已删除。
 
+### Narrow logical flag identity collapse
+
+提交 `5a47163` 关闭了 smallpt 中成片出现的窄 `TEST reg,reg` 形态。前端对 U8/U16 同寄存器
+自测只读取一次，不再生成无结果消费者的 `And`；后端对无 data use 的 `Or(value, 0)` 直接
+从 `value` 发布逻辑标志。低位 `BitExtract` 只有在紧邻该精确 flag identity、只有这一处 use
+且带 flags pseudo 时才允许与输入绑定。U8/U16 通过 `ADDS wzr, wzr, value, LSL #24/#16`
+一次得到正确 N/Z 并清 C/V，U32/U64 直接 `TST`；需要急切物化 PF 的旧路径仍保留。
+
+- bounded no-detail `4 8 6` host-dump A/B 两臂观察到相同 556 个 PC，其中 193 个缩短、0 个
+  增长，合计减少 937 条静态 host 指令；热点 `0x419287` 从 260B 降到 240B，原
+  `UXTB + UXTB + AND + MOV + SXTB + TST` 只剩一条 NZ producer；
+- 与 retained formal log 做 exact-version 交集后覆盖 12.038773% formal host weight，191 个
+  加权 PC 缩短、0 个增长，已经减少 43,721,205 条 formal-weighted 指令，占完整 formal
+  host total 的 0.221854%。覆盖不足，以上只能视为保守下界，不能换算新的 FEX ratio；
+- 两臂短 PPM SHA-256 均为
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`；logical shape 与
+  flags/SaveCV/CondSet focus 共通过 120 assertions，固定 seed 424242 的 ALU/mixed fuzz
+  保持既有 88 / 106 divergence；
+- 严格 short collector 连续两次在 15 秒硬上限终止，均未生成 hot record。没有放宽超时，
+  没有运行长 benchmark 或完整 suite，也没有加入开关或保留 probe。
+
 ## 否决项
 
 直接放开 Linux AFP scalar insert 曾使 c-ray host 134,666,060→132,076,475，
