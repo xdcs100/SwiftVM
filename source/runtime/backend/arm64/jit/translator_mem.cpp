@@ -1199,6 +1199,11 @@ void JitTranslator::EmitGetHostFPR(ir::Inst* inst) {
 }
 
 void JitTranslator::EmitSetHostGPR(ir::Inst* inst) {
+    const auto published = inst->GetArg<ir::Value>(0);
+    if (auto update = MatchPreIndexMemoryUpdate(published.Def());
+        update && update->publication == inst) {
+        return;
+    }
     if (context.IsHostWriteCoalesced(inst->Id())) {
         if (ReproveCoalescedHostWrite(inst)) {
             return;
@@ -1470,7 +1475,8 @@ void JitTranslator::EmitLoadMemory(ir::Inst* inst) {
                            false,
                            q_access && !fold_host_base,
                            !q_access,
-                           structured_guest_ea);
+                           structured_guest_ea,
+                           inst);
     auto scalar_fpr = scalar_load_fpr_fusions.find(inst);
     if (scalar_fpr != scalar_load_fpr_fusions.end()) {
         ASSERT_MSG(ReproveScalarLoadFPRFusion(inst, scalar_fpr->second),
@@ -1562,7 +1568,8 @@ void JitTranslator::EmitStoreMemory(ir::Inst* inst) {
                            false,
                            q_access && !fold_host_base,
                            !q_access,
-                           structured_guest_ea);
+                           structured_guest_ea,
+                           inst);
     const bool zero_gpr = CanUseZeroStoreRegister(value);
     switch (type) {
         case ir::ValueType::S8:
@@ -1635,7 +1642,9 @@ void JitTranslator::EmitLoadMemoryTSO(ir::Inst* inst) {
                            type,
                            false,
                            scalar_fast_path || q_access,
-                           !scalar_fast_path && !q_access);
+                           !scalar_fast_path && !q_access,
+                           false,
+                           inst);
 
     // FEAT_LRCPC's LDAPR is the scalar x86-TSO fast path. It requires a bare,
     // naturally aligned address, so materialize any offset and branch around
@@ -1782,7 +1791,9 @@ void JitTranslator::EmitStoreMemoryTSO(ir::Inst* inst) {
                            type,
                            false,
                            scalar_fast_path || q_access,
-                           !scalar_fast_path && !q_access);
+                           !scalar_fast_path && !q_access,
+                           false,
+                           inst);
 
     // Gate the complete scalar fast path with the same probe as LDAPR. This
     // keeps non-LRCPC hosts on the previous dmb+str implementation and makes

@@ -120,6 +120,9 @@ void JitTranslator::EmitAdd(ir::Inst* inst) {
 }
 
 void JitTranslator::EmitSub(ir::Inst* inst) {
+    if (MatchPreIndexMemoryUpdate(inst)) {
+        return;
+    }
     auto left = inst->GetArg<ir::Value>(0);
     auto right = inst->GetArg<ir::Operand>(1);
     auto pinned_w = [&](ir::Value value) -> std::optional<WRegister> {

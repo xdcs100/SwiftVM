@@ -101,7 +101,8 @@ public:
                               bool pair = false,
                               bool atomic = false,
                               bool allow_writeback = true,
-                              bool structured_guest_ea = false);
+                              bool structured_guest_ea = false,
+                              ir::Inst* memory_inst = nullptr);
 
 #define INST(name, ...) void Emit##name(ir::Inst *inst);
 #include "runtime/ir/ir.inc"
@@ -118,6 +119,14 @@ private:
     [[nodiscard]] bool ReproveCoalescedHostFPRRead(ir::Inst* inst) const;
     [[nodiscard]] bool ReproveAesChainTie(ir::Inst* inst) const;
     [[nodiscard]] bool ReproveAesChainHostWrite(ir::Inst* inst) const;
+    struct PreIndexMemoryUpdate {
+        ir::Inst* memory{};
+        ir::Inst* publication{};
+        XRegister base{};
+        s64 offset{};
+    };
+    [[nodiscard]] std::optional<PreIndexMemoryUpdate>
+    MatchPreIndexMemoryUpdate(ir::Inst* update) const;
     struct ScalarLoadFPRFusion {
         ir::Inst* low_store{};
         ir::Inst* high_store{};

@@ -30,12 +30,79 @@ bool JitTranslator::CanUseZeroStoreRegister(ir::Value value) {
            compatible_uses == definition->GetUses(false);
 }
 
+std::optional<JitTranslator::PreIndexMemoryUpdate>
+JitTranslator::MatchPreIndexMemoryUpdate(ir::Inst* update) const {
+    if (use_memory_base || !update || update->GetOp() != ir::OpCode::Sub ||
+        ir::GetValueSizeByte(update->ReturnType()) != sizeof(u64) ||
+        update->GetUses(false) != 2) {
+        return std::nullopt;
+    }
+
+    const auto right = update->GetArg<ir::Operand>(1);
+    if (!right.GetRight().Null() || !right.GetLeft().IsImm()) {
+        return std::nullopt;
+    }
+    const u64 decrement = right.GetLeft().imm.Get();
+    if (decrement == 0 || decrement > 256) {
+        return std::nullopt;
+    }
+
+    const auto source = update->GetArg<ir::Value>(0);
+    auto* source_def = source.Def();
+    if (!source_def || source_def->GetOp() != ir::OpCode::GetHostGPR ||
+        source_def->GetArg<ir::Imm>(1).Get() != 0 ||
+        ir::GetValueSizeByte(source.Type()) != sizeof(u64)) {
+        return std::nullopt;
+    }
+    const u32 target = source_def->GetArg<ir::Imm>(0).Get();
+    const auto base = XRegister(target);
+    if (context.X(source) != base) {
+        return std::nullopt;
+    }
+
+    auto& instructions = cur_block->GetInstList();
+    auto memory_it = std::next(instructions.iterator_to(*update));
+    if (memory_it == instructions.end() ||
+        memory_it->GetOp() != ir::OpCode::StoreMemory) {
+        return std::nullopt;
+    }
+    const auto memory_operand = memory_it->GetArg<ir::Operand>(0);
+    const auto stored = memory_it->GetArg<ir::Value>(1);
+    if (!memory_operand.GetRight().Null() ||
+        !memory_operand.GetLeft().IsValue() ||
+        memory_operand.GetLeft().value.Def() != update ||
+        ir::IsFloatValueType(stored.Type()) ||
+        ir::GetValueSizeByte(stored.Type()) != decrement) {
+        return std::nullopt;
+    }
+    if (!context.IsSpilled(stored) && context.X(stored) == base) {
+        return std::nullopt;
+    }
+
+    auto publication_it = std::next(memory_it);
+    if (publication_it == instructions.end() ||
+        publication_it->GetOp() != ir::OpCode::SetHostGPR ||
+        publication_it->GetArg<ir::Value>(0).Def() != update ||
+        publication_it->GetArg<ir::Imm>(1).Get() != target ||
+        publication_it->GetArg<ir::Imm>(2).Get() != 0) {
+        return std::nullopt;
+    }
+
+    return PreIndexMemoryUpdate{
+            .memory = memory_it.operator->(),
+            .publication = publication_it.operator->(),
+            .base = base,
+            .offset = -static_cast<s64>(decrement),
+    };
+}
+
 MemOperand JitTranslator::EmitMemOperand(ir::Operand& ir_op,
                                          ir::ValueType type,
                                          bool pair,
                                          bool atomic,
                                          bool allow_writeback,
-                                         bool structured_guest_ea) {
+                                         bool structured_guest_ea,
+                                         ir::Inst* memory_inst) {
     auto access_size = ir::GetValueSizeByte(type);
     if (ir_op.GetRight().Null()) {
         if (ir_op.GetLeft().IsImm()) {
@@ -64,6 +131,12 @@ MemOperand JitTranslator::EmitMemOperand(ir::Operand& ir_op,
         } else {
             // Match Case: load store post/index & push/pop
             auto addr_value = ir_op.GetLeft().value;
+            if (allow_writeback && !atomic) {
+                auto update = MatchPreIndexMemoryUpdate(addr_value.Def());
+                if (update && update->memory == memory_inst) {
+                    return MemOperand{update->base, update->offset, PreIndex};
+                }
+            }
             if ((mem_narrow_fuse || addr_ea_tie) &&
                 addr_value.Def()->GetOp() == ir::OpCode::GetOperand &&
                 addr_value.Def()->GetUses() == 1) {
