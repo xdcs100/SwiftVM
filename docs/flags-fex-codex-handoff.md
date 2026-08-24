@@ -8,8 +8,8 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`6b10c73`** `perf: reuse page bases for constant addresses`
-- Tracked tree is clean before the documentation commit. Preserve the existing untracked build/images/placement tools.
+- Code tip: **`a9f5ddf`** `perf: eliminate dead carry inversions`
+- Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
 
@@ -62,6 +62,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 | `e10fec4` | Let one audited consumer reuse a pinned W view for every operand occurrence and feed callee-saved pinned values directly into sign extension |
 | `7620306` | Store a sole narrow pinned GPR read directly from its fixed W home while preserving snapshot and address-use semantics |
 | `e2fe71c` | Normalize carry to a Direct cross-block ABI on FlagM hosts and remove the polarity-byte publication path |
+| `a9f5ddf` | Delete `InvertCarry` and its covered carry publication when backward liveness proves a later in-block C write wins before every read |
 | `2d86a6e` | Screen candidates with bounded short shape runs and retained formal weights before promoting them to long benchmarks |
 
 Hot files:
@@ -400,6 +401,18 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   weighted result. Focused IR validation passes 4 assertions; func_tests passes JIT/interpreter,
   region-off, flags-regs-off and CFINV-off with checksum `9f52b7d59285dbe5`; branch-only passes all
   six grids and helper-fault passes 38/38. No long benchmark or full suite was run.
+- A five-second truncated opcode audit covers only 4.825% of the current short-run host weight, but
+  separates real loads from their address tax: 2,203 / 2,231 weighted `LoadMemory` sites emit one
+  instruction, and extra address formation is 46 / 2,277 load-attributed instructions (2.020%), or
+  0.161% of the covered host account. The same slice exposes `InvertCarry` at 5.82%, so the larger
+  reducible target is dead carry normalization rather than the `LDR` body. `a9f5ddf` lets the existing
+  carry-liveness pass remove an inversion only when a later in-block C writer covers every path before
+  a reader; live-out C, `TestFlags(C)`, helpers, branches and the block-wide ADC/SBB gate keep it.
+  The strict local `4 8 6` A/B has identical 2,757-PC / 3,597-version sets, 100% host/entry and top-20
+  coverage, byte-identical PPM, zero spills and common host `593,160 -> 591,583` (`-1,577`,
+  `-0.265864%`) with no growing PC. Focused validation passes default/rollback carry elimination
+  (32 / 11 assertions), canonical carry (4), SaveCV (4), simple CondSet (62), rotate-zero carry (4),
+  region branch flags (46) and full NZCV publication (3). No long benchmark or full suite was run.
 - FEX-aligned RE=0 same-harness refresh for formal smallpt: SVM host/guest
   `3.335622 → 3.267832`; the landed stages fold this to about `2.478306`. With unchanged FEX
   `1.549`, ratio is `2.153× → 1.600×`. The earlier
@@ -518,10 +531,12 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 - An ordinary `StoreMemory` may read a pinned W home directly only when an offset-zero U8/U16/U32
   `GetHostGPR` has exactly that store-value use and no intervening write to the home. Address uses,
   later uses, U64 values and TSO stores keep the snapshot instruction.
-- FlagM units keep host C equal to x86 CF at every cross-block boundary. `InvertCarry` after a
-  sub-family producer is part of that canonicalization, not a removable polarity toggle. Direct
-  carry cannot use the inverted-carry `HI/LS` folding rule. Non-FlagM hosts still persist and load
-  `carry_inverted`.
+- FlagM units keep host C equal to x86 CF at every cross-block boundary. A live `InvertCarry` after
+  a sub-family producer is part of that canonicalization, not a polarity toggle that can be removed
+  locally. It is dead only when backward liveness proves a later in-block C write covers every path
+  before a read; live-out C and any intervening reader retain both the inversion and its producer.
+  Direct carry cannot use the inverted-carry `HI/LS` folding rule. Non-FlagM hosts still persist and
+  load `carry_inverted`.
 - A low32 copy may skip `BitExtract` only when its sole use is the immediately following
   `ZeroExtend32To64`; the wrapper must still emit a W move and keep all later uses.
 - A width round trip may substitute the original U32 SSA only for
@@ -600,9 +615,10 @@ StoreMemory 51.64M. Do not subtract the local short carry census from these form
 candidate changes unit/version formation and must pass a future formal gate before the ledger is rebased.
 
 1. **Canonical carry formal gate** — the largest StoreUniform subpool is closed on FlagM and the
-   short oracle is exact, but strict short coverage is only 37.091%. The next promoted-stage run
-   must remeasure unit formation and guest-normalized host density; do not quote the raw short
-   `host_dynamic` reduction as the FEX gap improvement.
+   short oracle is exact. Dead inversion elimination has a 100%-coverage same-shape short A/B, but
+   the complete pre-canonical-to-current comparison still has only 37.091% strict coverage. The next
+   promoted-stage run must remeasure unit formation and guest-normalized host density; do not quote
+   either raw short `host_dynamic` change as the FEX gap improvement.
 2. **Pinned GPR residuals** — keep level 2 as the performance default. Recount actual emitted bytes,
    not GetHost/SetHost IR. The largest remaining SetHost moves in the retained log implement real
    guest copies such as `mov rbp,rdi` and `mov rbx,rdx`; deleting them requires architectural
@@ -623,6 +639,8 @@ candidate changes unit/version formation and must pass a future formal gate befo
 5. **Remaining composite EA** — identity `[base+imm]`, `[base+index]` and matching scaled-index
    forms are now direct. Remaining materialized forms involve bias/32-bit wrapping, shifts or an
    AArch64-unencodable scale; require an exact encoding and wrap proof before extending the gate.
+   The truncated short audit attributes only 2.020% of observed `LoadMemory` work to address
+   formation, so do not treat the raw opcode total as a removable pool.
 6. **CoreMark remaining truncations** — raw BitExtract is no longer a pool. Only reopen 8/16-bit
    cases with a consumer-specific physical-high proof and the U16 helper regression in the gate.
 7. **SHA valid workload first** — fix or replace the current OpenSSL guest path that PageFatals before hashing, then redo the boundary census. Do not bypass guest fault semantics.
