@@ -40,8 +40,8 @@ publication、semantic Nop elision、zero-register FPR lane publication 和 shar
 materialization elision，再加入 simple CondSet saved-flags extraction 和 scaled memory
 displacement encoding、direct single-bit TestFlags extraction 和 PSTATE-preserving zero
 tests，再加入 live-PSTATE CSET materialization 和 negative GetOperand displacement lowering
-后，按正式 host 权重折算约为 2.625401。
-以未变的 FEX 1.549 为分母，对应 2.153×→1.695×。
+以及 aligned L1 BFI address formation 后，按正式 host 权重折算约为 2.620602。
+以未变的 FEX 1.549 为分母，对应 2.153×→1.692×。
 旧表与这次重采的
 unit 形成参数不完全相同，
 因此不直接覆盖原表；按两种口径合看，当前正式 smallpt 距离 FEX 约 1.68–1.75×。
@@ -425,7 +425,20 @@ ZF，既有 3-assertion repro 捕获了该问题；最终证明显式拒绝该�
 - STREAM/CoreMark 等 entry 分别减少 214 / 59；PPM、IDAT、STREAM validation 和
   CoreMark CRC 全部精确一致。
 
-二十五项合计使正式 smallpt 默认 region host 减少 278,843,805（21.0981%）。
+### Aligned L1 BFI address formation
+
+提交 `d9eb980` 让 direct-hash L1 表按完整表跨度对齐，使 inline return 和 dispatcher
+能以单条 `BFI` 形成 16-byte entry 地址，替代 `AND + ADD`。entry 数量、线性探测和
+失效值契约不变。
+
+- 正式 smallpt 1,042,807,357→1,040,901,562，减少 1,905,795（0.1828%）；377 个共同
+  PC 缩短、0 个增长，unit/version/entry 不变，spill 保持 0；
+- 正式 c-ray raw / 等 entry 分别减少 90,922,904 / 91,098,755，1,129 个等 entry PC
+  缩短、0 个增长，IDAT MD5 保持 `d0c71130abf3544a86b64417bc488c21`；
+- STREAM raw / 等 entry 分别减少 941 / 875；CoreMark raw / 等 entry 分别减少
+  31,825,004 / 31,825,027；validation 与 CRC final `0x382f` 保持一致。
+
+二十六项合计使正式 smallpt 默认 region host 减少 280,749,600（21.2423%）。
 
 ## 否决项
 
@@ -535,7 +548,12 @@ XMM fault sink 和 XMM1-11 驻留均已启用；XMM0 有既有墙钟回退证据
   一致。候选自一致为 1,657 units / 11 guests；相对 1,664-unit 基线有 7 个 unit 合并，
   decoded-block 与 IR 总量同步下降，所有 guest 输出精确一致。顶层 seed 424242 为
   191 passed / 35 个既有 failed cases / 44 个失败断言。
-- RSB/indirect 结构测试 26 assertions，覆盖八指令 L1 快路径、无 push 和无目标
+- aligned-L1 阶段的七指令结构门在 Mac/Orb 均通过 26 assertions，inline-L1 signal/SMC
+  invalidation 通过 13，trampoline 通过 154，排除既有 disk-cache 失败的 production
+  direct-link 在 Mac/Orb 通过 393 / 349 assertions。基线/候选 FLAGS 十二格逐字一致，
+  1,657-unit/11-guest fingerprint 匹配；顶层 seed 424242 为 191 passed / 35 个既有
+  failed cases / 45 个失败断言，失败文件集合不变。
+- RSB/indirect 结构测试 26 assertions，覆盖七指令 L1 快路径、无 push 和无目标
   dispatcher 路径；显式改写栈返回地址的临时 probe 在默认、L1-off 两种 RSB frame、
   FLAGS-off 和 interpreter 下均 rc=0，probe 已删除。
 - 新增 production inline-L1 signal 测试 6 assertions；FLAGS=0 下 direct-link production
@@ -556,14 +574,15 @@ XMM fault sink 和 XMM1-11 驻留均已启用；XMM0 有既有墙钟回退证据
 
 ## 下一步
 
-当前 single-version opcode ledger 覆盖正式 smallpt host 执行的约 83.62%。剩余单 op host
+当前 single-version opcode ledger 覆盖正式 smallpt host 执行的约 83.77%。剩余单 op host
 责任最高的是 GetOperand 83.40M、StoreUniform 82.41M、VecFMulScalar64 78.89M、LoadMemory
 76.55M、VecFAddScalar64 58.03M、LoadUniform 56.33M 和 StoreMemory 51.64M。
 
-1. 当前正式 smallpt 的已覆盖 link 约 6.8%。region/cycle link tail 约 2.1%，其中
+1. 当前正式 smallpt 的已覆盖 link 约 6.6%。region/cycle link tail 约 2.1%，其中
    acquire poll 与跨本块 cold stub 的目标跳转不可直接删除；
-   八条 return-L1 静态序列约 1.44%，其中 `AND + ADD + LDP + CMP + CSEL + BR` 没有
-   明确的基础 ISA 融合机会。公开 host exit 仍仅 139 次。剩余 `SetLocation` 均为动态
+   七条 return-L1 静态序列约 1.26%，地址形成已缩为 `BFI`，剩余
+   `LDP + CMP + CSEL + BR` 没有明确的基础 ISA 融合机会。公开 host exit 仍仅 139 次。
+   剩余 `SetLocation` 均为动态
    目标或后面仍有观察点，不能继承块尾常量证明。
 2. 剩余 `SetHostFPR` 约为 30,193,585（2.848%），其中完整写约 8,317,804（0.785%）。
    low-64 `LoadMemory` 与 high-64 zero 分别余 10,641,609（1.004%）/ 10,093,484
