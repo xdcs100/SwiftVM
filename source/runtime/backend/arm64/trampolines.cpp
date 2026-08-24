@@ -39,13 +39,11 @@ void EmitFlagsUnpark(MacroAssembler& assembler) {
     __ Ldr(ip1, MemOperand(state, state_offset_flags_nzcv_park));
     __ Tbz(ip1, kFlagsNzcvParkValidBit, &from_x26);
     __ Ldr(x12, MemOperand(state, state_offset_flags_result_park));
-    __ And(ip1, ip1, 0xF0000000ull);
     __ Msr(NZCV, ip1);
     __ Str(xzr, MemOperand(state, state_offset_flags_nzcv_park));
     __ B(&done);
     __ Bind(&from_x26);
-    __ And(ip1, flags, 0xF0000000ull);
-    __ Msr(NZCV, ip1);
+    __ Msr(NZCV, flags);
     __ Bind(&done);
 }
 }  // namespace

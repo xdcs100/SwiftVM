@@ -931,8 +931,7 @@ void JitTranslator::EmitBackedgeColdPaths() {
                                    offsetof(swift::x86::ThreadContext64,
                                             carry_inverted)));
     }
-    __ And(ip0, flags, static_cast<u64>(HostFlags::NZCV));
-    __ Msr(NZCV, ip0);
+    __ Msr(NZCV, flags);
     __ B(plan.local_entry.get());
 
     if (plan.optimized && plan.cold_referenced) {

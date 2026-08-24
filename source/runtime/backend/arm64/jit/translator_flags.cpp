@@ -230,9 +230,7 @@ void JitTranslator::PublishFlagsToken() {
 }
 
 void JitTranslator::LoadNZCVFromFlags() {
-    const auto scratch = context.GetSharedTmpX();
-    __ And(scratch, flags, static_cast<u64>(HostFlags::NZCV));
-    __ Msr(NZCV, scratch);
+    __ Msr(NZCV, flags);
 }
 
 bool JitTranslator::TryEmitCondSetFromFlags(ir::Inst* inst, ir::Cond cond) {

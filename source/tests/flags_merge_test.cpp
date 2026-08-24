@@ -11,8 +11,8 @@
 
 namespace {
 
-std::map<std::string, swift::u32> EmitFlagsPublication(
-        swift::runtime::ir::Flags saved_flags) {
+template <typename Build>
+std::map<std::string, swift::u32> EmitBlock(Build&& build) {
     using namespace swift::runtime;
     using namespace swift::runtime::backend;
     using namespace swift::runtime::ir;
@@ -31,12 +31,7 @@ std::map<std::string, swift::u32> EmitFlagsPublication(
             LocationDescriptor{0x87a0}, LocationDescriptor{0x87c0}, module_config);
 
     IntrusivePtr<Block> block{new Block(0, Location{0x87a0})};
-    auto left = block->LoadUniform<TypedValue<ValueType::U64>>(
-            Uniform{0, ValueType::U64});
-    auto right = block->LoadUniform<TypedValue<ValueType::U64>>(
-            Uniform{8, ValueType::U64});
-    auto result = block->Sub(left, Operand{right}).SetType(ValueType::U64);
-    block->SaveFlags(result, saved_flags);
+    build(*block);
     block->SetTerminal(terminal::ReturnToDispatch{});
     block->ReIdInstr();
 
@@ -73,6 +68,31 @@ std::map<std::string, swift::u32> EmitFlagsPublication(
     }
 
     return mnemonics;
+}
+
+std::map<std::string, swift::u32> EmitFlagsPublication(
+        swift::runtime::ir::Flags saved_flags) {
+    using namespace swift::runtime::ir;
+    return EmitBlock([saved_flags](Block& block) {
+        auto left = block.LoadUniform<TypedValue<ValueType::U64>>(
+                Uniform{0, ValueType::U64});
+        auto right = block.LoadUniform<TypedValue<ValueType::U64>>(
+                Uniform{8, ValueType::U64});
+        auto result = block.Sub(left, Operand{right}).SetType(ValueType::U64);
+        block.SaveFlags(result, saved_flags);
+    });
+}
+
+std::map<std::string, swift::u32> EmitCarryConsumer() {
+    using namespace swift::runtime::ir;
+    return EmitBlock([](Block& block) {
+        auto left = block.LoadUniform<TypedValue<ValueType::U64>>(
+                Uniform{0, ValueType::U64});
+        auto right = block.LoadUniform<TypedValue<ValueType::U64>>(
+                Uniform{8, ValueType::U64});
+        auto result = block.Adc(left, Operand{right}).SetType(ValueType::U64);
+        block.StoreUniform(Uniform{16, ValueType::U64}, result);
+    });
 }
 
 void RequireBitfieldMerge(std::map<std::string, swift::u32>& mnemonics) {
@@ -113,4 +133,11 @@ TEST_CASE("noncontiguous partial NZCV publication retains masked merge") {
     REQUIRE(mnemonics["orr"] == 1);
     REQUIRE(mnemonics["ubfx"] == 0);
     REQUIRE(mnemonics["bfi"] == 0);
+}
+
+TEST_CASE("NZCV restore writes the packed flags register directly") {
+    auto mnemonics = EmitCarryConsumer();
+
+    REQUIRE(mnemonics["msr"] == 1);
+    REQUIRE(mnemonics["and"] == 0);
 }

@@ -22,11 +22,7 @@ void JitTranslator::UnparkFlagsHot() {
     if (!FlagsRegsEnabled()) {
         return;
     }
-    // L2 veneers run after a trampoline Unpark or a unit-exit Merge into x26.
-    // Park is only live across C ABI. Using it here would revive a stale word
-    // after BlockLink. Two insns from x26 match the committed ABI.
-    __ And(ip1, flags, static_cast<u64>(HostFlags::NZCV));
-    __ Msr(NZCV, ip1);
+    __ Msr(NZCV, flags);
 }
 
 void JitTranslator::EmitFlagsPublishedVeneer(ir::Block* block) {
