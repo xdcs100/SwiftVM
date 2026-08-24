@@ -354,8 +354,12 @@ void SmcTracker::DelinkTargets(AddressSpace& space,
             ASSERT(record.site.offset + sizeof(u32) <= region->capacity);
             auto* rx_site = region->rx_base + record.site.offset;
             auto* rw_site = region->rw_base + record.site.offset;
-            ASSERT(region->trampoline_offset != CodeRegion::kInvalidTrampolineOffset);
-            auto* trampoline = region->rx_base + region->trampoline_offset;
+            const u32 trampoline_offset =
+                    record.flags_bypass_offset == UINT32_MAX
+                    ? region->trampoline_offset
+                    : region->pending_flags_trampoline_offset;
+            ASSERT(trampoline_offset != CodeRegion::kInvalidTrampolineOffset);
+            auto* trampoline = region->rx_base + trampoline_offset;
             const auto branch = EncodeBL(trampoline - rx_site);
             ASSERT(branch);
             ASSERT_MSG(PatchDirectBranch(*region, rx_site, rw_site, *branch),

@@ -121,8 +121,8 @@ void JitTranslator::EmitSplitFlagsPublish() {
 }
 
 void JitTranslator::MergeNZCV() {
-    MergeNZCV(FlagsRegsAuditMergeCause::PStateClobber,
-              flags_audit_block_edge);
+    (void)MergeNZCV(FlagsRegsAuditMergeCause::PStateClobber,
+                    flags_audit_block_edge);
 }
 
 void JitTranslator::EmitNZCVMerge(u64 requested,
@@ -148,8 +148,10 @@ void JitTranslator::EmitNZCVMerge(u64 requested,
     __ Orr(flags, flags, scratch);
 }
 
-void JitTranslator::MergeNZCV(FlagsRegsAuditMergeCause cause,
-                              FlagsRegsAuditEdgeKind edge) {
+DirectLinkFlagsBypass JitTranslator::MergeNZCV(
+        FlagsRegsAuditMergeCause cause,
+        FlagsRegsAuditEdgeKind edge) {
+    DirectLinkFlagsBypass flags_bypass{};
     const bool force_ret_pstate =
             FlagsRegsEnabled() && !nzcv_dirty && !True(nzcv_requested) &&
             BlockIsFlagsTransparent(cur_block) &&
@@ -165,6 +167,12 @@ void JitTranslator::MergeNZCV(FlagsRegsAuditMergeCause cause,
         const u64 req = force_ret_pstate ? static_cast<u64>(HostFlags::NZCV)
                                          : static_cast<u64>(nzcv_requested);
         EmitNZCVMerge(req, context.GetSharedTmpX());
+        const u32 merge_end = context.CurrentBufferSize();
+        if (FlagsRegsEnabled() && region_edges_active &&
+            req == static_cast<u64>(HostFlags::NZCV) &&
+            merge_end - begin == 3 * sizeof(u32)) {
+            flags_bypass = {begin, merge_end};
+        }
         if (!flags_token_keep) {
             nzcv_dirty = false;
             nzcv_requested = {};
@@ -211,6 +219,7 @@ void JitTranslator::MergeNZCV(FlagsRegsAuditMergeCause cause,
         }
     }
     PublishFlagsToken();
+    return flags_bypass;
 }
 
 void JitTranslator::PublishFlagsToken() {

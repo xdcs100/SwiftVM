@@ -110,6 +110,8 @@ bool LinkManager::RegisterSite(LinkSiteKey site,
         !source_owner.allocation || kind == LinkSiteKind::Count) {
         return false;
     }
+    const bool has_flags_bypass = signal_patch &&
+            signal_patch->flags_bypass.rx_site;
     if (signal_patch &&
         (signal_patch->region.id != site.region_id ||
          !signal_patch->region.ContainsRx(signal_patch->rx_site) ||
@@ -120,18 +122,39 @@ bool LinkManager::RegisterSite(LinkSiteKey site,
          (signal_patch->unlinked_bl & kBranchOpcodeMask) != kBranchOpcode)) {
         return false;
     }
+    if (has_flags_bypass) {
+        const auto& bypass = signal_patch->flags_bypass;
+        if (!bypass.rw_site ||
+            !signal_patch->region.ContainsRx(bypass.rx_site) ||
+            !signal_patch->region.ContainsRw(bypass.rw_site) ||
+            SiteRxToRw(signal_patch->region, bypass.rx_site) != bypass.rw_site ||
+            (bypass.linked_branch & kBranchOpcodeMask) != kBranchOpcode) {
+            return false;
+        }
+    }
     std::lock_guard guard(mutex_);
     if (const auto owner = outgoing_.find(source_owner);
         owner != outgoing_.end() && owner->second.retiring) {
         return false;
     }
-    const auto [it, inserted] = sites_.try_emplace(site,
-                                                   LinkSiteRecord{
-                                                           .site = site,
-                                                           .guest_target = guest_target,
-                                                           .source_owner = source_owner,
-                                                           .kind = kind,
-                                                   });
+    const auto flags_bypass_offset = has_flags_bypass
+            ? static_cast<u32>(
+                      static_cast<u8*>(signal_patch->flags_bypass.rx_site) -
+                      signal_patch->region.rx_base)
+            : UINT32_MAX;
+    const auto flags_bypass_instruction = has_flags_bypass
+            ? signal_patch->flags_bypass.unlinked_instruction
+            : 0;
+    const auto [it, inserted] = sites_.try_emplace(
+            site,
+            LinkSiteRecord{
+                    .site = site,
+                    .guest_target = guest_target,
+                    .source_owner = source_owner,
+                    .kind = kind,
+                    .flags_bypass_offset = flags_bypass_offset,
+                    .flags_bypass_instruction = flags_bypass_instruction,
+            });
     if (!inserted) {
         return false;
     }
@@ -191,7 +214,8 @@ u64 LinkManager::PublishTarget(u64 guest_target,
                                void* host_pc,
                                CodeRegionId region_id,
                                LinkSourceOwner target_owner,
-                               void* direct_host_pc) {
+                               void* direct_host_pc,
+                               void* pending_flags_host_pc) {
     std::lock_guard guard(mutex_);
     const u64 generation = next_target_generation_++;
     ASSERT(generation != kSignalInvalidatingGeneration);
@@ -218,6 +242,7 @@ u64 LinkManager::PublishTarget(u64 guest_target,
             .generation = generation,
             .host_pc = host_pc,
             .direct_host_pc = direct_host_pc ? direct_host_pc : host_pc,
+            .pending_flags_host_pc = pending_flags_host_pc,
             .region_id = region_id,
             .target_owner = target_owner,
             .signal_target = signal_target,
@@ -242,6 +267,7 @@ std::optional<LinkTargetRecord> LinkManager::QueryTarget(u64 guest_target) const
                 .guest_target = guest_target,
                 .host_pc = it->second.host_pc,
                 .direct_host_pc = it->second.direct_host_pc,
+                .pending_flags_host_pc = it->second.pending_flags_host_pc,
                 .region_id = it->second.region_id,
                 .generation = it->second.generation,
                 .target_owner = it->second.target_owner,
@@ -309,6 +335,10 @@ bool LinkManager::MarkLinked(LinkSiteKey site, u64 expected_generation, const Li
                                expected_generation;
     bool committed{};
     if (valid) {
+        if (site_it->second.flags_bypass_offset != UINT32_MAX &&
+            !target_it->second.pending_flags_host_pc) {
+            DisableFlagsBypassLocked(site_it->second);
+        }
         committed = commit(site_it->second);
     }
     const bool still_active =
@@ -317,10 +347,13 @@ bool LinkManager::MarkLinked(LinkSiteKey site, u64 expected_generation, const Li
     if (committed && still_active) {
         site_it->second.target_generation = expected_generation;
         site_it->second.state = LinkSiteState::Linked;
+        site_it->second.pending_flags_compatible =
+                target_it->second.pending_flags_host_pc != nullptr;
         if (const auto signal_site = signal_sites_.find(site);
             signal_site != signal_sites_.end()) {
             signal_site->second->linked.store(true, std::memory_order_release);
         }
+        TryEnableFlagsBypassLocked(site_it->second);
     }
     signal_target->linking_count.fetch_sub(1, std::memory_order_seq_cst);
     return committed && still_active;
@@ -334,6 +367,7 @@ bool LinkManager::MarkFar(LinkSiteKey site, u64 expected_generation) {
     }
     record->target_generation = expected_generation;
     record->state = LinkSiteState::Far;
+    record->pending_flags_compatible = false;
     if (const auto signal_site = signal_sites_.find(site); signal_site != signal_sites_.end()) {
         signal_site->second->linked.store(false, std::memory_order_release);
     }
@@ -368,6 +402,7 @@ std::vector<LinkSiteRecord> LinkManager::BeginTargetInvalidation(u64 guest_targe
         }
         result.push_back(record->second);
         record->second.target_generation = 0;
+        record->second.pending_flags_compatible = false;
         if (record->second.state != LinkSiteState::Retiring) {
             record->second.state = LinkSiteState::Unlinked;
         }
@@ -621,14 +656,18 @@ std::optional<uintptr_t> DecodeBranchTarget(const void* site, u32 insn) {
 }
 
 bool PatchDirectBranch(const CodeRegion& region, void* rx_site, void* rw_site, u32 insn) {
+    if ((insn & kBranchOpcodeMask) != kBranchOpcode) {
+        return false;
+    }
+    return PatchCodeWord(region, rx_site, rw_site, insn);
+}
+
+bool PatchCodeWord(const CodeRegion& region, void* rx_site, void* rw_site, u32 insn) {
     ASSERT(region.ContainsRx(rx_site));
     ASSERT(region.ContainsRw(rw_site));
     ASSERT(SiteRxToRw(region, rx_site) == rw_site);
     ASSERT((reinterpret_cast<uintptr_t>(rx_site) & 3u) == 0);
     ASSERT((reinterpret_cast<uintptr_t>(rw_site) & 3u) == 0);
-    if ((insn & kBranchOpcodeMask) != kBranchOpcode) {
-        return false;
-    }
     static_assert(std::atomic_ref<u32>::required_alignment <= alignof(u32));
     static_assert(std::atomic_ref<u32>::is_always_lock_free);
     auto& word = *static_cast<u32*>(rw_site);

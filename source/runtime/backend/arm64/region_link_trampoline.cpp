@@ -49,9 +49,12 @@ extern "C" void* RegionLinkTrampolineSlow(RegionLinkContext* context,
         if (!target || !target->host_pc) {
             return ReturnToDispatcher(*context, state, site);
         }
-        auto* direct_host_pc = target->direct_host_pc
-                ? target->direct_host_pc
-                : target->host_pc;
+        auto* direct_host_pc =
+                site->flags_bypass_offset != UINT32_MAX &&
+                                target->pending_flags_host_pc
+                        ? target->pending_flags_host_pc
+                        : (target->direct_host_pc ? target->direct_host_pc
+                                                  : target->host_pc);
 
         if (site->state == LinkSiteState::Linked) {
             if (site->target_generation == target->generation) {
@@ -97,9 +100,10 @@ extern "C" void* RegionLinkTrampolineSlow(RegionLinkContext* context,
     return ReturnToDispatcher(*context, state, context->manager->QuerySite(key));
 }
 
-std::vector<u8> BuildRegionLinkTrampoline(const Config& config,
-                                           RegionLinkContext* context,
-                                           const FeatureSet& features) {
+RegionLinkTrampolineCode BuildRegionLinkTrampoline(
+        const Config& config,
+        RegionLinkContext* context,
+        const FeatureSet& features) {
     vixl::svm_vixl_prof::JitScope vixl_prof{features.vixl_fast};
     MacroAssembler masm;
     std::vector<u16> gprs;
@@ -123,6 +127,16 @@ std::vector<u8> BuildRegionLinkTrampoline(const Config& config,
     const u32 frame_size = static_cast<u32>(
             AlignUp(fpr_base + fprs.size() * sizeof(u128), size_t{16}));
 
+    Label canonical_entry;
+    const u32 pending_flags_offset =
+            static_cast<u32>(masm.GetBuffer()->GetSizeInBytes());
+    masm.Mrs(x16, NZCV);
+    masm.And(x26, x26, ~u64{0xf0000000});
+    masm.Orr(x26, x26, x16);
+    masm.B(&canonical_entry);
+    masm.Bind(&canonical_entry);
+    const u32 canonical_offset =
+            static_cast<u32>(masm.GetBuffer()->GetSizeInBytes());
     masm.Sub(sp, sp, frame_size);
     masm.Stp(x29, x30, MemOperand(sp, 0));
     for (u32 i = 0; i < gprs.size(); ++i) {
@@ -170,8 +184,14 @@ std::vector<u8> BuildRegionLinkTrampoline(const Config& config,
     masm.FinalizeCode();
 
     const size_t size = masm.GetBuffer()->GetSizeInBytes();
-    std::vector<u8> result(size);
-    std::memcpy(result.data(), masm.GetBuffer()->GetStartAddress<u8*>(), size);
+    RegionLinkTrampolineCode result{
+            .code = std::vector<u8>(size),
+            .canonical_offset = canonical_offset,
+            .pending_flags_offset = pending_flags_offset,
+    };
+    std::memcpy(result.code.data(),
+                masm.GetBuffer()->GetStartAddress<u8*>(),
+                size);
     return result;
 }
 

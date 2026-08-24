@@ -536,7 +536,8 @@ bool JitContext::ForwardStatic(ir::Location location,
 void JitContext::Forward(ir::Location location,
                          Label* backedge_exit,
                          Label* self_target,
-                         LinkSiteKind direct_link_kind) {
+                         LinkSiteKind direct_link_kind,
+                         DirectLinkFlagsBypass flags_bypass) {
     ASSERT(cur_block);
     // Block exit: land any pending spill write-back before the transfer
     // (a spilled value defined by the block's last instruction may be live
@@ -568,7 +569,7 @@ void JitContext::Forward(ir::Location location,
 
         const bool self_module_forward{module == target_module};
         const ModuleConfig& module_config{module->GetModuleConfig()};
-        if (EmitDirectLink(location, direct_link_kind)) {
+        if (EmitDirectLink(location, direct_link_kind, flags_bypass)) {
             return;
         }
 
@@ -619,12 +620,27 @@ void JitContext::Forward(ir::Location location,
     }
 }
 
-bool JitContext::EmitDirectLink(ir::Location location, LinkSiteKind kind) {
+bool JitContext::EmitDirectLink(ir::Location location,
+                                LinkSiteKind kind,
+                                DirectLinkFlagsBypass flags_bypass) {
     if (!CanEmitDirectLink(location)) {
         return false;
     }
-    pending_direct_link_sites.push_back(
-            {CurrentBufferSize(), location.Value(), kind});
+    u32 flags_bypass_instruction{};
+    if (flags_bypass.Valid()) {
+        ASSERT(flags_bypass.code_offset + sizeof(u32) <=
+               flags_bypass.resume_offset);
+        ASSERT(flags_bypass.resume_offset <= CurrentBufferSize());
+        std::memcpy(&flags_bypass_instruction,
+                    masm.GetBuffer()->GetStartAddress<const u8*>() +
+                            flags_bypass.code_offset,
+                    sizeof(flags_bypass_instruction));
+    }
+    pending_direct_link_sites.push_back({CurrentBufferSize(),
+                                         location.Value(),
+                                         kind,
+                                         flags_bypass,
+                                         flags_bypass_instruction});
     RecordFlagsRegsAudit(FlagsRegsAuditMergeCause::TerminalInternal,
                          FlagsRegsAuditEdgeKind::DirectSlow,
                          FlagsRegsAuditCost::PackInstructions,
@@ -987,16 +1003,43 @@ u8* JitContext::Flush(const CodeBuffer& code_cache) {
         auto* cache = module->GetCodeCache(code_cache.exec_data);
         ASSERT(cache);
         const auto& region = cache->GetRegion();
-        auto* trampoline = static_cast<u8*>(cache->GetRegionTrampoline());
-        ASSERT(trampoline && region.ContainsRx(trampoline));
+        auto* canonical_trampoline =
+                static_cast<u8*>(cache->GetRegionTrampoline());
+        auto* pending_flags_trampoline =
+                static_cast<u8*>(cache->GetPendingFlagsRegionTrampoline());
+        ASSERT(canonical_trampoline &&
+               region.ContainsRx(canonical_trampoline));
+        ASSERT(pending_flags_trampoline &&
+               region.ContainsRx(pending_flags_trampoline));
         const LinkSourceOwner owner{module.get(), code_cache.exec_data};
         auto* emitted = masm.GetBuffer()->GetStartAddress<u8*>();
         for (const auto& pending : pending_direct_link_sites) {
             ASSERT(static_cast<size_t>(pending.code_offset) + sizeof(u32) <= code_cache.size);
             auto* rx_site = code_cache.exec_data + pending.code_offset;
+            auto* trampoline = pending.flags_bypass.Valid()
+                    ? pending_flags_trampoline
+                    : canonical_trampoline;
             const auto branch = EncodeBL(trampoline - rx_site);
             ASSERT(branch);
             std::memcpy(emitted + pending.code_offset, &*branch, sizeof(*branch));
+            LinkFlagsBypassPatch flags_bypass_patch{};
+            if (pending.flags_bypass.Valid()) {
+                const auto linked_branch = EncodeB(
+                        static_cast<intptr_t>(pending.flags_bypass.resume_offset) -
+                        static_cast<intptr_t>(pending.flags_bypass.code_offset));
+                ASSERT(linked_branch);
+                flags_bypass_patch = {
+                        .rx_site = code_cache.exec_data +
+                                pending.flags_bypass.code_offset,
+                        .rw_site = code_cache.rw_data +
+                                pending.flags_bypass.code_offset,
+                        .unlinked_instruction = pending.flags_bypass_instruction,
+                        .linked_branch = *linked_branch,
+                };
+                std::memcpy(emitted + pending.flags_bypass.code_offset,
+                            &*linked_branch,
+                            sizeof(*linked_branch));
+            }
             const LinkSiteKey key{
                     region.id,
                     code_cache.offset + pending.code_offset,
@@ -1006,6 +1049,7 @@ u8* JitContext::Flush(const CodeBuffer& code_cache) {
                     .rx_site = rx_site,
                     .rw_site = code_cache.rw_data + pending.code_offset,
                     .unlinked_bl = *branch,
+                    .flags_bypass = flags_bypass_patch,
             };
             ASSERT(module->GetAddressSpace().GetLinkManager().RegisterSite(
                     key, pending.guest_target, owner, &signal_patch, pending.kind));
@@ -1034,10 +1078,26 @@ ptrdiff_t JitContext::GetDirectLinkCodeOffset(LocationDescriptor location) const
     return GetCodeOffset(location);
 }
 
+ptrdiff_t JitContext::GetPendingFlagsCodeOffset(
+        LocationDescriptor location) const {
+    if (const auto it = pending_flags_entry_offsets.find(location);
+        it != pending_flags_entry_offsets.end()) {
+        return it->second;
+    }
+    return -1;
+}
+
 void JitContext::RecordDirectLinkEntry(LocationDescriptor location) {
     auto* entry = GetCountedEntryLabel(location);
     ASSERT(entry->IsBound());
     direct_link_entry_offsets.insert_or_assign(
+            location, static_cast<u32>(entry->GetLocation()));
+}
+
+void JitContext::RecordPendingFlagsEntry(LocationDescriptor location) {
+    auto* entry = GetCountedEntryLabel(location);
+    ASSERT(entry->IsBound());
+    pending_flags_entry_offsets.insert_or_assign(
             location, static_cast<u32>(entry->GetLocation()));
 }
 

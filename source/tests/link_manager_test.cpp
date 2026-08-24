@@ -19,6 +19,7 @@ using swift::runtime::backend::EncodeB;
 using swift::runtime::backend::EncodeBL;
 using swift::runtime::backend::Imm26Reachable;
 using swift::runtime::backend::LinkManager;
+using swift::runtime::backend::LinkFlagsBypassPatch;
 using swift::runtime::backend::LinkSignalPatchSite;
 using swift::runtime::backend::LinkSiteKey;
 using swift::runtime::backend::LinkSiteKind;
@@ -35,10 +36,10 @@ constexpr std::intptr_t kImm26Boundary = (std::intptr_t{1} << 27) - 4;
 
 static_assert(sizeof(LinkSiteKey) == 16);
 static_assert(sizeof(LinkSourceOwner) == 16);
-static_assert(sizeof(LinkSiteRecord) == 56);
-static_assert(sizeof(LinkSignalPatchSite) == 56);
-static_assert(sizeof(LinkTargetRecord) == 56);
-static_assert(sizeof(CodeRegion) == 32);
+static_assert(sizeof(LinkSiteRecord) == 64);
+static_assert(sizeof(LinkSignalPatchSite) == 88);
+static_assert(sizeof(LinkTargetRecord) == 64);
+static_assert(sizeof(CodeRegion) == 40);
 
 Config Arm64Config() {
     return Config{
@@ -312,4 +313,105 @@ TEST_CASE("signal delink deactivates before deferred invalidation resets state",
     const auto future_generation = manager.PublishTarget(
             kTarget, buffer->exec_data + 128, region.id);
     REQUIRE(manager.QueryTarget(kTarget)->generation == future_generation);
+}
+
+TEST_CASE("pending flags bypass rejects incompatible linked targets",
+          "[direct-link][manager][flags]") {
+    auto config = Arm64Config();
+    CodeCache cache{config, 1u << 20, FeatureSet{}, true};
+    const auto buffer = cache.AllocCode(256);
+    REQUIRE(buffer);
+    const auto& region = cache.GetRegion();
+    auto* bypass_rx = buffer->exec_data;
+    auto* bypass_rw = buffer->rw_data;
+    auto* first_rx = buffer->exec_data + 32;
+    auto* first_rw = buffer->rw_data + 32;
+    auto* second_rx = buffer->exec_data + 48;
+    auto* second_rw = buffer->rw_data + 48;
+    constexpr u32 kMergeHead = 0xd53b4200;
+    const auto skip_merge = EncodeB(12);
+    const auto first_bl = EncodeBL((buffer->exec_data + 128) - first_rx);
+    const auto second_bl = EncodeBL((buffer->exec_data + 128) - second_rx);
+    const auto first_direct = EncodeB((buffer->exec_data + 160) - first_rx);
+    const auto second_direct = EncodeB((buffer->exec_data + 176) - second_rx);
+    REQUIRE(skip_merge);
+    REQUIRE(first_bl);
+    REQUIRE(second_bl);
+    REQUIRE(first_direct);
+    REQUIRE(second_direct);
+    StoreInstruction(bypass_rw, *skip_merge);
+    StoreInstruction(first_rw, *first_bl);
+    StoreInstruction(second_rw, *second_bl);
+    buffer->Flush();
+
+    LinkManager manager;
+    const int owner_module{};
+    const int owner_allocation{};
+    const LinkSourceOwner owner{&owner_module, &owner_allocation};
+    constexpr u64 kFirstTarget = 0x601000;
+    constexpr u64 kSecondTarget = 0x602000;
+    const LinkSiteKey first_key{region.id, buffer->offset + 32};
+    const LinkSiteKey second_key{region.id, buffer->offset + 48};
+    const LinkFlagsBypassPatch bypass_patch{
+            .rx_site = bypass_rx,
+            .rw_site = bypass_rw,
+            .unlinked_instruction = kMergeHead,
+            .linked_branch = *skip_merge,
+    };
+    const LinkSignalPatchSite first_patch{
+            .region = region,
+            .rx_site = first_rx,
+            .rw_site = first_rw,
+            .unlinked_bl = *first_bl,
+            .flags_bypass = bypass_patch,
+    };
+    const LinkSignalPatchSite second_patch{
+            .region = region,
+            .rx_site = second_rx,
+            .rw_site = second_rw,
+            .unlinked_bl = *second_bl,
+            .flags_bypass = bypass_patch,
+    };
+    REQUIRE(manager.RegisterSite(first_key, kFirstTarget, owner, &first_patch));
+    REQUIRE(manager.RegisterSite(second_key, kSecondTarget, owner, &second_patch));
+
+    const auto first_generation = manager.PublishTarget(
+            kFirstTarget,
+            buffer->exec_data + 160,
+            region.id,
+            {},
+            buffer->exec_data + 160,
+            buffer->exec_data + 160);
+    auto second_generation = manager.PublishTarget(
+            kSecondTarget,
+            buffer->exec_data + 176,
+            region.id,
+            {},
+            buffer->exec_data + 176);
+    REQUIRE(manager.MarkLinked(first_key, first_generation, [&](const LinkSiteRecord&) {
+        return PatchDirectBranch(region, first_rx, first_rw, *first_direct);
+    }));
+    REQUIRE(LoadInstruction(bypass_rx) == *skip_merge);
+    REQUIRE(manager.MarkLinked(second_key, second_generation, [&](const LinkSiteRecord&) {
+        return PatchDirectBranch(region, second_rx, second_rw, *second_direct);
+    }));
+    REQUIRE(LoadInstruction(bypass_rx) == kMergeHead);
+
+    REQUIRE(manager.SignalInvalidateTarget(kSecondTarget).linked_sites == 1);
+    REQUIRE(manager.BeginTargetInvalidation(kSecondTarget).size() == 1);
+    second_generation = manager.PublishTarget(
+            kSecondTarget,
+            buffer->exec_data + 176,
+            region.id,
+            {},
+            buffer->exec_data + 176,
+            buffer->exec_data + 176);
+    REQUIRE(manager.MarkLinked(second_key, second_generation, [&](const LinkSiteRecord&) {
+        return PatchDirectBranch(region, second_rx, second_rw, *second_direct);
+    }));
+    REQUIRE(LoadInstruction(bypass_rx) == *skip_merge);
+
+    REQUIRE(manager.SignalInvalidateTarget(kFirstTarget).linked_sites == 1);
+    REQUIRE(LoadInstruction(first_rx) == *first_bl);
+    REQUIRE(LoadInstruction(bypass_rx) == *skip_merge);
 }

@@ -59,6 +59,16 @@ struct LinkSiteRecord {
     u64 target_generation{};
     LinkSiteState state{LinkSiteState::Unlinked};
     LinkSiteKind kind{LinkSiteKind::Unconditional};
+    u32 flags_bypass_offset{UINT32_MAX};
+    u32 flags_bypass_instruction{};
+    bool pending_flags_compatible{};
+};
+
+struct LinkFlagsBypassPatch {
+    void* rx_site{};
+    void* rw_site{};
+    u32 unlinked_instruction{};
+    u32 linked_branch{};
 };
 
 // Fully resolved at ordinary publication time. SignalInvalidation never
@@ -68,6 +78,7 @@ struct LinkSignalPatchSite {
     void* rx_site{};
     void* rw_site{};
     u32 unlinked_bl{};
+    LinkFlagsBypassPatch flags_bypass{};
 };
 
 // Host publication paired with the generation checked by the cold linker.
@@ -79,6 +90,7 @@ struct LinkTargetRecord {
     // a successfully patched site branches to direct_host_pc.
     void* host_pc{};
     void* direct_host_pc{};
+    void* pending_flags_host_pc{};
     CodeRegionId region_id{};
     u64 generation{};
     LinkSourceOwner target_owner{};
@@ -131,7 +143,8 @@ public:
                                     void* host_pc = nullptr,
                                     CodeRegionId region_id = 0,
                                     LinkSourceOwner target_owner = {},
-                                    void* direct_host_pc = nullptr);
+                                    void* direct_host_pc = nullptr,
+                                    void* pending_flags_host_pc = nullptr);
     [[nodiscard]] std::optional<LinkTargetRecord> QueryTarget(u64 guest_target) const;
     [[nodiscard]] std::optional<u64> QueryTargetGeneration(u64 guest_target) const;
     [[nodiscard]] bool ValidateTargetGeneration(u64 guest_target, u64 generation) const;
@@ -189,6 +202,7 @@ private:
         u64 generation{};
         void* host_pc{};
         void* direct_host_pc{};
+        void* pending_flags_host_pc{};
         CodeRegionId region_id{};
         LinkSourceOwner target_owner{};
         SignalTarget* signal_target{};
@@ -224,6 +238,8 @@ private:
     [[nodiscard]] bool ValidateMarkLocked(LinkSiteKey site,
                                           u64 expected_generation,
                                           LinkSiteRecord*& record);
+    void DisableFlagsBypassLocked(const LinkSiteRecord& record);
+    void TryEnableFlagsBypassLocked(LinkSiteRecord& record);
     [[nodiscard]] SignalTarget* FindSignalTarget(u64 guest_target) const noexcept;
     [[nodiscard]] SignalTarget* GetOrCreateSignalTargetLocked(u64 guest_target);
     void UnlinkSignalSiteLocked(SignalTarget& target, SignalSite* site);
@@ -263,5 +279,9 @@ private:
                                      void* rx_site,
                                      void* rw_site,
                                      u32 insn);
+[[nodiscard]] bool PatchCodeWord(const CodeRegion& region,
+                                 void* rx_site,
+                                 void* rw_site,
+                                 u32 insn);
 
 }  // namespace swift::runtime::backend

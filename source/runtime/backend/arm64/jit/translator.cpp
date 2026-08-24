@@ -780,6 +780,9 @@ JitTranslator::PrepareBlockState(ir::Block* block) {
     if (FlagsRegsEnabled() && region_edges_active && !split_flags_entry &&
         !BlockIsFlagsTransparent(block)) {
         context.RecordDirectLinkEntry(block->GetStartLocation().Value());
+        if (TargetKillsIncomingFlags(block->GetStartLocation())) {
+            context.RecordPendingFlagsEntry(block->GetStartLocation().Value());
+        }
     }
     flags_audit_block_edge = ClassifyFlagsAuditEdge(block->GetTerminal());
     if (region_edges_active) {

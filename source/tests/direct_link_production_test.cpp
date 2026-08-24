@@ -100,6 +100,54 @@ IntrusivePtr<Block> BuildConditionalSource(VAddr guest,
     return block;
 }
 
+void* TranslateFlagsKillingTarget(const std::shared_ptr<Module>& module,
+                                  VAddr guest) {
+    HIRBuilder builder{1, true};
+    auto* function = builder.AppendFunction(Location{guest}, Location{guest + 3});
+    const auto left = function->LoadImm(Imm{u8{7}}).SetType(ValueType::U8);
+    const auto right = function->LoadImm(Imm{u8{3}}).SetType(ValueType::U8);
+    const auto result = function->Sub(left, Operand{right}).SetType(ValueType::U8);
+    function->SaveFlags(result, Flags::All);
+    function->AdvancePC(Imm{u64{1}});
+    const auto condition = function->LocalCondSet(Cond::EQ).SetType(ValueType::U8);
+    auto [then_block, else_block] = builder.If(terminal::If{
+            condition,
+            terminal::LinkBlock{Location{guest + 1}},
+            terminal::LinkBlock{Location{guest + 2}},
+    });
+    builder.SetCurBlock(then_block);
+    function->EndBlock(terminal::ReturnToHost{});
+    builder.SetCurBlock(else_block);
+    function->EndBlock(terminal::ReturnToHost{});
+    function->EndFunction();
+    return TranslateIR(module, function);
+}
+
+void* TranslatePendingFlagsSource(const std::shared_ptr<Module>& module,
+                                  VAddr guest,
+                                  VAddr then_target,
+                                  VAddr else_target) {
+    HIRBuilder builder{1, true};
+    auto* function = builder.AppendFunction(Location{guest}, Location{guest + 2});
+    auto* body = builder.LinkBlock(
+            terminal::LinkBlock{Location{guest + 1}});
+    builder.SetCurBlock(body);
+    const auto selector = function->LoadUniform(
+            Uniform{8, ValueType::U8}).SetType(ValueType::U8);
+    const auto one = function->LoadImm(Imm{u8{1}}).SetType(ValueType::U8);
+    const auto result = function->Sub(selector, Operand{one}).SetType(ValueType::U8);
+    function->SaveFlags(result, Flags::All);
+    function->AdvancePC(Imm{u64{1}});
+    const auto condition = function->LocalCondSet(Cond::EQ).SetType(ValueType::U8);
+    function->EndBlock(terminal::If{
+            condition,
+            terminal::LinkBlock{Location{then_target}},
+            terminal::LinkBlock{Location{else_target}},
+    });
+    function->EndFunction();
+    return TranslateIR(module, function);
+}
+
 struct ProductionSite {
     u8* rx{};
     LinkSiteKey key{};
@@ -909,6 +957,144 @@ TEST_CASE("production conditional terminal links and delinks both arms independe
     REQUIRE(munmap(guest_memory, guest_size) == 0);
 #else
     SUCCEED("production conditional direct-link execution requires an AArch64 host");
+#endif
+}
+
+TEST_CASE("production direct links bypass a shared full flags merge",
+          "[direct-link][production][conditional][flags][smc]") {
+#if defined(__aarch64__)
+    ScopedEnvironment disk_cache{"SVM_JIT_CACHE", ""};
+    ScopedEnvironment flags_regs{"SVM_FLAGS_REGS", "1"};
+
+    const size_t page_size = static_cast<size_t>(getpagesize());
+    const size_t guest_size = 16 * page_size;
+    void* guest_memory = mmap(nullptr,
+                              guest_size,
+                              PROT_READ | PROT_WRITE,
+                              MAP_PRIVATE | MAP_ANON,
+                              -1,
+                              0);
+    REQUIRE(guest_memory != MAP_FAILED);
+    {
+        const VAddr source_guest = page_size + 0x100;
+        const VAddr then_guest = 5 * page_size + 0x100;
+        const VAddr else_guest = 9 * page_size + 0x100;
+        Config config{
+                .loc_start = 0,
+                .loc_end = guest_size,
+                .enable_jit = true,
+                .enable_asm_interp = false,
+                .has_local_operation = false,
+                .backend_isa = kArm64,
+                .uniform_buffer_size = 64,
+                .region_edges = true,
+                .global_opts = Optimizations::BlockLink,
+                .memory_base = guest_memory,
+                .guest_addr_mask = guest_size - 1,
+        };
+        AddressSpace space{config};
+        auto module = space.GetDefaultModule();
+
+        auto* then_code = TranslateFlagsKillingTarget(module, then_guest);
+        auto* else_code = TranslateFlagsKillingTarget(module, else_guest);
+        REQUIRE(then_code != nullptr);
+        REQUIRE(else_code != nullptr);
+        space.PushCodeCache(Location{then_guest}, then_code);
+        space.PushCodeCache(Location{else_guest}, else_code);
+        const auto then_target = space.GetLinkManager().QueryTarget(then_guest);
+        const auto else_target = space.GetLinkManager().QueryTarget(else_guest);
+        REQUIRE(then_target);
+        REQUIRE(else_target);
+        REQUIRE(then_target->pending_flags_host_pc != nullptr);
+        REQUIRE(else_target->pending_flags_host_pc != nullptr);
+
+        auto* source_code = static_cast<u8*>(TranslatePendingFlagsSource(
+                module, source_guest, then_guest, else_guest));
+        REQUIRE(source_code != nullptr);
+        space.PushCodeCache(Location{source_guest}, source_code);
+        const auto region = module->GetCodeRegion(source_code);
+        REQUIRE(region);
+        const auto sites = FindProductionSites(
+                space, *region, source_code, 512);
+        REQUIRE(sites.size() == 2);
+        const auto then_site = std::find_if(
+                sites.begin(), sites.end(), [&](const auto& site) {
+                    return site.record.guest_target == then_guest;
+                });
+        const auto else_site = std::find_if(
+                sites.begin(), sites.end(), [&](const auto& site) {
+                    return site.record.guest_target == else_guest;
+                });
+        REQUIRE(then_site != sites.end());
+        REQUIRE(else_site != sites.end());
+        REQUIRE(then_site->record.flags_bypass_offset != UINT32_MAX);
+        REQUIRE(then_site->record.flags_bypass_offset ==
+                else_site->record.flags_bypass_offset);
+        REQUIRE(then_site->record.flags_bypass_instruction ==
+                else_site->record.flags_bypass_instruction);
+
+        auto* pending_trampoline =
+                region->rx_base + region->pending_flags_trampoline_offset;
+        REQUIRE(DecodeBranchTarget(then_site->rx, LoadInsn(then_site->rx)) ==
+                reinterpret_cast<uintptr_t>(pending_trampoline));
+        REQUIRE(DecodeBranchTarget(else_site->rx, LoadInsn(else_site->rx)) ==
+                reinterpret_cast<uintptr_t>(pending_trampoline));
+        auto* bypass =
+                region->rx_base + then_site->record.flags_bypass_offset;
+        REQUIRE(DecodeBranchTarget(bypass, LoadInsn(bypass)) ==
+                reinterpret_cast<uintptr_t>(bypass + 3 * sizeof(u32)));
+
+        Runtime runtime{&space};
+        SetSelector(runtime, 1);
+        runtime.SetLocation(source_guest);
+        REQUIRE(runtime.Run() == HaltReason::CallHost);
+        REQUIRE(space.GetLinkManager().QuerySite(then_site->key)->state ==
+                LinkSiteState::Linked);
+        REQUIRE(space.GetLinkManager().QuerySite(else_site->key)->state ==
+                LinkSiteState::Unlinked);
+        REQUIRE(DecodeBranchTarget(then_site->rx, LoadInsn(then_site->rx)) ==
+                reinterpret_cast<uintptr_t>(
+                        then_target->pending_flags_host_pc));
+        REQUIRE(DecodeBranchTarget(bypass, LoadInsn(bypass)) ==
+                reinterpret_cast<uintptr_t>(bypass + 3 * sizeof(u32)));
+
+        SetSelector(runtime, 0);
+        runtime.SetLocation(source_guest);
+        REQUIRE(runtime.Run() == HaltReason::CallHost);
+        REQUIRE(space.GetLinkManager().QuerySite(else_site->key)->state ==
+                LinkSiteState::Linked);
+        REQUIRE(DecodeBranchTarget(else_site->rx, LoadInsn(else_site->rx)) ==
+                reinterpret_cast<uintptr_t>(
+                        else_target->pending_flags_host_pc));
+        REQUIRE(DecodeBranchTarget(bypass, LoadInsn(bypass)) ==
+                reinterpret_cast<uintptr_t>(bypass + 3 * sizeof(u32)));
+
+        space.InvalidateCodeRange(then_guest, then_guest + 1);
+        REQUIRE(DecodeBranchTarget(bypass, LoadInsn(bypass)) ==
+                reinterpret_cast<uintptr_t>(bypass + 3 * sizeof(u32)));
+        REQUIRE(DecodeBranchTarget(then_site->rx, LoadInsn(then_site->rx)) ==
+                reinterpret_cast<uintptr_t>(pending_trampoline));
+
+        auto then_block = BuildTarget(then_guest, 0x3333);
+        then_code = TranslateIR(module, then_block);
+        REQUIRE(then_code != nullptr);
+        space.PushCodeCache(Location{then_guest}, then_code);
+        const auto incompatible_target =
+                space.GetLinkManager().QueryTarget(then_guest);
+        REQUIRE(incompatible_target);
+        REQUIRE(incompatible_target->pending_flags_host_pc == nullptr);
+        SetSelector(runtime, 1);
+        runtime.SetLocation(source_guest);
+        REQUIRE(runtime.Run() == HaltReason::CallHost);
+        REQUIRE(space.GetLinkManager().QuerySite(then_site->key)->state ==
+                LinkSiteState::Linked);
+        REQUIRE(LoadInsn(bypass) == then_site->record.flags_bypass_instruction);
+        REQUIRE(DecodeBranchTarget(then_site->rx, LoadInsn(then_site->rx)) ==
+                reinterpret_cast<uintptr_t>(then_code));
+    }
+    REQUIRE(munmap(guest_memory, guest_size) == 0);
+#else
+    SUCCEED("production flags bypass execution requires an AArch64 host");
 #endif
 }
 

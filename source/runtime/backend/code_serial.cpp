@@ -569,6 +569,7 @@ void WriteUnit(BlobWriter& w, const SerialUnit& unit) {
         w.U32(b.code_offset);
         w.U64(b.guest_bytes_hash);
         w.U32(b.direct_code_offset);
+        w.U32(b.pending_flags_code_offset);
     }
     w.U32(static_cast<u32>(unit.relocs.size()));
     for (const auto& r : unit.relocs) {
@@ -585,6 +586,9 @@ void WriteUnit(BlobWriter& w, const SerialUnit& unit) {
         w.U32(site.code_offset);
         w.U64(site.guest_target);
         w.U8(site.kind);
+        w.U32(site.flags_bypass_offset);
+        w.U32(site.flags_bypass_resume_offset);
+        w.U32(site.flags_bypass_instruction);
     }
 }
 
@@ -608,13 +612,19 @@ bool ReadUnit(BlobReader& r, SerialUnit& unit) {
     unit.blocks.resize(count);
     for (auto& b : unit.blocks) {
         if (!r.U64(b.guest_start) || !r.U64(b.guest_end) || !r.U32(b.code_offset) ||
-            !r.U64(b.guest_bytes_hash) || !r.U32(b.direct_code_offset)) {
+            !r.U64(b.guest_bytes_hash) || !r.U32(b.direct_code_offset) ||
+            !r.U32(b.pending_flags_code_offset)) {
             return false;
         }
         if (b.code_offset >= code_size || b.guest_end < b.guest_start ||
             (b.direct_code_offset != UINT32_MAX &&
              ((b.direct_code_offset & 3u) != 0 ||
               b.direct_code_offset >= code_size))) {
+            return false;
+        }
+        if (b.pending_flags_code_offset != UINT32_MAX &&
+            ((b.pending_flags_code_offset & 3u) != 0 ||
+             b.pending_flags_code_offset >= code_size)) {
             return false;
         }
     }
@@ -632,20 +642,35 @@ bool ReadUnit(BlobReader& r, SerialUnit& unit) {
         rel.kind = static_cast<RelocKind>(kind);
         rel.use = static_cast<RelocUse>(use);
     }
-    if (!r.U32(count) || count > r.Remaining() / 13) {
+    if (!r.U32(count) || count > r.Remaining() / 25) {
         return false;
     }
     unit.link_sites.resize(count);
     u32 previous_offset{};
     bool first = true;
     for (auto& site : unit.link_sites) {
-        if (!r.U32(site.code_offset) || !r.U64(site.guest_target) || !r.U8(site.kind)) {
+        if (!r.U32(site.code_offset) || !r.U64(site.guest_target) ||
+            !r.U8(site.kind) || !r.U32(site.flags_bypass_offset) ||
+            !r.U32(site.flags_bypass_resume_offset) ||
+            !r.U32(site.flags_bypass_instruction)) {
             return false;
         }
         if ((site.code_offset & 3u) != 0 ||
             static_cast<size_t>(site.code_offset) + sizeof(u32) > code_size ||
             (!first && site.code_offset <= previous_offset)) {
             return false;
+        }
+        if (!site.ValidFlagsBypass(code_size)) {
+            return false;
+        }
+        if (site.HasFlagsBypass()) {
+            u32 instruction{};
+            std::memcpy(&instruction,
+                        unit.code.data() + site.flags_bypass_offset,
+                        sizeof(instruction));
+            if (instruction != site.flags_bypass_instruction) {
+                return false;
+            }
         }
         previous_offset = site.code_offset;
         first = false;

@@ -724,7 +724,10 @@ void RecordJitCacheUnit(const std::shared_ptr<backend::Module>& module,
     for (const auto& site : context.GetDirectLinkSites()) {
         link_sites.push_back({site.code_offset,
                               site.guest_target,
-                              static_cast<u8>(site.kind)});
+                              static_cast<u8>(site.kind),
+                              site.flags_bypass.code_offset,
+                              site.flags_bypass.resume_offset,
+                              site.flags_bypass_instruction});
     }
     cache->RecordUnit(module,
                       guest_start,
@@ -976,17 +979,26 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
             const auto offset = emitted_context->GetCodeOffset(guest);
             const auto direct_offset =
                     emitted_context->GetDirectLinkCodeOffset(guest);
+            const auto pending_flags_offset =
+                    emitted_context->GetPendingFlagsCodeOffset(guest);
             ASSERT(offset >= 0 && static_cast<size_t>(offset) < buffer.size);
             ASSERT(direct_offset >= 0 &&
                    static_cast<size_t>(direct_offset) < buffer.size);
+            ASSERT(pending_flags_offset < 0 ||
+                   static_cast<size_t>(pending_flags_offset) < buffer.size);
             auto* direct_host_pc = direct_offset == offset
                     ? nullptr
                     : buffer.exec_data + direct_offset;
+            auto* pending_flags_host_pc = pending_flags_offset < 0
+                    ? nullptr
+                    : buffer.exec_data + pending_flags_offset;
             {
                 PerfScope2 perf_pub_l2{GetPerfStats2().publish_l2};
                 (void)module->PublishLinkTarget(
                         ir::Location{guest}, buffer.exec_data + offset,
-                        buffer.exec_data, direct_host_pc);
+                        buffer.exec_data,
+                        direct_host_pc,
+                        pending_flags_host_pc);
                 mutable_address_space.PushCodeCache(guest, buffer.exec_data + offset);
             }
             cache_blocks.push_back({
@@ -996,6 +1008,9 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
                     .guest_bytes_hash = 0,
                     .direct_code_offset = direct_host_pc
                             ? static_cast<u32>(direct_offset)
+                            : UINT32_MAX,
+                    .pending_flags_code_offset = pending_flags_host_pc
+                            ? static_cast<u32>(pending_flags_offset)
                             : UINT32_MAX,
             });
             if (!module->GetModuleConfig().read_only) {
@@ -1267,7 +1282,10 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module,
             PerfScope2 perf_pub_disk{GetPerfStats2().publish_disk};
             const VAddr start = block->GetStartLocation().Value();
             const std::vector<backend::SerialBlock> cache_blocks{
-                    {start, block->GetEndLocation().Value(), 0, 0}};
+                    {.guest_start = start,
+                     .guest_end = block->GetEndLocation().Value(),
+                     .code_offset = 0,
+                     .guest_bytes_hash = 0}};
             RecordJitCacheUnit(
                     module, start, false, cache_blocks, buffer, *emitted_context);
         }

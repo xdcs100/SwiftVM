@@ -110,14 +110,19 @@ bool CodeCache::InitializeRegionTrampoline(LinkManager& manager,
     context->region = &region;
     context->return_host = return_host;
     context->dispatcher = dispatcher;
-    auto code = arm64::BuildRegionLinkTrampoline(config, context.get(), features);
-    const auto buffer = AllocCode(code.size());
+    auto trampoline =
+            arm64::BuildRegionLinkTrampoline(config, context.get(), features);
+    const auto buffer = AllocCode(trampoline.code.size());
     if (!buffer) {
         return false;
     }
-    std::memcpy(buffer->rw_data, code.data(), code.size());
+    std::memcpy(buffer->rw_data,
+                trampoline.code.data(),
+                trampoline.code.size());
     buffer->Flush();
-    region.trampoline_offset = buffer->offset;
+    region.trampoline_offset = buffer->offset + trampoline.canonical_offset;
+    region.pending_flags_trampoline_offset =
+            buffer->offset + trampoline.pending_flags_offset;
     region_link_context_ = std::move(context);
     return true;
 }
@@ -127,6 +132,14 @@ void* CodeCache::GetRegionTrampoline() const {
         return nullptr;
     }
     return region.rx_base + region.trampoline_offset;
+}
+
+void* CodeCache::GetPendingFlagsRegionTrampoline() const {
+    if (region.pending_flags_trampoline_offset ==
+        CodeRegion::kInvalidTrampolineOffset) {
+        return nullptr;
+    }
+    return region.rx_base + region.pending_flags_trampoline_offset;
 }
 
 void CodeCache::Init() {
@@ -141,6 +154,8 @@ void CodeCache::Init() {
             .rx_base = code_mem_mapped ? code_mem_mapped : code_mem->GetMemory(),
             .capacity = max_size,
             .trampoline_offset = CodeRegion::kInvalidTrampolineOffset,
+            .pending_flags_trampoline_offset =
+                    CodeRegion::kInvalidTrampolineOffset,
     };
 
     if (!read_only) {

@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#include <map>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -224,8 +225,7 @@ void JitDiskCache::RecordUnit(const std::shared_ptr<Module>& module,
 
     std::vector<u32> external_bl_offsets;
     external_bl_offsets.reserve(unit.link_sites.size());
-    std::vector<u32> normalized_bl;
-    normalized_bl.reserve(unit.link_sites.size());
+    std::map<u32, u32> normalized_words;
     if (!unit.link_sites.empty()) {
         // A serialized site list is also a defensive format check: only an
         // ARM64 BlockLink module may produce or revive these relocations.
@@ -238,7 +238,6 @@ void JitDiskCache::RecordUnit(const std::shared_ptr<Module>& module,
             stats.reject_scan.fetch_add(1, std::memory_order_relaxed);
             return;
         }
-        auto* trampoline = region->rx_base + region->trampoline_offset;
         u32 previous_offset{};
         bool first = true;
         for (const auto& site : unit.link_sites) {
@@ -254,13 +253,37 @@ void JitDiskCache::RecordUnit(const std::shared_ptr<Module>& module,
                 stats.reject_scan.fetch_add(1, std::memory_order_relaxed);
                 return;
             }
+            const bool has_flags_bypass = site.HasFlagsBypass();
+            if (!site.ValidFlagsBypass(code_size) ||
+                (has_flags_bypass &&
+                 region->pending_flags_trampoline_offset ==
+                         CodeRegion::kInvalidTrampolineOffset)) {
+                stats.reject_scan.fetch_add(1, std::memory_order_relaxed);
+                return;
+            }
+            auto* trampoline = region->rx_base +
+                    (has_flags_bypass
+                             ? region->pending_flags_trampoline_offset
+                             : region->trampoline_offset);
             const auto branch = EncodeBL(trampoline - rx_site);
             if (!branch) {
                 stats.reject_scan.fetch_add(1, std::memory_order_relaxed);
                 return;
             }
             external_bl_offsets.push_back(site.code_offset);
-            normalized_bl.push_back(*branch);
+            if (!normalized_words.emplace(site.code_offset, *branch).second) {
+                stats.reject_scan.fetch_add(1, std::memory_order_relaxed);
+                return;
+            }
+            if (has_flags_bypass) {
+                const auto [it, inserted] = normalized_words.emplace(
+                        site.flags_bypass_offset,
+                        site.flags_bypass_instruction);
+                if (!inserted && it->second != site.flags_bypass_instruction) {
+                    stats.reject_scan.fetch_add(1, std::memory_order_relaxed);
+                    return;
+                }
+            }
             previous_offset = site.code_offset;
             first = false;
         }
@@ -272,12 +295,12 @@ void JitDiskCache::RecordUnit(const std::shared_ptr<Module>& module,
     // snapshot is independent of Linked/Far/Unlinked runtime state.
     unit.code.resize(code_size);
     size_t cursor{};
-    for (size_t i = 0; i < unit.link_sites.size(); ++i) {
-        const size_t offset = unit.link_sites[i].code_offset;
+    for (const auto& [word_offset, instruction] : normalized_words) {
+        const size_t offset = word_offset;
         if (offset > cursor) {
             std::memcpy(unit.code.data() + cursor, rw_data + cursor, offset - cursor);
         }
-        std::memcpy(unit.code.data() + offset, &normalized_bl[i], sizeof(u32));
+        std::memcpy(unit.code.data() + offset, &instruction, sizeof(u32));
         cursor = offset + sizeof(u32);
     }
     if (cursor < code_size) {
@@ -389,7 +412,10 @@ bool JitDiskCache::ReviveUnit(const std::shared_ptr<Module>& module, const Seria
         if (block.code_offset % 4 != 0 || block.code_offset >= unit.code.size() ||
             (block.direct_code_offset != UINT32_MAX &&
              ((block.direct_code_offset & 3u) != 0 ||
-              block.direct_code_offset >= unit.code.size()))) {
+              block.direct_code_offset >= unit.code.size())) ||
+            (block.pending_flags_code_offset != UINT32_MAX &&
+             ((block.pending_flags_code_offset & 3u) != 0 ||
+              block.pending_flags_code_offset >= unit.code.size()))) {
             stats.reject_reloc.fetch_add(1, std::memory_order_relaxed);
             dirty = true;
             return false;
@@ -401,12 +427,25 @@ bool JitDiskCache::ReviveUnit(const std::shared_ptr<Module>& module, const Seria
         return false;
     }
     for (const auto& site : unit.link_sites) {
+        const bool has_flags_bypass = site.HasFlagsBypass();
         if ((site.code_offset & 3u) != 0 ||
             static_cast<size_t>(site.code_offset) + sizeof(u32) > unit.code.size() ||
-            site.kind >= static_cast<u8>(LinkSiteKind::Count)) {
+            site.kind >= static_cast<u8>(LinkSiteKind::Count) ||
+            !site.ValidFlagsBypass(unit.code.size())) {
             stats.reject_reloc.fetch_add(1, std::memory_order_relaxed);
             dirty = true;
             return false;
+        }
+        if (has_flags_bypass) {
+            u32 instruction{};
+            std::memcpy(&instruction,
+                        unit.code.data() + site.flags_bypass_offset,
+                        sizeof(instruction));
+            if (instruction != site.flags_bypass_instruction) {
+                stats.reject_reloc.fetch_add(1, std::memory_order_relaxed);
+                dirty = true;
+                return false;
+            }
         }
     }
 
@@ -445,10 +484,22 @@ bool JitDiskCache::ReviveUnit(const std::shared_ptr<Module>& module, const Seria
             dirty = true;
             return false;
         }
-        auto* trampoline = direct_region->rx_base + direct_region->trampoline_offset;
         unlinked_bl.reserve(unit.link_sites.size());
         for (const auto& site : unit.link_sites) {
             auto* rx_site = buffer.exec_data + site.code_offset;
+            const bool has_flags_bypass = site.HasFlagsBypass();
+            const u32 trampoline_offset = has_flags_bypass
+                    ? direct_region->pending_flags_trampoline_offset
+                    : direct_region->trampoline_offset;
+            if (trampoline_offset == CodeRegion::kInvalidTrampolineOffset) {
+                if (auto* cache = module->GetCodeCache(buffer.exec_data)) {
+                    cache->FreeCode(buffer.exec_data);
+                }
+                stats.reject_reloc.fetch_add(1, std::memory_order_relaxed);
+                dirty = true;
+                return false;
+            }
+            auto* trampoline = direct_region->rx_base + trampoline_offset;
             const auto branch = EncodeBL(trampoline - rx_site);
             if (!branch) {
                 if (auto* cache = module->GetCodeCache(buffer.exec_data)) {
@@ -459,6 +510,15 @@ bool JitDiskCache::ReviveUnit(const std::shared_ptr<Module>& module, const Seria
                 return false;
             }
             std::memcpy(buffer.rw_data + site.code_offset, &*branch, sizeof(*branch));
+            if (has_flags_bypass) {
+                const auto linked_branch = EncodeB(
+                        static_cast<intptr_t>(site.flags_bypass_resume_offset) -
+                        static_cast<intptr_t>(site.flags_bypass_offset));
+                ASSERT(linked_branch);
+                std::memcpy(buffer.rw_data + site.flags_bypass_offset,
+                            &*linked_branch,
+                            sizeof(*linked_branch));
+            }
             unlinked_bl.push_back(*branch);
         }
     }
@@ -549,11 +609,25 @@ bool JitDiskCache::ReviveUnit(const std::shared_ptr<Module>& module, const Seria
             auto* rx_site = buffer.exec_data + site.code_offset;
             auto* rw_site = buffer.rw_data + site.code_offset;
             const LinkSiteKey key{direct_region->id, buffer.offset + site.code_offset};
+            LinkFlagsBypassPatch flags_bypass_patch{};
+            if (site.HasFlagsBypass()) {
+                const auto linked_branch = EncodeB(
+                        static_cast<intptr_t>(site.flags_bypass_resume_offset) -
+                        static_cast<intptr_t>(site.flags_bypass_offset));
+                ASSERT(linked_branch);
+                flags_bypass_patch = {
+                        .rx_site = buffer.exec_data + site.flags_bypass_offset,
+                        .rw_site = buffer.rw_data + site.flags_bypass_offset,
+                        .unlinked_instruction = site.flags_bypass_instruction,
+                        .linked_branch = *linked_branch,
+                };
+            }
             const LinkSignalPatchSite signal_patch{
                     .region = *direct_region,
                     .rx_site = rx_site,
                     .rw_site = rw_site,
                     .unlinked_bl = unlinked_bl[i],
+                    .flags_bypass = flags_bypass_patch,
             };
             if (!address_space.GetLinkManager().RegisterSite(
                         key,
@@ -586,10 +660,15 @@ bool JitDiskCache::ReviveUnit(const std::shared_ptr<Module>& module, const Seria
         auto* direct_host_pc = block.direct_code_offset == UINT32_MAX
                 ? nullptr
                 : buffer.exec_data + block.direct_code_offset;
+        auto* pending_flags_host_pc =
+                block.pending_flags_code_offset == UINT32_MAX
+                ? nullptr
+                : buffer.exec_data + block.pending_flags_code_offset;
         (void)module->PublishLinkTarget(ir::Location{block.guest_start},
                                         buffer.exec_data + block.code_offset,
                                         buffer.exec_data,
-                                        direct_host_pc);
+                                        direct_host_pc,
+                                        pending_flags_host_pc);
         address_space.PushCodeCache(ir::Location{block.guest_start},
                                     buffer.exec_data + block.code_offset);
         if (!module->GetModuleConfig().read_only) {

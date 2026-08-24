@@ -307,7 +307,10 @@ private:
 
     // Terminals
     void EmitTerminal(const ir::Terminal &terminal,
-                      LinkSiteKind direct_link_kind = LinkSiteKind::Unconditional);
+                      LinkSiteKind direct_link_kind = LinkSiteKind::Unconditional,
+                      DirectLinkFlagsBypass flags_bypass = {});
+    [[nodiscard]] bool CanBypassTerminalFlagsMerge(
+            const ir::Terminal& terminal) const;
     void PrepareRegionEdges(ir::HIRFunction* function);
     void CollectRegionTargets(const ir::Terminal& terminal,
                               std::vector<u64>& targets) const;
@@ -359,8 +362,8 @@ private:
     // Merge pending guest flags kept in host NZCV into the flags register.
     // B0 tags the existing sequence only; the tags never affect emission.
     void MergeNZCV();
-    void MergeNZCV(FlagsRegsAuditMergeCause cause,
-                   FlagsRegsAuditEdgeKind edge);
+    DirectLinkFlagsBypass MergeNZCV(FlagsRegsAuditMergeCause cause,
+                                    FlagsRegsAuditEdgeKind edge);
     void EmitNZCVMerge(u64 requested, const Register& scratch);
     void PublishFlagsToken();
 

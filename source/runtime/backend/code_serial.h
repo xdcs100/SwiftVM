@@ -139,6 +139,7 @@ struct SerialBlock {
     u32 code_offset{};
     u64 guest_bytes_hash{};
     u32 direct_code_offset{UINT32_MAX};
+    u32 pending_flags_code_offset{UINT32_MAX};
 };
 
 // One direct-link branch site inside the unit. The code byte at
@@ -150,6 +151,27 @@ struct SerialLinkSite {
     u32 code_offset{};
     u64 guest_target{};
     u8 kind{};
+    u32 flags_bypass_offset{UINT32_MAX};
+    u32 flags_bypass_resume_offset{UINT32_MAX};
+    u32 flags_bypass_instruction{};
+
+    [[nodiscard]] bool HasFlagsBypass() const {
+        return flags_bypass_offset != UINT32_MAX;
+    }
+
+    [[nodiscard]] bool ValidFlagsBypass(std::size_t code_size) const {
+        if (!HasFlagsBypass()) {
+            return flags_bypass_resume_offset == UINT32_MAX &&
+                   flags_bypass_instruction == 0;
+        }
+        const auto begin = static_cast<std::size_t>(flags_bypass_offset);
+        const auto resume = static_cast<std::size_t>(flags_bypass_resume_offset);
+        return flags_bypass_resume_offset != UINT32_MAX &&
+               (flags_bypass_offset & 3u) == 0 &&
+               begin + 3 * sizeof(u32) <= code_size &&
+               resume == begin + 3 * sizeof(u32) &&
+               resume <= code_offset;
+    }
 };
 
 struct SerialUnit {
@@ -223,7 +245,7 @@ struct ValidityKey {
     bool operator==(const ValidityKey&) const = default;
 };
 
-constexpr u64 kCacheFormatVersion = 6;
+constexpr u64 kCacheFormatVersion = 7;
 
 u64 HashBytes(const void* data, std::size_t size, u64 seed);
 u64 HashU64(u64 value, u64 seed);

@@ -423,17 +423,21 @@ TEST_CASE("disk cache scanner keeps move-wide constants and rejects PC-relative 
     }
 }
 
-TEST_CASE("disk cache v6 serializes direct entries and arbitrary link-site records",
+TEST_CASE("disk cache v7 serializes flags contracts and link-site records",
           "[direct-link][jit-cache][serializer]") {
     SerialUnit input{};
     input.guest_start = 0x1000;
     input.feature_hash = 0x123456789abcdef0ull;
-    input.code.resize(32, 0);
-    input.blocks.push_back({0x1000, 0x1004, 0, 0x1234, 16});
+    input.code.resize(64, 0);
+    input.blocks.push_back({0x1000, 0x1004, 0, 0x1234, 16, 20});
+    constexpr u32 kMergeHead = 0xd53b4200;
+    std::memcpy(input.code.data() + 24, &kMergeHead, sizeof(kMergeHead));
     input.link_sites = {
-            {4, 0x2000, static_cast<u8>(LinkSiteKind::ConditionalThen)},
-            {8, 0x3000, static_cast<u8>(LinkSiteKind::ConditionalElse)},
-            {20, 0x4000, static_cast<u8>(LinkSiteKind::SwitchArm)},
+            {40, 0x2000, static_cast<u8>(LinkSiteKind::ConditionalThen),
+             24, 36, kMergeHead},
+            {44, 0x3000, static_cast<u8>(LinkSiteKind::ConditionalElse),
+             24, 36, kMergeHead},
+            {52, 0x4000, static_cast<u8>(LinkSiteKind::SwitchArm)},
     };
     BlobWriter writer;
     WriteUnit(writer, input);
@@ -446,11 +450,18 @@ TEST_CASE("disk cache v6 serializes direct entries and arbitrary link-site recor
     REQUIRE(output.code == input.code);
     REQUIRE(output.blocks.size() == 1);
     REQUIRE(output.blocks[0].direct_code_offset == 16);
+    REQUIRE(output.blocks[0].pending_flags_code_offset == 20);
     REQUIRE(output.link_sites.size() == input.link_sites.size());
     for (size_t i = 0; i < input.link_sites.size(); ++i) {
         REQUIRE(output.link_sites[i].code_offset == input.link_sites[i].code_offset);
         REQUIRE(output.link_sites[i].guest_target == input.link_sites[i].guest_target);
         REQUIRE(output.link_sites[i].kind == input.link_sites[i].kind);
+        REQUIRE(output.link_sites[i].flags_bypass_offset ==
+                input.link_sites[i].flags_bypass_offset);
+        REQUIRE(output.link_sites[i].flags_bypass_resume_offset ==
+                input.link_sites[i].flags_bypass_resume_offset);
+        REQUIRE(output.link_sites[i].flags_bypass_instruction ==
+                input.link_sites[i].flags_bypass_instruction);
     }
 }
 

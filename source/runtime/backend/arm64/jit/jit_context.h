@@ -26,12 +26,23 @@ using namespace vixl::aarch64;
 struct NoneReg {};
 using CPUReg = boost::variant<NoneReg, Register, VRegister>;
 
-// Allocation-relative description retained after emission so disk-cache v4
+struct DirectLinkFlagsBypass {
+    u32 code_offset{UINT32_MAX};
+    u32 resume_offset{UINT32_MAX};
+
+    [[nodiscard]] bool Valid() const {
+        return code_offset != UINT32_MAX && resume_offset != UINT32_MAX;
+    }
+};
+
+// Allocation-relative description retained after emission so disk cache
 // can normalize every site without reading a concurrently patched code word.
 struct DirectLinkSiteInfo {
     u32 code_offset{};
     u64 guest_target{};
     LinkSiteKind kind{LinkSiteKind::Unconditional};
+    DirectLinkFlagsBypass flags_bypass{};
+    u32 flags_bypass_instruction{};
 };
 
 class JitContext : DeleteCopyAndMove {
@@ -94,7 +105,8 @@ public:
     void Forward(ir::Location location,
                  Label* backedge_exit = nullptr,
                  Label* self_target = nullptr,
-                 LinkSiteKind direct_link_kind = LinkSiteKind::Unconditional);
+                 LinkSiteKind direct_link_kind = LinkSiteKind::Unconditional,
+                 DirectLinkFlagsBypass flags_bypass = {});
     void ForwardLocal(ir::Location location,
                       Label* cycle_exit = nullptr,
                       bool fallthrough = false,
@@ -157,7 +169,10 @@ public:
     // A linked canonical-state edge can bypass the published flags veneer.
     [[nodiscard]] ptrdiff_t GetDirectLinkCodeOffset(
             LocationDescriptor location) const;
+    [[nodiscard]] ptrdiff_t GetPendingFlagsCodeOffset(
+            LocationDescriptor location) const;
     void RecordDirectLinkEntry(LocationDescriptor location);
+    void RecordPendingFlagsEntry(LocationDescriptor location);
     [[nodiscard]] bool IsUniform(const Register& reg);
     [[nodiscard]] bool IsSpilled(const ir::Value& value) {
         return reg_alloc.ValueType(value) == RegAlloc::MEM;
@@ -263,7 +278,8 @@ private:
     void RecordHotSpillReload();
     void RecordHotSpillWriteback();
     [[nodiscard]] bool EmitDirectLink(ir::Location location,
-                                      LinkSiteKind kind);
+                                      LinkSiteKind kind,
+                                      DirectLinkFlagsBypass flags_bypass = {});
 
     // --- RegAlloc::MEM (spilled value) support ---------------------------
     // A value the linear scan could not keep in a host register lives in
@@ -357,6 +373,7 @@ private:
     std::array<ir::HostGPR, ARM64_MAX_X_REGS> spilled_fprs;
     std::map<LocationDescriptor, Label> labels;
     std::map<LocationDescriptor, u32> direct_link_entry_offsets;
+    std::map<LocationDescriptor, u32> pending_flags_entry_offsets;
     std::map<LocationDescriptor, Label> internal_labels;
     // FLAGS_REGS L2 veneer lands here, immediately before the entry counter.
     // Internal taken edges still use internal_labels after the counter, matching
