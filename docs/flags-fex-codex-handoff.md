@@ -834,10 +834,19 @@ peepholes.
   host instructions fall `4,914,012 -> 4,804,966` (`-109,046`, `-2.219083%`): 163 PCs shrink,
   three grow and 2,627 are unchanged. Move-class instructions rise `1,291,180 -> 1,313,749`, but
   the fixed-home moves replace a larger uniform-state load/store cost. The final Mac static screen
-  completes in 1.206s, covers 558 PCs and preserves its existing PPM oracle. Disk-cache format is
+  completes in 1.2-1.3s, covers 558 PCs and preserves its existing PPM oracle. Disk-cache format is
   v8 because cached code embeds the resident-XMM ABI. Focused resident-XMM, page-fault and cache
   serializer validation passes 909 assertions; the cross-process v8 cache round trip also passes.
   This stage makes no wall-time claim and ran no long benchmark, stress test or full suite.
+- Replacing the level-2 R8-R11 pins with R12-R15 kept the same 12-register pressure and exact PPM,
+  but the comparable retained-entry subset grew by 4,087 instructions (`+0.145456%`). The map and
+  its temporary captures were removed; do not treat guest ABI lifetime alone as a pin-selection
+  proof.
+- A partial-NZCV direct-link prototype deferred its three-instruction merge until a compatible
+  overwrite-first target linked. The bounded density census found 16 partial arms in eight shared
+  merge groups, but none of their targets satisfied the existing complete-overwrite contract;
+  the weighted saving upper bound was zero. The implementation, tests and census logging were
+  removed rather than retaining an unused cross-unit ABI extension.
 
 ## Orb loop
 
