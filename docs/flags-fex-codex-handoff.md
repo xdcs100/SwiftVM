@@ -59,6 +59,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 | `e2f9527` | Preserve identity-mode `[base + index]` in memory IR and use the AArch64 register-offset encoding directly |
 | `4821182` | Fold fault-exact identity-mode stack pushes into one AArch64 pre-index store; retain biased-memory and base/data-overlap paths |
 | `6b10c73` | Share one materialized 4 KiB guest page base across encodable absolute memory addresses and make the proven path default |
+| `e10fec4` | Let one audited consumer reuse a pinned W view for every operand occurrence and feed callee-saved pinned values directly into sign extension |
 
 Hot files:
 
@@ -348,6 +349,19 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   `-227,602,716` with 67 PCs smaller and none larger. STREAM raw/equal-entry are `-152` / `-216`;
   CoreMark raw/equal-entry are `-147` / `-216`. PPM, c-ray IDAT, STREAM validation, CoreMark CRC
   and spill gates remain exact.
+- The default x86 GPR map is not full pin: `SVM_X86_PIN_EXT=2` keeps 12 of 16 architectural GPRs
+  resident; only opt-in level 3 adds R12-R15 in x6-x9. The prior level-3 audit grew 4,400-unit host
+  code by 3.89%, raised spill memory operations from 5,425 to 14,071 and lost 10.18% on loaded
+  CoreMark, so it remains rejected. In the retained formal smallpt logs, 72,003,699 / 86,980,059
+  weighted SetHostGPR instances and 123,911,206 / 129,472,617 GetHostGPR instances already emit
+  zero bytes; the remaining emitted moves are about 14.98M / 5.56M host instructions.
+- A single audited consumer may now name the same pinned W read more than once, so `test eax,eax`
+  lowers directly to an `ANDS` using w22 instead of first extracting a snapshot. Callee-saved
+  pinned byte/word/dword reads also feed `SXTB/SXTH/SXTW` directly. A later second consumer keeps
+  the materialized snapshot. Existing formal entries attribute 2,054,236 + 706,866 executions to
+  the two proven hot shapes; this estimated 2,761,102-instruction reduction is not folded into the
+  headline formal total because long benchmark reruns were stopped. Mac focused validation passes
+  6 cases / 429 assertions; no full suite was run.
 - FEX-aligned RE=0 same-harness refresh for formal smallpt: SVM host/guest
   `3.335622 → 3.267832`; the landed stages fold this to about `2.478306`. With unchanged FEX
   `1.549`, ratio is `2.153× → 1.600×`. The earlier
@@ -539,23 +553,28 @@ largest remaining per-op host responsibilities are StoreUniform 82.41M, VecFMulS
 LoadMemory 76.55M, GetOperand 65.87M, VecFAddScalar64 58.03M, LoadUniform 56.33M and
 StoreMemory 51.64M.
 
-1. **smallpt remaining link** — covered link is now about 6.6%. Region/cycle tails are about
+1. **Pinned GPR residuals** — keep level 2 as the performance default. Recount actual emitted bytes,
+   not GetHost/SetHost IR. The largest remaining SetHost moves in the retained log implement real
+   guest copies such as `mov rbp,rdi` and `mov rbx,rdx`; deleting them requires architectural
+   register renaming, not another fixed-home peephole. Continue only with a consumer that can read
+   the fixed home directly while retaining snapshot and helper-clobber proofs.
+2. **smallpt remaining link** — covered link is now about 6.6%. Region/cycle tails are about
    2.1%; their acquire poll and branch across per-block cold stubs are load-bearing. Audit the
    roughly 1.26% remaining return-L1 static sequences separately; address formation is now one
    `BFI`, and `LDP + CMP + CSEL + BR` has no obvious base-ISA fusion. Public host exit executes
    only 139 times. The remaining
    `SetLocation` tail is dynamic or has a later observer and must not inherit the trailing-constant proof.
-2. **Remaining FPR publication** — SetHostFPR is about 30,193,585 (`2.848%`), with about
+3. **Remaining FPR publication** — SetHostFPR is about 30,193,585 (`2.848%`), with about
    8,317,804 (`0.785%`) full writes. Low-load/high-zero remain 10,641,609 (`1.004%`) /
    10,093,484 (`0.952%`); all-compatible high-zero materialization is gone. About 8.29M adjacent
    candidates were rejected by exact fault/alias/home gates and must not be recovered heuristically.
-3. **Remaining composite EA** — identity `[base+imm]`, `[base+index]` and matching scaled-index
+4. **Remaining composite EA** — identity `[base+imm]`, `[base+index]` and matching scaled-index
    forms are now direct. Remaining materialized forms involve bias/32-bit wrapping, shifts or an
    AArch64-unencodable scale; require an exact encoding and wrap proof before extending the gate.
-4. **CoreMark remaining truncations** — raw BitExtract is no longer a pool. Only reopen 8/16-bit
+5. **CoreMark remaining truncations** — raw BitExtract is no longer a pool. Only reopen 8/16-bit
    cases with a consumer-specific physical-high proof and the U16 helper regression in the gate.
-5. **SHA valid workload first** — fix or replace the current OpenSSL guest path that PageFatals before hashing, then redo the boundary census. Do not bypass guest fault semantics.
-6. **PF/AF dedicated GPR is closed** until a new canonical park/recovery carrier yields a nonzero mechanical saving; the current audit is strictly negative.
+6. **SHA valid workload first** — fix or replace the current OpenSSL guest path that PageFatals before hashing, then redo the boundary census. Do not bypass guest fault semantics.
+7. **PF/AF dedicated GPR is closed** until a new canonical park/recovery carrier yields a nonzero mechanical saving; the current audit is strictly negative.
 7. **Do not** grow the default region window again for coremark (64 == 128). Other benches might still want 128 **after** the lazy fix.
 
 ## Orb loop

@@ -481,6 +481,25 @@ ON，`SVM_CONST_ADDR_CACHE=0` 可回退。
 
 二十九项合计使正式 smallpt 默认 region host 减少 337,269,455（25.5188%）。
 
+### Pinned GPR direct consumers
+
+默认 `SVM_X86_PIN_EXT=2` 固定 RAX/RCX/RDX/RBX/RSP/RBP/RSI/RDI/R8-R11，共 12 个
+x86 GPR；R12-R15 只在 level 3 固定到 x6-x9。W60 已证明 level 3 会使 4,400-unit host
+代码增加 3.89%、spill memory operation 从 5,425 增至 14,071，并使受载 CoreMark 比
+level 2 下降 10.18%，因此不翻默认。
+
+已有正式 smallpt 日志中，SetHostGPR 的 86,980,059 次加权 IR 有 72,003,699 次发码为零，
+实际剩 14,976,360 条 host move；GetHostGPR 的 129,472,617 次加权 IR 有 123,911,206 次
+发码为零，实际剩 5,561,411 条。提交 `e10fec4` 允许同一个 audited consumer 在多个 operand
+位置直接读取 pinned W view，并让 callee-saved pinned U8/U16/U32 直接进入
+`SXTB/SXTH/SXTW`。若同一快照还有后续 consumer，仍保留原 `UBFX`。
+
+旧正式 entries 对 `test eax,eax` 和 pinned-W sign extension 两个已证明热块的权重分别为
+2,054,236 / 706,866，机械上对应至少减少 2,761,102 条 host 指令（约为当前正式总量的
+0.2805%）。遵照停止长时间压力测试的要求，本轮未重跑正式 smallpt，故不修改
+984,381,707 和 1.600× 的正式标题数据。Mac 增量构建通过；3 个新用例与 3 个相邻 GPR
+回归共 6 cases / 429 assertions 通过，未运行完整套件。
+
 ## 否决项
 
 直接放开 Linux AFP scalar insert 曾使 c-ray host 134,666,060→132,076,475，
@@ -635,20 +654,23 @@ saved-flags compound CondSet 的 `HI/LS` 与 `GE/LT` 两指令原型通过 88-as
 责任最高的是 StoreUniform 82.41M、VecFMulScalar64 78.89M、LoadMemory 76.55M、GetOperand
 65.87M、VecFAddScalar64 58.03M、LoadUniform 56.33M 和 StoreMemory 51.64M。
 
-1. 当前正式 smallpt 的已覆盖 link 约 6.6%。region/cycle link tail 约 2.1%，其中
+1. GPR pin 应按实际 host bytes 而不是 IR 数量判断。level 2 保持 12/16 固定映射；level 3
+   的 spill/host 膨胀已经否决。剩余 SetHost 热 move 多数是 guest 架构寄存器之间的真实复制，
+   只能继续寻找 consumer 直接读取 fixed home 的形态，不能把真实 `mov` 当 publication 删除。
+2. 当前正式 smallpt 的已覆盖 link 约 6.6%。region/cycle link tail 约 2.1%，其中
    acquire poll 与跨本块 cold stub 的目标跳转不可直接删除；
    七条 return-L1 静态序列约 1.26%，地址形成已缩为 `BFI`，剩余
    `LDP + CMP + CSEL + BR` 没有明确的基础 ISA 融合机会。公开 host exit 仍仅 139 次。
    剩余 `SetLocation` 均为动态
    目标或后面仍有观察点，不能继承块尾常量证明。
-2. 剩余 `SetHostFPR` 约为 30,193,585（2.848%），其中完整写约 8,317,804（0.785%）。
+3. 剩余 `SetHostFPR` 约为 30,193,585（2.848%），其中完整写约 8,317,804（0.785%）。
    low-64 `LoadMemory` 与 high-64 zero 分别余 10,641,609（1.004%）/ 10,093,484
    （0.952%）；所有 use 都兼容的 high-zero 常量物化已经消除，剩余数值是 publication IR 次数。
    相邻池中约
    8.29M 次因 fault/alias/fixed-home 门拒绝，不为继续扩池放宽精确状态边界。
-3. identity `[base+imm]`、`[base+index]` 与 access-size 匹配的 scaled index 已直接进入
+4. identity `[base+imm]`、`[base+index]` 与 access-size 匹配的 scaled index 已直接进入
    memory emitter。剩余复合 EA 涉及 bias/32-bit wrapping、shift 或 AArch64 不可编码的
    scale；只有同时给出 encoding 与 wrap 证明才扩展。
-4. CoreMark 的 8/16-bit truncation 仍要求 consumer-specific 物理高位证明，并保留 U16
+5. CoreMark 的 8/16-bit truncation 仍要求 consumer-specific 物理高位证明，并保留 U16
    CallLambda 回归门。
-5. SHA 必须先换成能真正进入 hashing 的合法 workload；不使用当前 PageFatal 前的路径计数。
+6. SHA 必须先换成能真正进入 hashing 的合法 workload；不使用当前 PageFatal 前的路径计数。
