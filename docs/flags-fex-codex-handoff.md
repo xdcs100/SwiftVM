@@ -60,6 +60,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 | `4821182` | Fold fault-exact identity-mode stack pushes into one AArch64 pre-index store; retain biased-memory and base/data-overlap paths |
 | `6b10c73` | Share one materialized 4 KiB guest page base across encodable absolute memory addresses and make the proven path default |
 | `e10fec4` | Let one audited consumer reuse a pinned W view for every operand occurrence and feed callee-saved pinned values directly into sign extension |
+| `7620306` | Store a sole narrow pinned GPR read directly from its fixed W home while preserving snapshot and address-use semantics |
 | `2d86a6e` | Screen candidates with bounded short shape runs and retained formal weights before promoting them to long benchmarks |
 
 Hot files:
@@ -378,6 +379,14 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   the two proven hot shapes; this estimated 2,761,102-instruction reduction is not folded into the
   headline formal total because long benchmark reruns were stopped. Mac focused validation passes
   6 cases / 429 assertions; no full suite was run.
+- A sole U8/U16/U32 pinned read used as the value of an ordinary `StoreMemory` now stores directly
+  from its fixed W home. Address reuse, a later value use, an intervening write to that home, U64
+  values and TSO stores keep the materialized snapshot. The local Release `4 8 6` short screen has
+  byte-identical PPM output and identical 3,250-PC / 3,502-version shapes; the strict common set is
+  `-852,490` weighted host instructions (`-0.083737%`), with all top-20 PCs present. Its
+  Mac-to-retained-Orb host coverage is only 98.362170%, below the 99.9% promotion gate, so this is
+  recorded as a directional screen rather than a formal result. Focused validation passes 5 cases /
+  8 assertions.
 - FEX-aligned RE=0 same-harness refresh for formal smallpt: SVM host/guest
   `3.335622 → 3.267832`; the landed stages fold this to about `2.478306`. With unchanged FEX
   `1.549`, ratio is `2.153× → 1.600×`. The earlier
@@ -493,6 +502,9 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 - INC leftover C is live; do not treat INC as covering CF; do not copy C at INC entry (halt reason 2).
 - `kMaxFuncBlocks=128`. `lazy_budget < 128` used to make **128 eager**. Keep `<=`. Never raise default window past 128 without raising the cap **and** keeping published-L2 skip.
 - A faulting full-width `LoadMemory` may publish directly into its pinned home because the fault does not commit the destination. Partial/narrow writes and any path rejected by the existing local observer, conflict, or liveness proof must keep the real publication instruction.
+- An ordinary `StoreMemory` may read a pinned W home directly only when an offset-zero U8/U16/U32
+  `GetHostGPR` has exactly that store-value use and no intervening write to the home. Address uses,
+  later uses, U64 values and TSO stores keep the snapshot instruction.
 - A low32 copy may skip `BitExtract` only when its sole use is the immediately following
   `ZeroExtend32To64`; the wrapper must still emit a W move and keep all later uses.
 - A width round trip may substitute the original U32 SSA only for
@@ -572,8 +584,10 @@ StoreMemory 51.64M.
 1. **Pinned GPR residuals** — keep level 2 as the performance default. Recount actual emitted bytes,
    not GetHost/SetHost IR. The largest remaining SetHost moves in the retained log implement real
    guest copies such as `mov rbp,rdi` and `mov rbx,rdx`; deleting them requires architectural
-   register renaming, not another fixed-home peephole. Continue only with a consumer that can read
-   the fixed home directly while retaining snapshot and helper-clobber proofs.
+   register renaming, not another fixed-home peephole. Direct ordinary StoreMemory payload reads
+   are closed. Continue only with another consumer that can read the fixed home directly while
+   retaining snapshot, width and helper-clobber proofs; narrow Sub is the next measured candidate,
+   not a generally safe GetHost elimination.
 2. **smallpt remaining link** — covered link is now about 6.6%. Region/cycle tails are about
    2.1%; their acquire poll and branch across per-block cold stubs are load-bearing. Audit the
    roughly 1.26% remaining return-L1 static sequences separately; address formation is now one
