@@ -1269,8 +1269,12 @@ void JitTranslator::EmitSetHostFPR(ir::Inst* inst) {
         ASSERT_MSG(ReproveScalarValueFPRFusion(inst, fusion->second),
                    "scalar FPR value fusion proof diverged at IR {}", inst->Id());
         const auto value = inst->GetArg<ir::Value>(0);
-        const auto source = CanUseZeroStoreRegister(value) ? xzr : context.X(value);
-        __ Fmov(VRegister::GetQRegFromCode(fusion->second.target).D(), source);
+        auto target = VRegister::GetQRegFromCode(fusion->second.target);
+        if (CanUseZeroStoreRegister(value)) {
+            __ Eor(target.V16B(), target.V16B(), target.V16B());
+        } else {
+            __ Fmov(target.D(), context.X(value));
+        }
         return;
     }
     if (context.IsHostWriteCoalesced(inst->Id())) {

@@ -44,6 +44,19 @@ IntrusivePtr<Block> MakeScalarLoad(bool zero_high, bool fault_observer = false) 
     return block;
 }
 
+IntrusivePtr<Block> MakeZeroScalarValue() {
+    IntrusivePtr<Block> block{new Block(0, Location{0x8810})};
+    auto low = block->LoadImm(Imm{swift::u64{0}}).SetType(ValueType::U64);
+    auto high = block->LoadImm(Imm{swift::u64{0}}).SetType(ValueType::U64);
+    block->AppendInst(
+            OpCode::SetHostFPR, low, HostRegIndex(kTarget), Imm{0u});
+    block->AppendInst(
+            OpCode::SetHostFPR, high, HostRegIndex(kTarget), Imm{8u});
+    block->SetTerminal(terminal::ReturnToDispatch{});
+    block->ReIdInstr();
+    return block;
+}
+
 std::vector<std::string> Emit(IntrusivePtr<Block> block) {
     GPRSMask gprs{~((1u << 8) - 1u)};
     FPRSMask fprs{0};
@@ -104,6 +117,13 @@ TEST_CASE("scalar memory load and zero-high publication use one D-register load"
     REQUIRE(Count(observed, "ldr d17") == 0);
     REQUIRE(Count(observed, "mov v17.d") == 0);
     REQUIRE(Count(observed, "fmov d17") == 1);
+}
+
+TEST_CASE("zero-low scalar publication clears the full resident home") {
+    const auto emitted = Emit(MakeZeroScalarValue());
+    REQUIRE(Count(emitted, "eor v17.16b") == 1);
+    REQUIRE(Count(emitted, "fmov d17") == 0);
+    REQUIRE(Count(emitted, "mov v17.d") == 0);
 }
 
 TEST_CASE("faulting scalar memory load leaves the resident XMM home unchanged") {
