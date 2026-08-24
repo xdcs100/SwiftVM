@@ -1084,30 +1084,32 @@ void JitTranslator::EmitTestFlags(ir::Inst* inst) {
     }
     auto result = context.W(ir::Value{inst});
     auto nzcv_mask = static_cast<u32>(GuestNZCVToHost(test));
-    std::optional<u32> host_bit;
+    struct HostFlagTest {
+        u32 bit;
+        Condition condition;
+    };
+    std::optional<HostFlagTest> host_test;
     switch (test) {
         case ir::Flags::Carry:
-            host_bit = HostFlagsBit::C;
+            host_test = HostFlagTest{HostFlagsBit::C, cs};
             break;
         case ir::Flags::Overflow:
-            host_bit = HostFlagsBit::V;
+            host_test = HostFlagTest{HostFlagsBit::V, vs};
             break;
         case ir::Flags::Zero:
-            host_bit = HostFlagsBit::Z;
+            host_test = HostFlagTest{HostFlagsBit::Z, eq};
             break;
         case ir::Flags::Negate:
-            host_bit = HostFlagsBit::N;
+            host_test = HostFlagTest{HostFlagsBit::N, mi};
             break;
         default:
             break;
     }
-    if (host_bit) {
+    if (host_test) {
         if (save_in_nzcv && nzcv_dirty) {
-            const auto scratch = context.GetSharedTmpX();
-            __ Mrs(scratch, NZCV);
-            __ Ubfx(result, scratch.W(), *host_bit, 1);
+            __ Cset(result, host_test->condition);
         } else {
-            __ Ubfx(result, flags.W(), *host_bit, 1);
+            __ Ubfx(result, flags.W(), host_test->bit, 1);
         }
         return;
     }
