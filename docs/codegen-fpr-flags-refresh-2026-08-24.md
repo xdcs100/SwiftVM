@@ -582,6 +582,35 @@ ARM64 emitter 分别维护并复算同一 producer 集合；既有 observer、fi
 - 严格 short collector 连续两次在 15 秒硬上限终止，均未生成 hot record。没有放宽超时，
   没有运行长 benchmark 或完整 suite，也没有加入开关或保留 probe。
 
+### NZCV publication and restore compaction
+
+提交 `477947d`、`e389f9d`、`5b94050`、`183bf78` 和 `46197f6` 关闭了 flags 路径中五个同源
+的大池。连续的部分 NZCV 发布统一为 `MRS + UBFX + BFI`，完整和非连续掩码由同一个 emitter
+负责，region/backedge 不再维护重复实现。恢复时直接执行 `MSR NZCV, x26`；AArch64 NZCV
+系统寄存器只接收 31:28，VIXL 的 `NZCVWriteIgnoreMask` 也明确把其余位标为 write-ignore。
+region published veneer 复用现有 `TargetKillsIncomingFlags` 全覆盖证明，目标在观察或故障前
+完整覆盖 incoming flags 时不再恢复 PSTATE。逻辑类同时清 C/V/AF 时，bits 26:29 的连续区间
+由一条 `BFC` 清除；其他非连续组合保持原发码。
+
+- partial 阶段的 556-PC 同形样本有 219 个缩短、0 增长，静态减少 561 条；正式权重
+  交集减少 38,750,240 条。region 完整发布继续减少 16,608,202 条；
+- 直接 `MSR` 阶段保持 558 PC / 558 version 完全一致，264 个缩短、0 增长，静态减少 2,068
+  条，12.038818% 正式交集减少 179,793,723 条，占完整正式总量 0.912324%；
+- dead published-entry restore 阶段同形，186 个缩短、0 增长，静态减少 673 条，正式交集减少
+  42,596,165 条；C/V/AF 阶段同形，269 个缩短、0 增长，静态减少 668 条，正式交集减少
+  52,706,706 条；
+- 从本轮起点到最终样本，`0x47f6c0` 的冷 printf unit 分裂出 `0x47f8a8` / `0x47f8f0`。该
+  PC 只有 240 entries、36,960 formal host weight，明确排除后，555 个共同 PC 中 329 个
+  缩短、0 增长，静态减少 4,093 条；541-PC exact-version 子集覆盖 12.038585%，累计减少
+  330,449,276 条 formal-weighted 指令，占完整 formal total 的 1.676794%。覆盖不足且有冷
+  unit 成形变化，所以仍只作为保守下界，不换算新的 FEX ratio；
+- 最终短 PPM SHA-256 仍为
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`。flags codegen focus
+  通过 10 cases / 142 assertions，region/trampoline/L1 focus 通过 5 cases / 224 assertions，
+  辅助 region 集通过 3 cases / 63 assertions；固定 seed 424242 的 256-iteration ALU/mixed
+  fuzz 保持既有 88 / 106 divergence。没有运行长 benchmark、stress 或完整 suite，没有
+  新增开关或保留临时 probe。
+
 ## 否决项
 
 把所有窄 `TEST` 的 `And -> Or(0)` 扩成直接 `And` flags producer，并把两侧 low extract 都
@@ -756,6 +785,10 @@ saved-flags compound CondSet 的 `HI/LS` 与 `GE/LT` 两指令原型通过 88-as
 当前 single-version opcode ledger 覆盖正式 smallpt host 执行的约 82.85%。剩余单 op host
 责任最高的是 StoreUniform 82.41M、VecFMulScalar64 78.89M、LoadMemory 76.55M、GetOperand
 65.87M、VecFAddScalar64 58.03M、LoadUniform 56.33M 和 StoreMemory 51.64M。
+
+本轮已经关闭部分/完整 NZCV 掩码、`MSR` 前掩码和可证明死亡的 published-entry restore。
+剩余高权重 full merge 与单条 `MSR` 在 committed x26 ABI 下已是局部指令下界；下一轮若继续
+从 flags 大头推进，需要设计跨 unit pending-flags / dual-entry ABI，不再继续堆掩码 peephole。
 
 1. GPR pin 应按实际 host bytes 而不是 IR 数量判断。level 2 保持 12/16 固定映射；level 3
    的 spill/host 膨胀已经否决。剩余 SetHost 热 move 多数是 guest 架构寄存器之间的真实复制，

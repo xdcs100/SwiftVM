@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`a9f5ddf`** `perf: eliminate dead carry inversions`
+- Code tip: **`46197f6`** `perf: coalesce contiguous flag clears`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -64,11 +64,18 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 | `e2fe71c` | Normalize carry to a Direct cross-block ABI on FlagM hosts and remove the polarity-byte publication path |
 | `a9f5ddf` | Delete `InvertCarry` and its covered carry publication when backward liveness proves a later in-block C write wins before every read |
 | `2d86a6e` | Screen candidates with bounded short shape runs and retained formal weights before promoting them to long benchmarks |
+| `5a47163` | Collapse narrow logical flag identities into one width-correct NZ producer |
+| `477947d` / `e389f9d` | Merge contiguous partial NZCV with bitfield instructions and share the optimal merge across region materialization |
+| `5b94050` | Restore NZCV directly from the packed flags register; `MSR NZCV` ignores every non-NZCV bit |
+| `183bf78` | Skip published-region NZCV restores when the existing target proof covers all incoming flags before any observer or fault |
+| `46197f6` | Clear the contiguous AF/unused/C/V span with one bitfield clear |
 
 Hot files:
 
 - `translator_region.cpp` — `SuccessorCoversIncomingNzcv`, `BlockIsFlagsTransparent`, `EmitRegionIf`
 - `translator_flags.cpp` — `MergeNZCV`, `force_ret_pstate`, direct simple `CondSet` extraction
+- `translator_flags_abi.cpp` — published region entry restore and target-kill reuse
+- `trampolines.cpp` — runtime flags park/unpark ABI
 - `translator_terminal.cpp` — generic If / LinkBlock / RSB
 - `translator/x86/translator.cpp` — `RegionFuncBudget`, `kMaxFuncBlocks=128`, lazy skip of published L2
 - `register_alloc_coalesce_gpr.cpp` — pinned guest GPR read/write coalescing and full-width load publication
@@ -491,6 +498,28 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   hit the 15-second hard limit and produced no records; they were not extended or retried. Logical
   shape plus flags/SaveCV/CondSet focus passes 120 assertions; fixed-seed ALU/mixed fuzz remains at
   the documented 88 / 106 existing divergences. No long benchmark or full suite was run.
+- `477947d` / `e389f9d` / `5b94050` / `183bf78` / `46197f6` compact the remaining high-volume
+  NZCV publication and restore mechanisms. Contiguous partial publication is
+  `MRS + UBFX + BFI`; full and non-contiguous publication share one emitter across ordinary and
+  region paths. `MSR NZCV, x26` now consumes the packed flags word directly because the system
+  register ignores all bits outside 31:28. Published region veneers omit even that restore when
+  the existing full incoming-flags kill proof succeeds, and simultaneous C/V/AF clears use one
+  `BFC` over bits 26:29. No compatibility path or runtime switch was added.
+- The final bounded `4 8 6` dump has 558 sections/PCs. Against the 556-PC starting dump, the large
+  cold printf unit at `0x47f6c0` split into `0x47f6c0`, `0x47f8a8` and `0x47f8f0`; it has only 240
+  retained-formal entries and 36,960 host weight, so it is explicitly excluded rather than treated
+  as an exact version. The remaining 555 common PCs have 329 shrink, 226 unchanged, 0 growth and
+  `-4,093` static instructions. The exact retained-formal subset is 541 PCs / 12.038585% coverage
+  and removes 330,449,276 weighted instructions (`-1.676794%` of the complete formal total). This
+  remains a conservative lower bound, not a replacement formal FEX ratio.
+- Each same-shape stage was shrink-only: direct packed-register NZCV restore is `-2,068` static /
+  `-179,793,723` weighted, proven-dead published-entry restore is `-673` / `-42,596,165`, and the
+  contiguous C/V/AF clear is `-668` / `-52,706,706`. The short PPM remains byte-identical at
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`.
+- Flags codegen focus passes 142 assertions in 10 cases; region/trampoline/L1 focus passes 224
+  assertions in 5 cases, and the auxiliary region localization/link set passes 63 assertions in
+  3 cases. Fixed-seed 256-iteration ALU/mixed fuzz remains at the documented 88 / 106 existing
+  divergences. No long benchmark, stress run or full suite was run.
 - FEX-aligned RE=0 same-harness refresh for formal smallpt: SVM host/guest
   `3.335622 → 3.267832`; the landed stages fold this to about `2.478306`. With unchanged FEX
   `1.549`, ratio is `2.153× → 1.600×`. The earlier
@@ -695,6 +724,12 @@ pre-canonical-carry largest per-op responsibilities were StoreUniform 82.41M, Ve
 LoadMemory 76.55M, GetOperand 65.87M, VecFAddScalar64 58.03M, LoadUniform 56.33M and
 StoreMemory 51.64M. Do not subtract the local short carry census from these formal values: the
 candidate changes unit/version formation and must pass a future formal gate before the ledger is rebased.
+
+The new bounded census closes redundant partial/full merge masks, redundant pre-`MSR` masks and
+provably dead published-entry restores. The remaining high-weight `MRS`/full merge and one-instruction
+`MSR` sites are local ISA floors under the committed x26 ABI. A further large flags reduction now
+requires a real cross-unit pending-flags/dual-entry ABI; do not reopen these closed sequences with
+more mask peepholes.
 
 1. **Canonical carry formal gate** — the largest StoreUniform subpool is closed on FlagM and the
    short oracle is exact. Dead inversion elimination has a 100%-coverage same-shape short A/B, but
