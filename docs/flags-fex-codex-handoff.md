@@ -413,6 +413,16 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   `-0.265864%`) with no growing PC. Focused validation passes default/rollback carry elimination
   (32 / 11 assertions), canonical carry (4), SaveCV (4), simple CondSet (62), rotate-zero carry (4),
   region branch flags (46) and full NZCV publication (3). No long benchmark or full suite was run.
+- Normalized U8 `Select(condition, 1, 0)` now emits `CSET`, and its two `LoadImm` producers are
+  suppressed only when every use is another proven identity select. The proof accepts only direct
+  boolean producers and bounded `And` / `Or` compositions. Non-local conditions retain the existing
+  `MergeNZCV + CMP` boundary, so flags publication semantics do not move. The strict local `4 8 6`
+  A/B has identical 2,757-PC / 3,597-version sets, 100% host/entry and top-20 coverage,
+  byte-identical PPM, zero spills and common host `591,583 -> 590,195` (`-1,388`, `-0.234625%`)
+  with no growing PC. CondSet, flag-elimination and COMIS checks pass 3,588 assertions. The bounded
+  setcc/cmov/jcc and BMI diagnostics are byte-for-byte identical to the pre-change failure sets;
+  the 512-iteration interpreter run passes. A larger frontend SetCC collapse was rejected because
+  removing `Select` also removed its PSTATE clobber boundary. No long benchmark or full suite was run.
 - FEX-aligned RE=0 same-harness refresh for formal smallpt: SVM host/guest
   `3.335622 → 3.267832`; the landed stages fold this to about `2.478306`. With unchanged FEX
   `1.549`, ratio is `2.153× → 1.600×`. The earlier
