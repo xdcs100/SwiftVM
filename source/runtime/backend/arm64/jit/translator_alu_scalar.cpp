@@ -168,6 +168,10 @@ void JitTranslator::EmitSub(ir::Inst* inst) {
                 aligned_right = Operand{saved.W(), LSL, shift};
             } else if (!right_operand.IsShiftedRegister()) {
                 aligned_right = Operand{right_operand.GetRegister().W(), LSL, shift};
+            } else if (right_operand.GetShift() == LSL &&
+                       right_operand.GetShiftAmount() == 0) {
+                aligned_right = Operand{
+                        right_operand.GetRegister().W(), LSL, shift};
             } else {
                 auto saved = context.GetTmpX();
                 __ Mov(saved.W(), right_operand);

@@ -94,6 +94,25 @@ std::size_t Count(const std::vector<std::string>& lines, std::string_view first,
     });
 }
 
+bool HasShiftPreparation(const std::vector<std::string>& lines) {
+    for (std::size_t index = 0; index + 1 < lines.size(); ++index) {
+        const auto& preparation = lines[index];
+        const auto comma = preparation.find(',');
+        if ((!preparation.starts_with("mov w") &&
+             !preparation.starts_with("lsl w")) ||
+            comma == std::string::npos ||
+            !lines[index + 1].starts_with("subs w")) {
+            continue;
+        }
+        const auto destination = preparation.substr(4, comma - 4);
+        if (lines[index + 1].find(", " + destination + ", lsl #") !=
+            std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
 }  // namespace
 
 TEST_CASE("one pinned GPR consumer reuses its fixed W view") {
@@ -127,6 +146,9 @@ TEST_CASE("callee-saved pinned GPR subtraction reads the fixed W view directly")
         REQUIRE(std::ranges::any_of(lines, [](const auto& line) {
             return line.find("w22") != std::string::npos;
         }));
+        if (type != ValueType::U32) {
+            REQUIRE_FALSE(HasShiftPreparation(lines));
+        }
     }
 }
 
