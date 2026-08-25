@@ -227,8 +227,8 @@ public:
     [[nodiscard]] u16 AesChainTarget(u32 id) const {
         return reg_alloc.AesChainTarget(id);
     }
-    [[nodiscard]] bool IsPshufd4eExt(u32 id) const {
-        return reg_alloc.IsPshufd4eExt(id);
+    [[nodiscard]] bool IsPshufdDirect(u32 id) const {
+        return reg_alloc.IsPshufdDirect(id);
     }
     [[nodiscard]] backend::GPRSMask DirtyGPR(u32 id) const {
         return reg_alloc.DirtyGPR(id);

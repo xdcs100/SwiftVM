@@ -6,6 +6,7 @@
 #include "register_alloc_internal.h"
 #include <cstdio>
 #include "base/logging.h"
+#include "runtime/backend/arm64/pshufd_direct.h"
 #include "runtime/common/perf_stats.h"
 
 namespace swift::runtime::ir {
@@ -403,7 +404,7 @@ public:
         }
         CoalesceLow32Copies();
         CoalesceGuestFPRAccesses(xmm_resident);
-        RecognizePshufd4eExt();
+        RecognizePshufdDirect();
         CacheConstantAddresses();
         if (spill_count && RaDiagEnabled()) {
             LOG_WARNING("RegisterAllocPass: {} value(s) spilled to stack slots (highest slot {})",
@@ -828,10 +829,13 @@ private:
         }
     }
 
-    static bool IsPshufd4eMask(const Inst& inst) {
-        return inst.GetOp() == OpCode::VecLoadConst &&
-               inst.GetArg<Imm>(0).Get() == 0x0f0e0d0c0b0a0908ull &&
-               inst.GetArg<Imm>(1).Get() == 0x0706050403020100ull;
+    static bool IsPshufdDirectMask(const Inst& inst) {
+        if (inst.GetOp() != OpCode::VecLoadConst) {
+            return false;
+        }
+        const u64 low = inst.GetArg<Imm>(0).Get();
+        const u64 high = inst.GetArg<Imm>(1).Get();
+        return backend::arm64::DecodePshufdDirectControl(low, high).has_value();
     }
 
     void CacheConstantAddresses() {
@@ -1070,15 +1074,11 @@ private:
         }
     }
 
-    void RecognizePshufd4eExt() {
-        if (!features.pshufd_4e_ext) {
-            return;
-        }
-
+    void RecognizePshufdDirect() {
         auto recognize_block = [&](Block* lir_block) {
             auto& list = lir_block->GetInstList();
             for (auto& constant : list) {
-                if (!IsPshufd4eMask(constant)) {
+                if (!IsPshufdDirectMask(constant)) {
                     continue;
                 }
                 Vector<Inst*> shuffles;
@@ -1108,9 +1108,9 @@ private:
                 if (!exact || shuffles.empty() || local_uses != constant.GetUses()) {
                     continue;
                 }
-                reg_alloc->MarkPshufd4eExt(constant.Id());
+                reg_alloc->MarkPshufdDirect(constant.Id());
                 for (auto* shuffle : shuffles) {
-                    reg_alloc->MarkPshufd4eExt(shuffle->Id());
+                    reg_alloc->MarkPshufdDirect(shuffle->Id());
                 }
             }
         };

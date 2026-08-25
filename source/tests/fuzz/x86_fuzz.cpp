@@ -5175,16 +5175,13 @@ TEST_CASE("PSHUFD all immediates match the lane-selection golden model") {
         }
     };
     const auto old_jit = save_env("SVM_ENABLE_JIT");
-    const auto old_gate = save_env("SVM_PSHUFD_4E_EXT");
     const auto old_cache = save_env("SVM_VEC_CONST_CACHE");
 
     swift::runtime::SetSvmConfigEnvForTest("SVM_ENABLE_JIT", "1", 1);
+    swift::runtime::SetSvmConfigEnvForTest("SVM_VEC_CONST_CACHE", "0", 1);
+    auto* uncached_instance = X86Instance::Make();
     swift::runtime::SetSvmConfigEnvForTest("SVM_VEC_CONST_CACHE", "1", 1);
-    swift::runtime::SetSvmConfigEnvForTest("SVM_PSHUFD_4E_EXT", "0", 1);
-    auto* off_instance = X86Instance::Make();
-    swift::runtime::SetSvmConfigEnvForTest("SVM_PSHUFD_4E_EXT", "1", 1);
-    auto* on_instance = X86Instance::Make();
-    restore_env(old_gate);
+    auto* cached_instance = X86Instance::Make();
     restore_env(old_cache);
     restore_env(old_jit);
 
@@ -5204,10 +5201,10 @@ TEST_CASE("PSHUFD all immediates match the lane-selection golden model") {
         return op;
     };
 
-    auto* off_core = X86Core::Make(off_instance);
-    auto* on_core = X86Core::Make(on_instance);
-    auto* off_ctx = &off_core->GetContext();
-    auto* on_ctx = &on_core->GetContext();
+    auto* uncached_core = X86Core::Make(uncached_instance);
+    auto* cached_core = X86Core::Make(cached_instance);
+    auto* uncached_ctx = &uncached_core->GetContext();
+    auto* cached_ctx = &cached_core->GetContext();
     const auto run = [&](X86Core* core, ThreadContext64* context,
                          u64 address, const Vec128& source) {
         std::memcpy(reinterpret_cast<void*>(data + kSourceOff),
@@ -5271,18 +5268,18 @@ TEST_CASE("PSHUFD all immediates match the lane-selection golden model") {
             for (const auto& source : sources) {
                 const auto expected = golden(source, static_cast<u8>(control));
                 CAPTURE(control, static_cast<u32>(form));
-                REQUIRE(run(off_core, off_ctx, address, source) == expected);
-                REQUIRE(run(on_core, on_ctx, address, source) == expected);
+                REQUIRE(run(uncached_core, uncached_ctx, address, source) == expected);
+                REQUIRE(run(cached_core, cached_ctx, address, source) == expected);
                 ++checks;
             }
         }
     }
     REQUIRE(checks == 256 * 3 * sources.size());
 
-    X86Core::Destroy(off_core);
-    X86Core::Destroy(on_core);
-    X86Instance::Destroy(off_instance);
-    X86Instance::Destroy(on_instance);
+    X86Core::Destroy(uncached_core);
+    X86Core::Destroy(cached_core);
+    X86Instance::Destroy(uncached_instance);
+    X86Instance::Destroy(cached_instance);
     swift::runtime::backend::SmcTracker::SetEnabled(true);
     munmap(arena, kArenaSize);
 }

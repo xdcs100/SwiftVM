@@ -5,18 +5,46 @@
 #include <functional>
 
 #include "runtime/backend/arm64/defines.h"
+#include "runtime/backend/arm64/pshufd_direct.h"
 #include "runtime/backend/context.h"
 
 namespace swift::runtime::backend::arm64 {
 
 #define __ masm.
 
+bool JitTranslator::EmitPshufdDirect(const VRegister& result,
+                                     const VRegister& source,
+                                     u32 control) {
+    switch (control) {
+        case 0xE4:
+            if (result.GetCode() != source.GetCode()) {
+                __ Orr(result.V16B(), source.V16B(), source.V16B());
+            }
+            return true;
+        case 0x00: __ Dup(result.V4S(), source.V4S(), 0); return true;
+        case 0x55: __ Dup(result.V4S(), source.V4S(), 1); return true;
+        case 0xAA: __ Dup(result.V4S(), source.V4S(), 2); return true;
+        case 0xFF: __ Dup(result.V4S(), source.V4S(), 3); return true;
+        case 0x39: __ Ext(result.V16B(), source.V16B(), source.V16B(), 4); return true;
+        case 0x93: __ Ext(result.V16B(), source.V16B(), source.V16B(), 12); return true;
+        case 0x50: __ Zip1(result.V4S(), source.V4S(), source.V4S()); return true;
+        case 0xFA: __ Zip2(result.V4S(), source.V4S(), source.V4S()); return true;
+        case 0xA0: __ Trn1(result.V4S(), source.V4S(), source.V4S()); return true;
+        case 0xF5: __ Trn2(result.V4S(), source.V4S(), source.V4S()); return true;
+        case 0x4E: __ Ext(result.V16B(), source.V16B(), source.V16B(), 8); return true;
+        default: return false;
+    }
+}
+
 void JitTranslator::EmitVecShuffle32(ir::Inst* inst) {
     auto src = context.V(inst->GetArg<ir::Value>(0));
     auto result = context.V(ir::Value{inst});
+    const u32 control = inst->GetArg<ir::Imm>(1).Get();
+    if (EmitPshufdDirect(result, src, control)) {
+        return;
+    }
     auto indexes = context.GetTmpV();
     auto tmp = context.GetTmpX();
-    const u32 control = inst->GetArg<ir::Imm>(1).Get();
     u64 index_lo = 0;
     u64 index_hi = 0;
     for (u32 byte = 0; byte < 16; ++byte) {
@@ -101,48 +129,32 @@ void JitTranslator::EmitVecShuffle32TwoSrc(ir::Inst* inst) {
     }
 
     if (same_source) {
-        // Alias-only shapes gain more one-instruction mappings because both
-        // architectural operands name the same old destination.
-        switch (control) {
-            case 0xE4:
-                if (sse_shufps_imm && result.GetCode() == left.GetCode()) {
-                    ASSERT_MSG(ReproveShufpsImmTie(inst),
-                               "SHUFPS imm tie proof diverged at IR {}", inst->Id());
-                }
-                if (result.GetCode() != left.GetCode()) {
-                    __ Orr(result.V16B(), left.V16B(), left.V16B());
-                }
-                return;
-            case 0x00: __ Dup(result.V4S(), left.V4S(), 0); return;
-            case 0x55: __ Dup(result.V4S(), left.V4S(), 1); return;
-            case 0xAA: __ Dup(result.V4S(), left.V4S(), 2); return;
-            case 0xFF: __ Dup(result.V4S(), left.V4S(), 3); return;
-            case 0x39: __ Ext(result.V16B(), left.V16B(), left.V16B(), 4); return;
-            case 0x93: __ Ext(result.V16B(), left.V16B(), left.V16B(), 12); return;
-            case 0x50: __ Zip1(result.V4S(), left.V4S(), left.V4S()); return;
-            case 0xFA: __ Zip2(result.V4S(), left.V4S(), left.V4S()); return;
-            case 0xA0: __ Trn1(result.V4S(), left.V4S(), left.V4S()); return;
-            case 0xF5: __ Trn2(result.V4S(), left.V4S(), left.V4S()); return;
-            // c-ray's two dominant splat-low shapes preserve the old high
-            // qword. When RA ties result to source, one INS is sufficient.
-            case 0xE0:
-            case 0xE5: {
-                if (sse_shufps_imm && result.GetCode() == left.GetCode()) {
-                    ASSERT_MSG(ReproveShufpsImmTie(inst),
-                               "SHUFPS imm tie proof diverged at IR {}", inst->Id());
-                }
-                if (result.GetCode() != left.GetCode()) {
-                    __ Orr(result.V16B(), left.V16B(), left.V16B());
-                }
-                const u32 selected = control & 3;
-                const u32 destination = selected == 0 ? 1 : 0;
-                __ Ins(result.V4S(), destination, left.V4S(), selected);
-                return;
+        if (control == 0xE4) {
+            if (sse_shufps_imm && result.GetCode() == left.GetCode()) {
+                ASSERT_MSG(ReproveShufpsImmTie(inst),
+                           "SHUFPS imm tie proof diverged at IR {}", inst->Id());
             }
-            default: break;
+            const bool emitted = EmitPshufdDirect(result, left, control);
+            ASSERT(emitted);
+            return;
+        }
+        if (EmitPshufdDirect(result, left, control)) {
+            return;
+        }
+        if (control == 0xE0 || control == 0xE5) {
+            if (sse_shufps_imm && result.GetCode() == left.GetCode()) {
+                ASSERT_MSG(ReproveShufpsImmTie(inst),
+                           "SHUFPS imm tie proof diverged at IR {}", inst->Id());
+            }
+            if (result.GetCode() != left.GetCode()) {
+                __ Orr(result.V16B(), left.V16B(), left.V16B());
+            }
+            const u32 selected = control & 3;
+            const u32 destination = selected == 0 ? 1 : 0;
+            __ Ins(result.V4S(), destination, left.V4S(), selected);
+            return;
         }
 
-        // A single table is sufficient for every remaining alias control.
         auto indexes = context.GetTmpV();
         auto tmp = context.GetTmpX();
         u64 index_lo = 0;
@@ -211,13 +223,17 @@ void JitTranslator::EmitVecShuffle32TwoSrc(ir::Inst* inst) {
     __ Tbx(result.V16B(), right.V16B(), indexes.V16B());
 }
 
-bool JitTranslator::ReprovePshufd4eExtConstant(ir::Inst* inst) const {
-    if (!context.GetFeatures().pshufd_4e_ext || !inst ||
-        inst->GetOp() != ir::OpCode::VecLoadConst ||
-        !context.IsPshufd4eExt(inst->Id()) ||
-        inst->GetArg<ir::Imm>(0).Get() != 0x0f0e0d0c0b0a0908ull ||
-        inst->GetArg<ir::Imm>(1).Get() != 0x0706050403020100ull) {
-        return false;
+std::optional<u8> JitTranslator::ReprovePshufdDirectConstant(
+        ir::Inst* inst) const {
+    if (!inst || inst->GetOp() != ir::OpCode::VecLoadConst ||
+        !context.IsPshufdDirect(inst->Id())) {
+        return std::nullopt;
+    }
+    const u64 low = inst->GetArg<ir::Imm>(0).Get();
+    const u64 high = inst->GetArg<ir::Imm>(1).Get();
+    auto control = DecodePshufdDirectControl(low, high);
+    if (!control) {
+        return std::nullopt;
     }
 
     u32 local_uses = 0;
@@ -231,31 +247,36 @@ bool JitTranslator::ReprovePshufd4eExtConstant(ir::Inst* inst) const {
             if (consumer.GetOp() != ir::OpCode::VecShuffle32Indexed ||
                 consumer.GetArg<ir::Value>(1).Def() != inst ||
                 consumer.GetArg<ir::Value>(0).Def() == inst ||
-                !context.IsPshufd4eExt(consumer.Id())) {
-                return false;
+                !context.IsPshufdDirect(consumer.Id())) {
+                return std::nullopt;
             }
             saw_shuffle = true;
         }
     }
-    return saw_shuffle && local_uses == inst->GetUses();
+    if (!saw_shuffle || local_uses != inst->GetUses()) {
+        return std::nullopt;
+    }
+    return control;
 }
 
-bool JitTranslator::ReprovePshufd4eExtShuffle(ir::Inst* inst) const {
-    if (!context.GetFeatures().pshufd_4e_ext || !inst ||
-        inst->GetOp() != ir::OpCode::VecShuffle32Indexed ||
-        !context.IsPshufd4eExt(inst->Id())) {
-        return false;
+std::optional<u8> JitTranslator::ReprovePshufdDirectShuffle(
+        ir::Inst* inst) const {
+    if (!inst || inst->GetOp() != ir::OpCode::VecShuffle32Indexed ||
+        !context.IsPshufdDirect(inst->Id())) {
+        return std::nullopt;
     }
     auto indexes = inst->GetArg<ir::Value>(1);
-    return indexes.Defined() && indexes.Def() &&
-           context.IsPshufd4eExt(indexes.Id()) &&
-           ReprovePshufd4eExtConstant(indexes.Def());
+    if (!indexes.Defined() || !indexes.Def() ||
+        !context.IsPshufdDirect(indexes.Id())) {
+        return std::nullopt;
+    }
+    return ReprovePshufdDirectConstant(indexes.Def());
 }
 
 void JitTranslator::EmitVecLoadConst(ir::Inst* inst) {
-    if (context.IsPshufd4eExt(inst->Id())) {
-        ASSERT_MSG(ReprovePshufd4eExtConstant(inst),
-                   "PSHUFD 0x4e constant proof diverged at IR {}", inst->Id());
+    if (context.IsPshufdDirect(inst->Id())) {
+        ASSERT_MSG(ReprovePshufdDirectConstant(inst).has_value(),
+                   "PSHUFD direct constant proof diverged at IR {}", inst->Id());
         return;
     }
     auto result = context.V(ir::Value{inst});
@@ -277,10 +298,12 @@ void JitTranslator::EmitVecLoadConst(ir::Inst* inst) {
 void JitTranslator::EmitVecShuffle32Indexed(ir::Inst* inst) {
     auto src = context.V(inst->GetArg<ir::Value>(0));
     auto result = context.V(ir::Value{inst});
-    if (context.IsPshufd4eExt(inst->Id())) {
-        ASSERT_MSG(ReprovePshufd4eExtShuffle(inst),
-                   "PSHUFD 0x4e EXT proof diverged at IR {}", inst->Id());
-        __ Ext(result.V16B(), src.V16B(), src.V16B(), 8);
+    if (context.IsPshufdDirect(inst->Id())) {
+        auto control = ReprovePshufdDirectShuffle(inst);
+        ASSERT_MSG(control.has_value(),
+                   "PSHUFD direct shuffle proof diverged at IR {}", inst->Id());
+        const bool emitted = EmitPshufdDirect(result, src, *control);
+        ASSERT(emitted);
         return;
     }
     auto indexes = context.V(inst->GetArg<ir::Value>(1));

@@ -276,7 +276,7 @@ public:
     bool CommitWidthComponentOwner(u32 anchor_id, u16 target);
     void MarkConstAddressCached(u32 id, u32 anchor_id);
     void MarkAesChainTied(u32 id, u16 target);
-    void MarkPshufd4eExt(u32 id);
+    void MarkPshufdDirect(u32 id);
     [[nodiscard]] bool IsHostWriteCoalesced(u32 id) const;
     [[nodiscard]] bool IsHostReadCoalesced(u32 id) const;
     [[nodiscard]] bool IsWidthChainCoalesced(u32 id) const;
@@ -293,7 +293,7 @@ public:
     [[nodiscard]] u32 ConstAddressCacheAnchor(u32 id) const;
     [[nodiscard]] bool IsAesChainTied(u32 id) const;
     [[nodiscard]] u16 AesChainTarget(u32 id) const;
-    [[nodiscard]] bool IsPshufd4eExt(u32 id) const;
+    [[nodiscard]] bool IsPshufdDirect(u32 id) const;
     [[nodiscard]] bool IsFixedGPR(u32 id) const;
     void SetActiveRegs(u32 id, GPRSMask &gprs, FPRSMask &fprs);
     // Experimental placement probe: rename only the symmetric dynamic homes
@@ -349,7 +349,7 @@ private:
     Vector<u32> low32_copy_sources{};
     Vector<u32> const_address_cache_anchors{};
     Vector<u16> aes_chain_targets{};
-    Vector<bool> pshufd_4e_ext{};
+    Vector<bool> pshufd_direct{};
     u32 stack_size{};
     ir::Inst *current_ir{};
     GPRSMask gprs;

@@ -142,8 +142,13 @@ private:
             ir::Inst* load, const ScalarFPRPublication& publication) const;
     [[nodiscard]] bool ReproveScalarValueFPRFusion(
             ir::Inst* low_store, const ScalarFPRPublication& publication) const;
-    [[nodiscard]] bool ReprovePshufd4eExtConstant(ir::Inst* inst) const;
-    [[nodiscard]] bool ReprovePshufd4eExtShuffle(ir::Inst* inst) const;
+    [[nodiscard]] bool EmitPshufdDirect(const VRegister& result,
+                                        const VRegister& source,
+                                        u32 control);
+    [[nodiscard]] std::optional<u8> ReprovePshufdDirectConstant(
+            ir::Inst* inst) const;
+    [[nodiscard]] std::optional<u8> ReprovePshufdDirectShuffle(
+            ir::Inst* inst) const;
     [[nodiscard]] bool ReproveWidthChainBridge(ir::Inst* inst) const;
     [[nodiscard]] bool ReproveLow32Copy(ir::Inst* inst) const;
     [[nodiscard]] bool ReproveCachedConstAddress(ir::Inst* inst) const;

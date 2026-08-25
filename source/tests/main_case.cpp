@@ -34,6 +34,7 @@
 #include "runtime/backend/runtime.h"
 #include "runtime/backend/smc_tracker.h"
 #include "runtime/backend/arm64/fpcr_mode.h"
+#include "runtime/backend/arm64/pshufd_direct.h"
 #include "runtime/backend/arm64/trampolines.h"
 #include "runtime/backend/arm64/jit/jit_context.h"
 #include "runtime/backend/arm64/jit/translator.h"
@@ -306,7 +307,7 @@ TEST_CASE("FeatureSet snapshots every B-class field and applies sparse overrides
     using namespace swift::runtime;
     using namespace swift::runtime::backend;
 
-    STATIC_REQUIRE(kFeatureCount == 72);
+    STATIC_REQUIRE(kFeatureCount == 71);
     REQUIRE(FeatureSet{}.ra_coalesce_live);
     REQUIRE(FeatureSet{}.operand_copy_kill);
     REQUIRE(FeatureSet{}.zero_store_zr);
@@ -5850,13 +5851,11 @@ TEST_CASE("AES KEYGEN compact uses the immutable runtime prefix and exact loweri
 #endif
 }
 
-TEST_CASE("PSHUFD 0x4e EXT requires an exclusively shared canonical mask") {
+TEST_CASE("PSHUFD direct lowering requires an exclusively shared canonical mask") {
     using namespace swift::runtime;
     using namespace swift::runtime::backend;
     using namespace swift::runtime::ir;
 
-    constexpr swift::u64 kIndexLo = 0x0f0e0d0c0b0a0908ull;
-    constexpr swift::u64 kIndexHi = 0x0706050403020100ull;
     const GPRSMask gprs{~((1u << 8) - 1u)};
 
     struct Case {
@@ -5865,15 +5864,14 @@ TEST_CASE("PSHUFD 0x4e EXT requires an exclusively shared canonical mask") {
         Value indexes;
         Value first;
     };
-    auto make_case = [&](swift::u64 location, bool mixed, bool wrong_mask,
-                         bool two_shuffles) {
+    auto make_case = [&](swift::u64 location, swift::u8 control, bool mixed,
+                         bool corrupt_mask, bool two_shuffles) {
         IntrusivePtr<Block> block{new Block(0, Location{location})};
         auto source = block->LoadUniform(Uniform{0, ValueType::V128})
                               .SetType(ValueType::V128);
-        auto indexes = block->VecLoadConst(
-                                    Imm{swift::u64{wrong_mask ? kIndexLo ^ 1u
-                                                               : kIndexLo}},
-                                    Imm{kIndexHi})
+        auto [low, high] = arm64::PshufdIndexMask(control);
+        low ^= corrupt_mask;
+        auto indexes = block->VecLoadConst(Imm{low}, Imm{high})
                                .SetType(ValueType::V128);
         auto first = block->VecShuffle32Indexed(source, indexes)
                              .SetType(ValueType::V128);
@@ -5893,23 +5891,14 @@ TEST_CASE("PSHUFD 0x4e EXT requires an exclusively shared canonical mask") {
         return Case{std::move(block), source, indexes, first};
     };
 
-    auto allocate = [&](Block* block, bool enabled) {
+    auto allocate = [&](Block* block) {
         auto features = FeatureSet{};
-        // This is a single production-style allocation, not a two-phase
-        // helper. The selector is nevertheless explicit so a future default
-        // flip cannot contaminate the OFF arm.
-        features.pshufd_4e_ext = enabled;
         auto alloc = std::make_unique<RegAlloc>(
                 block->MaxInstrId(), gprs, FPRSMask{0}, features);
         RegisterAllocPass::Run(block, alloc.get(), false, features);
         return alloc;
     };
-    struct Emitted {
-        std::size_t bytes{};
-        std::string text;
-    };
-    auto emit = [&](Block* block, RegAlloc& alloc, swift::u64 location,
-                    bool enabled) {
+    auto emit = [&](Block* block, RegAlloc& alloc, swift::u64 location) {
         Config config{
                 .loc_start = 0,
                 .loc_end = 1ull << 48,
@@ -5918,16 +5907,14 @@ TEST_CASE("PSHUFD 0x4e EXT requires an exclusively shared canonical mask") {
                 .backend_isa = kArm64,
         };
         AddressSpace address_space{config};
-        ModuleConfig module_config{};
-        module_config.feature_overrides.Set(FeatureId::pshufd_4e_ext, enabled);
         auto module = address_space.MapModule(
                 LocationDescriptor{location}, LocationDescriptor{location + 0x10},
-                module_config);
+                ModuleConfig{});
         arm64::JitContext context{module, alloc};
         arm64::JitTranslator translator{context};
         translator.Translate(block);
         context.Finish();
-        Emitted emitted{.bytes = context.CurrentBufferSize()};
+        std::string text;
         auto& masm = context.GetMasm();
         auto* first = masm.GetBuffer()->GetStartAddress<const vixl::aarch64::Instruction*>();
         auto* last = masm.GetBuffer()->GetEndAddress<const vixl::aarch64::Instruction*>();
@@ -5937,62 +5924,57 @@ TEST_CASE("PSHUFD 0x4e EXT requires an exclusively shared canonical mask") {
         for (auto* instruction = first; instruction < last;
              instruction = instruction->GetNextInstruction()) {
             decoder.Decode(instruction);
-            emitted.text += disassembler.GetOutput();
-            emitted.text += '\n';
+            text += disassembler.GetOutput();
+            text += '\n';
         }
-        return emitted;
+        return text;
     };
 
-    auto exact = make_case(0xb0400, false, false, true);
-    auto off = allocate(exact.block.get(), false);
-    auto on = allocate(exact.block.get(), true);
-    REQUIRE_FALSE(off->IsPshufd4eExt(exact.indexes.Id()));
-    REQUIRE(on->IsPshufd4eExt(exact.indexes.Id()));
-    REQUIRE(on->IsPshufd4eExt(exact.first.Id()));
-    auto off_code = emit(exact.block.get(), *off, 0xb0500, false);
-    auto on_code = emit(exact.block.get(), *on, 0xb0600, true);
-    INFO("OFF:\n" << off_code.text << "ON:\n" << on_code.text);
-    REQUIRE(on_code.bytes + 10 * vixl::aarch64::kInstructionSize == off_code.bytes);
-    REQUIRE(on_code.text.find("ext") != std::string::npos);
-    REQUIRE(on_code.text.find("tbl") == std::string::npos);
-
-    SECTION("result and source may alias") {
-        auto item = make_case(0xb0700, false, false, false);
-        auto alloc = allocate(item.block.get(), true);
-        alloc->MapRegister(item.first.Id(), alloc->ValueFPR(item.source));
-        REQUIRE(alloc->ValueFPR(item.first).id == alloc->ValueFPR(item.source).id);
-        auto code = emit(item.block.get(), *alloc, 0xb0800, true);
-        REQUIRE(code.text.find("ext") != std::string::npos);
-        REQUIRE(code.text.find("tbl") == std::string::npos);
+    for (const auto [name, control, mnemonic] : {
+                 std::tuple{"lane rotation", swift::u8{0x4E}, "ext"},
+                 std::tuple{"lane splat", swift::u8{0x00}, "dup"}}) {
+        DYNAMIC_SECTION(name << " uses one-instruction shuffles") {
+            auto item = make_case(0xb0400 + control, control, false, false, true);
+            auto alloc = allocate(item.block.get());
+            REQUIRE(alloc->IsPshufdDirect(item.indexes.Id()));
+            REQUIRE(alloc->IsPshufdDirect(item.first.Id()));
+            auto code = emit(item.block.get(), *alloc, 0xb0500 + control);
+            REQUIRE(code.find(mnemonic) != std::string::npos);
+            REQUIRE(code.find("tbl") == std::string::npos);
+        }
     }
 
-    for (const auto [name, mixed, wrong_mask] : {
+    SECTION("result and source may alias") {
+        auto item = make_case(0xb0700, 0x4E, false, false, false);
+        auto alloc = allocate(item.block.get());
+        alloc->MapRegister(item.first.Id(), alloc->ValueFPR(item.source));
+        REQUIRE(alloc->ValueFPR(item.first).id == alloc->ValueFPR(item.source).id);
+        auto code = emit(item.block.get(), *alloc, 0xb0800);
+        REQUIRE(code.find("ext") != std::string::npos);
+        REQUIRE(code.find("tbl") == std::string::npos);
+    }
+
+    for (const auto [name, mixed, corrupt_mask] : {
                  std::tuple{"mixed consumer", true, false},
-                 std::tuple{"non-0x4e mask", false, true}}) {
-        DYNAMIC_SECTION(name << " keeps the old bytes") {
-            auto item = make_case(0xb0900 + mixed * 0x20 + wrong_mask * 0x40,
-                                  mixed, wrong_mask, true);
-            auto item_off = allocate(item.block.get(), false);
-            auto item_on = allocate(item.block.get(), true);
-            REQUIRE_FALSE(item_on->IsPshufd4eExt(item.indexes.Id()));
-            auto old_code = emit(item.block.get(), *item_off, 0xb0a00, false);
-            auto new_code = emit(item.block.get(), *item_on, 0xb0a00, true);
-            REQUIRE(new_code.bytes == old_code.bytes);
-            REQUIRE(new_code.text == old_code.text);
+                 std::tuple{"non-canonical mask", false, true}}) {
+        DYNAMIC_SECTION(name << " keeps indexed lowering") {
+            auto item = make_case(0xb0900 + mixed * 0x20 + corrupt_mask * 0x40,
+                                  0x4E, mixed, corrupt_mask, true);
+            auto alloc = allocate(item.block.get());
+            REQUIRE_FALSE(alloc->IsPshufdDirect(item.indexes.Id()));
+            auto code = emit(item.block.get(), *alloc, 0xb0a00);
+            REQUIRE(code.find("tbl") != std::string::npos);
         }
     }
 
     SECTION("the canonical mask cannot also be the shuffled source") {
-        auto item = make_case(0xb0b00, false, false, false);
+        auto item = make_case(0xb0b00, 0x4E, false, false, false);
         item.first.Def()->SetArg(0, item.indexes);
         item.block->ReIdInstr();
-        auto item_off = allocate(item.block.get(), false);
-        auto item_on = allocate(item.block.get(), true);
-        REQUIRE_FALSE(item_on->IsPshufd4eExt(item.indexes.Id()));
-        auto old_code = emit(item.block.get(), *item_off, 0xb0c00, false);
-        auto new_code = emit(item.block.get(), *item_on, 0xb0c00, true);
-        REQUIRE(new_code.bytes == old_code.bytes);
-        REQUIRE(new_code.text == old_code.text);
+        auto alloc = allocate(item.block.get());
+        REQUIRE_FALSE(alloc->IsPshufdDirect(item.indexes.Id()));
+        auto code = emit(item.block.get(), *alloc, 0xb0c00);
+        REQUIRE(code.find("tbl") != std::string::npos);
     }
 }
 
