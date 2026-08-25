@@ -1137,6 +1137,18 @@ peepholes.
   `89ccd2e15dba67378197d05524a6223795f8b8ab2d11f4d40deaef4af9f35c6e`. Five focused local cases
   pass 182 assertions, the fixed-seed local differential remains 90/90 existing mismatches and the
   Mac short oracle is exact. This stage ran no long benchmark, stress test or full suite.
+- `c540443` collapses a pinned low-32 self-publication from `UBFX + MOV + MOV` to the one required
+  architectural W self-write. The backend proof accepts only a same-pin
+  `GetHostGPR(U32) -> ZeroExtend32To64 -> SetHostGPR(U64)` chain, preserves the high-half clear,
+  and redirects later transparent aliases only when every alias is used as a memory address before
+  any replacement write to that pin. CoreMark keeps 2,846 PCs / 3,379 versions and `crcfinal=0x382f`;
+  weighted host work falls `5,987,682,134 -> 5,885,762,053` (`-101,920,081`, `-1.702163%`). The two
+  10.24M-entry hotspots at `0x403630` and `0x403688` each shrink from 25 to 23 host instructions and
+  from six to four moves. The bounded smallpt gate keeps 2,802 PCs / 3,435 versions, zero spills and
+  the exact PPM while moving `399,467 -> 399,449` (`-18`, `-0.004506%`). The deterministic c-ray
+  oracle remains SHA `89ccd2e15dba67378197d05524a6223795f8b8ab2d11f4d40deaef4af9f35c6e`.
+  Focused pinned-GPR, integer-width and composite-memory tests pass 60 assertions. This stage ran no
+  long benchmark, stress test or full suite.
 
 ## Orb loop
 
