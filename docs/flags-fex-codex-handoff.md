@@ -905,6 +905,16 @@ peepholes.
   differential passes 3,482 assertions and the focused flags units pass 66. The existing
   setcc/CMOV/Jcc fuzz has the same 124 known flag differences in baseline and candidate. This stage
   ran no long benchmark, stress test or full suite.
+- `cab14f9` lowers the twelve PSHUFD controls that map exactly to one Arm64 copy, `DUP`, `EXT`,
+  `ZIP` or `TRN` instruction through one shared decoder. Immediate and cached-index forms use the
+  same emitter; an indexed form skips `VecLoadConst` only when every use belongs to the proven
+  direct-shuffle component. The former `SVM_PSHUFD_4E_EXT` gate and its obsolete fallback were
+  removed. The bounded Orb screen completes in 2.852 seconds with identical PC/version sets,
+  99.995707% retained-host coverage, all top-20 PCs, no growing PC and exact PPM SHA. The comparable
+  total falls `4,143,628 -> 4,111,648` (`-31,980`, `-0.771787%`); `0x436420` accounts for 31,720.
+  The exclusive-use proof passes 17 assertions, the complete 256-immediate cached/uncached sweep
+  passes 6,914 and the FeatureSet contract passes 158. This stage ran no long benchmark, stress
+  test or full suite.
 
 ## Orb loop
 
