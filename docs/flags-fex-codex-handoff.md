@@ -956,6 +956,16 @@ peepholes.
   six assertions and two flags-off regression groups pass 257. A fixed-seed 256-iteration flags
   differential retains the same 95 known differences and mismatch hash in baseline and candidate.
   This stage ran no long benchmark, stress test or full suite.
+- `4595fc5` keeps a full-width coalesced arithmetic result in its pinned GPR while the flags token
+  remains block-local. The proof requires the exact coalesced host publication and rejects later
+  physical-register reuse, hard clobbers and every later write to the same guest home. Region edges,
+  pending-flags backedges and parked state still normalize to the `x12` ABI when required. The unused
+  AF-in-token state was removed. The bounded Orb screen completes in 3.701 seconds with identical
+  2,755-PC / 3,621-version sets, 99.995707% retained-host coverage, all top-20 PCs, no growing PC and
+  exact PPM SHA `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`.
+  The comparable total falls `3,910,564 -> 3,894,028` (`-16,536`, `-0.422855%`). Six focused flags
+  codegen cases pass; the broad flags filter retains the same two pre-existing 8-bit shift failures
+  in baseline and candidate. This stage ran no long benchmark, stress test or full suite.
 
 ## Orb loop
 
