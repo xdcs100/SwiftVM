@@ -934,6 +934,16 @@ peepholes.
   falls `4,061,499 -> 4,039,995` (`-21,504`, `-0.529460%`); `0x40248e` and `0x402497` each lose
   seven instructions per entry. Ten focused scalar-FPR, differential and fault tests pass 521
   assertions locally. This stage ran no long benchmark, stress test or full suite.
+- `4355474` lets adjacent scalar memory-load publications share one zero high-half constant. The
+  zero is removed only when every use participates in a proven scalar publication, while each load
+  still requires single use, exact adjacency, fault-safe ordering and no live fixed-home conflict.
+  The bounded Orb screen completes in 2.829 seconds with identical 2,755-PC / 3,621-version sets,
+  99.995707% retained-host coverage, all top-20 PCs, no growing PC and exact PPM SHA
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. The comparable total
+  falls `4,039,995 -> 3,994,447` (`-45,548`, `-1.127427%`). The largest reductions are `0x402777`
+  at 12,288, `0x4026a0` at 10,212, `0x40248e` at 9,516 and `0x402497` at 8,916. Three focused
+  scalar-load, shared-zero and fault tests pass 21 assertions locally. This stage ran no long
+  benchmark, stress test or full suite.
 
 ## Orb loop
 
