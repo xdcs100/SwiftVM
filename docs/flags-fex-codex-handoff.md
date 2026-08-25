@@ -716,6 +716,7 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 | Saved-flags compound `CondSet` | two-instruction HI/LS and GE/LT forms were implemented and validated, but execute 0 times in formal smallpt/CoreMark and the c-ray audit sample; GT/LE still need three inputs, so the zero-gain prototype was removed |
 | General narrow `TEST` direct-`And` flags | 496-PC bounded A/B had 29 shrinking and 31 growing PCs, only 13 net static instructions and `-623` retained-formal-weighted instructions; fully reverted |
 | Global inverted-carry ABI default | bounded smallpt aborted on the scalar-FPR fixed-home proof before producing an oracle; a safe version requires explicit edge polarity rather than changing the decoder default, fully reverted |
+| Integer `Sub` branch-only carry normalization | the non-carry-only form still changed the bounded unit/version set from 2,755/3,621 to 2,785/3,056; strict coverage was 99.648660% with two growing PCs, below the 99.9% gate despite `-0.908475%` on the comparable subset, fully reverted |
 
 ## Next ready (pick one, measure, revert on 124/134)
 
