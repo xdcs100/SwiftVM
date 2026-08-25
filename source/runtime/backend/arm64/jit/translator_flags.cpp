@@ -899,7 +899,8 @@ bool JitTranslator::CanUseCompactFCmpCarrier(ir::Inst* fcmp) const {
         saw_condition = true;
         auto scan = publish;
         for (++scan; scan != list.end() && &*scan != &user; ++scan) {
-            if (!PreservesHostNZCV(scan->GetOp())) {
+            if (scan->GetOp() != ir::OpCode::InvertCarry &&
+                !PreservesHostNZCV(scan->GetOp())) {
                 return false;
             }
         }
