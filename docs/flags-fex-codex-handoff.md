@@ -377,8 +377,8 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
   `-227,602,716` with 67 PCs smaller and none larger. STREAM raw/equal-entry are `-152` / `-216`;
   CoreMark raw/equal-entry are `-147` / `-216`. PPM, c-ray IDAT, STREAM validation, CoreMark CRC
   and spill gates remain exact.
-- The default x86 GPR map is not full pin: `SVM_X86_PIN_EXT=2` keeps 12 of 16 architectural GPRs
-  resident; only opt-in level 3 adds R12-R15 in x6-x9. The prior level-3 audit grew 4,400-unit host
+- The default x86 GPR map is not full pin: `SVM_X86_PIN_EXT=2` keeps 13 of 16 architectural GPRs
+  resident; only opt-in level 3 adds R13-R15 in x7-x9. The prior level-3 audit grew 4,400-unit host
   code by 3.89%, raised spill memory operations from 5,425 to 14,071 and lost 10.18% on loaded
   CoreMark, so it remains rejected. In the retained formal smallpt logs, 72,003,699 / 86,980,059
   weighted SetHostGPR instances and 123,911,206 / 129,472,617 GetHostGPR instances already emit
@@ -737,13 +737,14 @@ peepholes.
    the complete pre-canonical-to-current comparison still has only 37.091% strict coverage. The next
    promoted-stage run must remeasure unit formation and guest-normalized host density; do not quote
    either raw short `host_dynamic` change as the FEX gap improvement.
-2. **Pinned GPR residuals** — keep level 2 as the performance default. Recount actual emitted bytes,
+2. **Pinned GPR residuals** — keep the 13-register level 2 map as the performance default. Recount actual emitted bytes,
    not GetHost/SetHost IR. The largest remaining SetHost moves in the retained log implement real
    guest copies such as `mov rbp,rdi` and `mov rbx,rdx`; deleting them requires architectural
    register renaming, not another fixed-home peephole. Direct ordinary StoreMemory payload reads
    and callee-saved `Sub` reads are closed. Continue only with another measured consumer that can
    read the fixed home directly while retaining snapshot, width and helper-clobber proofs; the
-   same `Add` extension was only `-51` and is closed. A current bounded emitted-write census has
+   same `Add` extension was only `-51` and is closed. Selective R12 pinning is landed; do not extend
+   the map to R13-R15 without another cross-workload result. The pre-R12 bounded emitted-write census has
    31,705 weighted `SetHostGPR` instructions: 13,002 are `GetHostGPR`-root guest copies, while the
    3,944 `SignExtend` pool is now closed. Recount roots after each landed stage; do not treat the
    remaining total as a generally safe GetHost elimination. Another 5,157 `Sub`-root live writes
@@ -780,7 +781,7 @@ peepholes.
 
 ## 2026-08-25 continuation
 
-- Default level 2 still pins 12 of 16 guest GPRs. Level 3/full pin remains closed: the fixed audit
+- Default level 2 now pins 13 of 16 guest GPRs. Level 3/full pin remains closed: the fixed audit
   grows move/bridge work by 3.526%, and the Mac Debug pool can abort at 6 available registers for
   a 21-register scratch demand.
 - `quick_shape.py --static-only` now captures the existing host dump without runtime entry counters.
@@ -1069,15 +1070,40 @@ peepholes.
   dead-edge tests pass 22 / 72 assertions. The fixed-seed 256-iteration Orb setcc/cmov/jcc
   differential retains the documented 95 existing mismatches. This stage ran no long benchmark,
   stress test or full suite.
+- `90fcc3c` keeps PF-only logical publications out of the pending-NZCV state. They no longer emit a
+  dead `TST` or leave an empty merge mask that aborts the next ordinary `Select`. The focused
+  regression passes three assertions. The corrected no-R12 smallpt shape is effectively neutral
+  against `86aaac4` on common PCs (`-2` short dynamic instructions) with the same PPM and zero
+  spills. The fix also lets the bounded c-ray path proceed to the next independently exposed proof.
+- `438c634` extends the resident scalar-FPR chain proof through a valid in-place `VecFUnary` node.
+  Register allocation and backend reproving now agree on the same fixed-home chain and coalesce its
+  final publication. This removes the c-ray `0x41bc20` proof abort without weakening the last-use,
+  same-home or crossing-write gates. The scalar fixed-home test passes 276 assertions; c-ray
+  `128x96`, four-sample output is exact in both A/B arms.
+- `c1d85c6` adds R12/x6 to the default level-2 static map while leaving x7-x9 available. The exact
+  fixed-baseline/candidate `smallpt_wh_x64 4 8 6` run keeps 2,802 PCs, 3,435 versions, the PPM SHA
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1` and zero spills; short
+  dynamic host work falls `411,321 -> 406,727` (`-4,594`, `-1.116889%`). Applying retained entries
+  to the prior exact comparison gives `3,523,261 -> 3,457,146` (`-66,115`, `-1.876529%`). The
+  bounded c-ray static common total falls `219,512 -> 218,190` (`-1,322`, `-0.602245%`) with exact
+  output. CoreMark moves in the other direction: exact dynamic host work grows
+  `6,199,760,435 -> 6,215,732,448` (`+15,972,013`, `+0.257623%`) while CRC remains `0x382f`.
+  This trade is retained because CoreMark is already substantially ahead of the measured FEX
+  reference, while smallpt and c-ray are current deficits. Static-pin, pinned-GPR, page-fault and
+  scalar-chain focused gates pass 457 assertions. This stage makes no wall-time claim and ran no
+  long benchmark, stress test or full suite.
 
 ## Orb loop
 
 ```
 M=/mnt/mac/Users/swift/CLionProjects/SwiftVM
 P=/home/swift/svm-phasec/SwiftVM
-git ls-files -z | rsync -a --from0 --files-from=- ./ ubuntu@orb:$P/
+git ls-files -z | rsync -a --no-times --checksum --from0 --files-from=- ./ ubuntu@orb:$P/
 cmake --build /home/swift/svm-phasec/build --target svm_translator_linux -j$(nproc)
 ```
+
+Keep `--no-times --checksum` for A/B source switches. Preserved older source mtimes can otherwise
+leave a newer Ninja object in place even though the source contents changed.
 
 Mac: `cmake --build build-master --target swift_runtime`.
 
