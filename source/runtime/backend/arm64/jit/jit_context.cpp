@@ -390,15 +390,20 @@ bool JitContext::FlushSpillWrites(ir::Inst* consumer) {
 #if defined(__linux__) && !defined(__ANDROID__)
         if (consumer && !forwarded && !write.is_fpr && write.reg == spill_scratch.GetCode() &&
             !IsSpillForwardBarrier(consumer->GetOp())) {
+            u32 direct_uses = 0;
+            ir::Inst* definition = nullptr;
             for (const auto& value : consumer->GetValues()) {
                 if (value.Defined() && value.Id() == write.value) {
-                    spill_use_scratch.emplace(write.value, write.reg);
-                    retained = write;
-                    forwarded = true;
-                    break;
+                    definition = value.Def();
+                    ++direct_uses;
                 }
             }
-            if (forwarded) {
+            if (definition) {
+                spill_use_scratch.emplace(write.value, write.reg);
+                if (definition->GetUses(false) != direct_uses) {
+                    retained = write;
+                }
+                forwarded = true;
                 continue;
             }
         }

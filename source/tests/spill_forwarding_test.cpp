@@ -93,6 +93,9 @@ TEST_CASE("adjacent spilled scalar def-use stays in the reserved scratch") {
         return (line.find("str x18, [x28") != std::string::npos) ||
                (line.find("ldr x18, [x28") != std::string::npos);
     }));
+    const auto after_consumer = std::next(consumer);
+    REQUIRE(after_consumer != emitted.end());
+    REQUIRE(after_consumer->find("str x18, [x28") == std::string::npos);
 #else
     SUCCEED("reserved spill scratch is Linux-only");
 #endif
