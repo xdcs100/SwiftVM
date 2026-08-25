@@ -8,13 +8,29 @@ namespace swift::runtime::backend::arm64 {
 bool JitTranslator::CanUseZeroStoreRegister(ir::Value value) {
     auto* definition = value.Def();
     if (!context.GetFeatures().zero_store_zr || context.IsSpilled(value) ||
-        !definition || definition->GetOp() != ir::OpCode::LoadImm ||
-        definition->GetArg<ir::Imm>(0).Get() != 0 ||
-        ir::IsFloatValueType(value.Type()) ||
+        !definition || !IsZeroStoreValue(value) ||
         ir::GetValueSizeByte(value.Type()) > sizeof(u64)) {
         return false;
     }
+    return HasOnlyZeroStoreUses(definition);
+}
 
+bool JitTranslator::IsZeroStoreValue(ir::Value value) {
+    if (!value.Defined() || ir::IsFloatValueType(value.Type())) {
+        return false;
+    }
+    auto* definition = value.Def();
+    if (definition->GetOp() == ir::OpCode::LoadImm) {
+        return definition->GetArg<ir::Imm>(0).Get() == 0;
+    }
+    if (definition->GetOp() != ir::OpCode::ZeroExtend32 &&
+        definition->GetOp() != ir::OpCode::ZeroExtend32To64) {
+        return false;
+    }
+    return IsZeroStoreValue(definition->GetArg<ir::Value>(0));
+}
+
+bool JitTranslator::HasOnlyZeroStoreUses(ir::Inst* definition) {
     u32 compatible_uses = 0;
     for (auto& use : cur_block->GetInstList()) {
         if ((use.GetOp() == ir::OpCode::StoreUniform ||
@@ -23,6 +39,13 @@ bool JitTranslator::CanUseZeroStoreRegister(ir::Value value) {
             ++compatible_uses;
         } else if (use.GetOp() == ir::OpCode::SetHostFPR &&
                    use.GetArg<ir::Value>(0).Def() == definition) {
+            ++compatible_uses;
+        } else if ((use.GetOp() == ir::OpCode::ZeroExtend32 ||
+                    use.GetOp() == ir::OpCode::ZeroExtend32To64) &&
+                   use.GetArg<ir::Value>(0).Def() == definition &&
+                   !context.IsSpilled(ir::Value{&use}) &&
+                   IsZeroStoreValue(ir::Value{&use}) &&
+                   HasOnlyZeroStoreUses(&use)) {
             ++compatible_uses;
         }
     }

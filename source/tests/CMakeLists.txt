@@ -16,6 +16,7 @@ add_executable(swift_test
         scalar_load_fpr_fusion_test.cpp
         scalar_memory_ea_test.cpp
         stack_writeback_test.cpp
+        zero_store_chain_test.cpp
         main_case.cpp
         ../translator/linux/guest_memory.cpp
         smc_tracker_test.cpp

@@ -500,6 +500,9 @@ void JitTranslator::EmitZeroTestPreservingPstate(ir::Inst* inst, bool nonzero) {
 }
 
 void JitTranslator::EmitZeroExtend32(ir::Inst* inst) {
+    if (CanUseZeroStoreRegister(ir::Value{inst})) {
+        return;
+    }
     auto value = inst->GetArg<ir::Value>(0);
     auto result = context.W(ir::Value{inst});
     auto fused = value.Def() ? fused_pin_gpr_reads.find(value.Def())
@@ -544,6 +547,9 @@ void JitTranslator::EmitZeroExtend32(ir::Inst* inst) {
 }
 
 void JitTranslator::EmitZeroExtend32To64(ir::Inst* inst) {
+    if (CanUseZeroStoreRegister(ir::Value{inst})) {
+        return;
+    }
     auto source = inst->GetArg<ir::Value>(0);
     if (context.IsWidthChainCoalesced(inst->Id())) {
         ASSERT_MSG(ReproveWidthChainBridge(inst),

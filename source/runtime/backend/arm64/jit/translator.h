@@ -114,6 +114,8 @@ public:
 private:
     void EmitExecutionTrace(u64 guest_rip);
     [[nodiscard]] bool CanUseZeroStoreRegister(ir::Value value);
+    [[nodiscard]] bool IsZeroStoreValue(ir::Value value);
+    [[nodiscard]] bool HasOnlyZeroStoreUses(ir::Inst* definition);
     [[nodiscard]] bool ReproveCoalescedHostWrite(ir::Inst* inst) const;
     [[nodiscard]] bool ReproveCoalescedHostRead(ir::Inst* inst) const;
     [[nodiscard]] std::optional<u64> CachedConstAddressOffset(ir::Inst* inst) const;
