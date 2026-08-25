@@ -857,6 +857,21 @@ peepholes.
   is larger. The Mac 558-PC static screen is exact and falls `62,372 -> 62,209` (`-0.261335%`).
   Cache format is v9. Resident ABI, rollback, fault, AFP and cache tests pass locally; this stage ran
   no long benchmark, stress test or full suite.
+- Scalar binary chains now transfer a resident XMM home across each exact last-use edge instead of
+  computing in a temporary FPR and publishing later. At `0x4023c0`, three multiply/add chains lose
+  six full-vector moves and the unit falls from 377 to 371 host instructions. Applying the retained
+  baseline entries to 2,785 same-version Orb PCs gives `4,379,137 -> 4,249,587` (`-129,550`,
+  `-2.958345%`); the largest reductions are `0x402777` and `0x40284e` at nine instructions each.
+  The single bounded production run records 2,793 PCs, 3,659 versions, 271,517 entries,
+  `host_dynamic=4,276,521`, `move_dynamic=1,059,189`, zero spills and exact PPM SHA
+  `fe779f46a4c8f0f75ab42b573253492e5f1da2ee508fdb6aee62389787244cd0`.
+- Resident-XMM fault snapshots now retain the last pre-fault carrier and let register allocation
+  commit it directly into the fixed home. This fixes the packed arithmetic fault case where a
+  faulting RHS load previously returned stale XMM state. Its focused code remains 16 host
+  instructions with `fmul v16` committed before the load and `fadd v16` after it. One smallpt
+  boundary block requires one real publication instruction, costing 3,048 retained-weight
+  instructions versus the unsafe candidate. Local and Orb FPR/XMM/scalar validation both pass
+  1,887 assertions across 24 tests. This stage ran no long benchmark, stress test or full suite.
 
 ## Orb loop
 

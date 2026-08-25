@@ -1412,8 +1412,8 @@ TEST_CASE("XMM fault snapshots retain the latest SSA value and remove only safe 
     REQUIRE(before_mapped_write->GetOp() == OpCode::StoreUniform);
     REQUIRE(before_mapped_write->GetArg<Value>(1) == forwarded_product);
 
-    // Resident XMM homes are recovered from their fixed FPRs on a fault and
-    // therefore must never acquire State snapshot plans or publication tax.
+    // Keep the last pre-fault carrier so register allocation can commit it
+    // directly into the resident home before the faulting instruction.
     UniformInfo resident_info = info;
     UniformRegister resident{.uniform = Uniform{0, ValueType::V128}};
     resident.host_reg.fpr = HostFPR{17};
@@ -1423,7 +1423,10 @@ TEST_CASE("XMM fault snapshots retain the latest SSA value and remove only safe 
     auto resident_shape = make_triad();
     UniformStoreSinkPass::CaptureLatestSnapshots(resident_shape.block.get(),
                                                   resident_info);
-    REQUIRE(resident_shape.block->GetUniformSnapshotPlans().empty());
+    const auto& resident_plans = resident_shape.block->GetUniformSnapshotPlans();
+    REQUIRE(resident_plans.size() == 1);
+    REQUIRE(resident_plans.front().boundary == resident_shape.observation);
+    REQUIRE(resident_plans.front().value == resident_shape.product);
 
     const std::array affected_producers{
             OpCode::VecFAdd, OpCode::VecFSub, OpCode::VecFMul,
@@ -6134,6 +6137,26 @@ TEST_CASE("scalar FPR fixed-home tie requires an exact safe publication window")
         REQUIRE(untied_on_code.bytes == untied_off_code.bytes);
         REQUIRE(untied_on_code.text == untied_off_code.text);
         ++index;
+    }
+
+    SECTION("a scalar chain keeps the resident destination until publication") {
+        IntrusivePtr<Block> block{new Block(0, Location{0x10400})};
+        auto left = block->GetHostFPR(HostRegIndex(target), Imm{0u}).SetType(ValueType::V128);
+        auto right = block->LoadUniform(Uniform{16, ValueType::V128}).SetType(ValueType::V128);
+        auto first = block->VecFMulScalar64(left, right).SetType(ValueType::V128);
+        auto second = block->VecFAddScalar64(first, right).SetType(ValueType::V128);
+        block->AppendInst(OpCode::SetHostFPR, second, HostRegIndex(target), Imm{0u});
+        block->SetTerminal(terminal::ReturnToDispatch{});
+        block->ReIdInstr();
+
+        auto off = allocate(block.get(), false);
+        auto off_code = emit(block.get(), *off, 0x11400, false);
+        auto on = allocate(block.get(), true);
+        REQUIRE(on->ValueFPR(first).id == target);
+        REQUIRE(on->ValueFPR(second).id == target);
+        auto on_code = emit(block.get(), *on, 0x12400, true);
+        INFO("OFF:\n" << off_code.text << "ON:\n" << on_code.text);
+        REQUIRE(on_code.bytes + 2 * vixl::aarch64::kInstructionSize == off_code.bytes);
     }
 
     SECTION("a third-party fixed-home write rejects the scalar tie") {

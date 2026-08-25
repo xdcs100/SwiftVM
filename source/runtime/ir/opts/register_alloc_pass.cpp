@@ -588,7 +588,12 @@ private:
                          : type != backend::RegAlloc::GPR) {
                 return;
             }
-            if (!is_float) {
+            if (is_float) {
+                const u32 code = reg_alloc->ValueFPR(active.inst->Id()).id;
+                if (reg_alloc->GetFprs().Get(code)) {
+                    return;
+                }
+            } else {
                 const u32 code = reg_alloc->ValueGPR(active.inst->Id()).id;
                 // A fixed-home/tied static register cannot be returned to the
                 // value pool, and a register forbidden across the incoming
@@ -1608,6 +1613,20 @@ private:
             reg_alloc->ValueType(source) != backend::RegAlloc::FPR) {
             return false;
         }
+        const auto source_fpr = reg_alloc->ValueFPR(source);
+        if (reg_alloc->GetFprs().Get(source_fpr.id)) {
+            auto writes = scalar_tie_fpr_writes.find(source_fpr.id);
+            if (writes != scalar_tie_fpr_writes.end() &&
+                std::any_of(writes->second.begin(), writes->second.end(), [&current](u32 write_id) {
+                    return current.start < write_id && write_id < current.end;
+                })) {
+                return false;
+            }
+        }
+        const auto fixed_source = scalar_tie_fixed_read_end.find(source.Id());
+        const bool transfer_fixed_source = fixed_source != scalar_tie_fixed_read_end.end() &&
+                                           fixed_source->second == current.start &&
+                                           reg_alloc->IsHostReadCoalesced(source.Id());
 
         auto matches = [&](const LiveInterval& live) {
             return live.inst->Id() == source.Id() && live.end == current.start;
@@ -1630,10 +1649,10 @@ private:
                 removed = true;
             }
         }
-        if (!removed) {
+        if (!removed && !transfer_fixed_source) {
             return false;
         }
-        reg_alloc->MapRegister(current.inst->Id(), reg_alloc->ValueFPR(source));
+        reg_alloc->MapRegister(current.inst->Id(), source_fpr);
         return true;
     }
 
@@ -1740,6 +1759,8 @@ private:
 
     void CollectLiveIntervals(HIRFunction* hir_function) {
         PerfScope2 perf_scan{GetPerfStats2().regalloc_live_scan};
+        scalar_tie_fpr_writes.clear();
+        scalar_tie_fixed_read_end.clear();
         // A value referenced ONLY by a block terminal (terminal::If.cond, a
         // Switch dispatch value, ...) never appears in the HIRValue use list:
         // HIRFunction::UseInst walks instruction arguments only, and EndBlock
@@ -1767,6 +1788,7 @@ private:
                 } else if (inst.GetOp() == OpCode::SetHostFPR) {
                     const auto host_reg = static_cast<u16>(inst.GetArg<Imm>(1).Get());
                     host_fpr_writes[host_reg].push_back(inst.Id());
+                    scalar_tie_fpr_writes[host_reg].push_back(inst.Id());
                 }
                 for (auto value : inst.GetValues()) {
                     auto source = ResolveBitCastSource(value);
@@ -1829,21 +1851,17 @@ private:
             auto& hir_value = *hir_value_ptr;
             auto instr = hir_value.value.Def();
             auto start = hir_value.GetOrderId();
-            u32 end{hir_value.GetOrderId()};
-            std::for_each(hir_value.uses.begin(), hir_value.uses.end(), [&end](auto& use) {
-                end = std::max(end, (u32) use.inst->Id());
-            });
-            // Block optimization passes can turn a LoadUniform into a BitCast
-            // after HIR use lists were built. Scan the current instructions
-            // above so alias roots remain live even when those lists are stale.
+            u32 current_end{hir_value.GetOrderId()};
             if (auto it = actual_use_end.find(instr->Id()); it != actual_use_end.end()) {
-                end = std::max(end, it->second);
+                current_end = std::max(current_end, it->second);
             }
-            // Extend for terminal uses (see above): the value must stay live
-            // until the end of the block whose terminal reads it.
             if (auto it = terminal_end.find(instr->Id()); it != terminal_end.end()) {
-                end = std::max(end, it->second);
+                current_end = std::max(current_end, it->second);
             }
+            u32 end{current_end};
+            std::for_each(hir_value.uses.begin(), hir_value.uses.end(), [&end](auto& use) {
+                end = std::max(end, (u32)use.inst->Id());
+            });
             const bool host_reg_alias = instr->IsGetHostRegOperation();
             const auto host_index =
                     host_reg_alias ? static_cast<u16>(instr->GetArg<Imm>(0).Get()) : u16{};
@@ -1860,17 +1878,19 @@ private:
                     full_gpr_get &&
                     !LiveRangeCrossesHostRegWrite(host_gpr_writes, host_index, instr->Id(), end);
             const bool fixed_fpr_alias =
-                    fixed_fpr_get &&
-                    end <= definition_block_end[instr->Id()] &&
+                    fixed_fpr_get && end <= definition_block_end[instr->Id()] &&
                     !LiveRangeCrossesHostRegWrite(host_fpr_writes, host_index, instr->Id(), end);
-            if (fixed_fpr_alias || fixed_gpr_get) {
-                if (fixed_fpr_alias) {
-                    reg_alloc->MapRegister(hir_value.GetOrderId(), HostFPR{host_index});
-                    reg_alloc->MarkHostReadCoalesced(hir_value.GetOrderId());
-                } else {
-                    MapFixedRead(hir_value.GetOrderId(), host_index);
-                    fixed_gpr_alias_end[hir_value.GetOrderId()] = end;
+            if (fixed_fpr_alias) {
+                reg_alloc->MapRegister(hir_value.GetOrderId(), HostFPR{host_index});
+                reg_alloc->MarkHostReadCoalesced(hir_value.GetOrderId());
+                if (scalar_insert && features.sse_scalar_tie) {
+                    scalar_tie_fixed_read_end.emplace(instr->Id(), current_end);
                 }
+                continue;
+            }
+            if (fixed_gpr_get) {
+                MapFixedRead(hir_value.GetOrderId(), host_index);
+                fixed_gpr_alias_end[hir_value.GetOrderId()] = end;
                 continue;
             }
             if (instr->IsBitCastOperation()) {
@@ -1891,6 +1911,8 @@ private:
         ASSERT_MSG(rpo.size() == 1, "single-block register allocator received {} blocks",
                    rpo.size());
         auto* lir_block = rpo.front().GetBlock();
+        scalar_tie_fpr_writes.clear();
+        scalar_tie_fixed_read_end.clear();
         const auto instr_count = static_cast<u32>(hir_function->MaxInstrCount());
 
         // Exact specialization of the function collector above: instruction ids
@@ -1912,6 +1934,7 @@ private:
             } else if (inst.GetOp() == OpCode::SetHostFPR) {
                 const auto host_reg = static_cast<u16>(inst.GetArg<Imm>(1).Get());
                 host_fpr_writes.emplace_back(host_reg, inst.Id());
+                scalar_tie_fpr_writes[host_reg].push_back(inst.Id());
             }
             auto record_use = [&actual_use_end, &inst](Value value) {
                 auto source = ResolveBitCastSource(value);
@@ -1982,7 +2005,9 @@ private:
             auto& hir_value = *hir_value_ptr;
             auto* instr = hir_value.value.Def();
             auto start = hir_value.GetOrderId();
-            u32 end{hir_value.GetOrderId()};
+            const u32 current_end =
+                    std::max<u32>(hir_value.GetOrderId(), actual_use_end[instr->Id()]);
+            u32 end{current_end};
             // Preserve the generic collector's use-list maximum even when an
             // optimization has left a stale use behind. The current-argument
             // scan below is the matching second maximum: it catches rewritten
@@ -2010,21 +2035,25 @@ private:
                                 });
             const bool fixed_gpr_get = full_gpr_get && !crosses_host_write;
             const bool crosses_host_fpr_write =
-                    fixed_fpr_get &&
-                    std::any_of(host_fpr_writes.begin(), host_fpr_writes.end(),
-                                [host_index, instr, end](const auto& write) {
-                                    return write.first == host_index && instr->Id() < write.second &&
-                                           write.second <= end;
-                                });
+                    fixed_fpr_get && std::any_of(host_fpr_writes.begin(),
+                                                 host_fpr_writes.end(),
+                                                 [host_index, instr, end](const auto& write) {
+                                                     return write.first == host_index &&
+                                                            instr->Id() < write.second &&
+                                                            write.second <= end;
+                                                 });
             const bool fixed_fpr_alias = fixed_fpr_get && !crosses_host_fpr_write;
-            if (fixed_fpr_alias || fixed_gpr_get) {
-                if (fixed_fpr_alias) {
-                    reg_alloc->MapRegister(hir_value.GetOrderId(), HostFPR{host_index});
-                    reg_alloc->MarkHostReadCoalesced(hir_value.GetOrderId());
-                } else {
-                    MapFixedRead(hir_value.GetOrderId(), host_index);
-                    fixed_gpr_alias_end[hir_value.GetOrderId()] = end;
+            if (fixed_fpr_alias) {
+                reg_alloc->MapRegister(hir_value.GetOrderId(), HostFPR{host_index});
+                reg_alloc->MarkHostReadCoalesced(hir_value.GetOrderId());
+                if (scalar_insert && features.sse_scalar_tie) {
+                    scalar_tie_fixed_read_end.emplace(instr->Id(), current_end);
                 }
+                continue;
+            }
+            if (fixed_gpr_get) {
+                MapFixedRead(hir_value.GetOrderId(), host_index);
+                fixed_gpr_alias_end[hir_value.GetOrderId()] = end;
                 continue;
             }
             if (instr->IsBitCastOperation()) {
@@ -2042,6 +2071,8 @@ private:
 
     void CollectLiveIntervals(Block* lir_block) {
         PerfScope2 perf_scan{GetPerfStats2().regalloc_live_scan};
+        scalar_tie_fpr_writes.clear();
+        scalar_tie_fixed_read_end.clear();
         ASSERT_MSG(lir_block, "block == null");
         ASSERT_MSG(!lir_block->IsEmptyBlock(), "block is empty");
         StackVector<u16, 64> use_end{};
@@ -2055,6 +2086,7 @@ private:
             } else if (instr.GetOp() == OpCode::SetHostFPR) {
                 const auto host_reg = static_cast<u16>(instr.GetArg<Imm>(1).Get());
                 host_fpr_writes[host_reg].push_back(instr.Id());
+                scalar_tie_fpr_writes[host_reg].push_back(instr.Id());
             }
             if (!instr.IsGetHostRegOperation() && !instr.IsBitCastOperation()) {
                 // SetHost* is a normal use. Pinned registers are reserved from
@@ -2134,14 +2166,18 @@ private:
                     fixed_fpr_get &&
                     !LiveRangeCrossesHostRegWrite(
                             host_fpr_writes, host_index, instr.Id(), use_end[instr.Id()]);
-            if (fixed_fpr_alias || fixed_gpr_get) {
-                if (fixed_fpr_alias) {
-                    reg_alloc->MapRegister(instr.Id(), HostFPR{host_index});
-                    reg_alloc->MarkHostReadCoalesced(instr.Id());
-                } else {
-                    MapFixedRead(instr.Id(), host_index);
-                    fixed_gpr_alias_end[instr.Id()] = use_end[instr.Id()];
+            if (fixed_fpr_alias) {
+                reg_alloc->MapRegister(instr.Id(), HostFPR{host_index});
+                reg_alloc->MarkHostReadCoalesced(instr.Id());
+                if (scalar_insert && features.sse_scalar_tie) {
+                    scalar_tie_fixed_read_end.emplace(
+                            instr.Id(), std::max<u32>(instr.Id(), use_end[instr.Id()]));
                 }
+                continue;
+            }
+            if (fixed_gpr_get) {
+                MapFixedRead(instr.Id(), host_index);
+                fixed_gpr_alias_end[instr.Id()] = use_end[instr.Id()];
                 continue;
             }
             if (instr.IsBitCastOperation()) {
@@ -2341,7 +2377,9 @@ private:
 
     void FreeFPR(u32 id) {
         ASSERT(active_fprs.Get(id));
-        active_fprs.Clear(id);
+        if (!reg_alloc->GetFprs().Get(id)) {
+            active_fprs.Clear(id);
+        }
     }
 
     void FreeSpill(u32 slot) {
@@ -2357,6 +2395,8 @@ private:
     Vector<LiveInterval> fast_active_lives;
     backend::GPRSMask active_gprs;
     backend::FPRSMask active_fprs;
+    HostRegWriteMap scalar_tie_fpr_writes;
+    Map<u32, u32> scalar_tie_fixed_read_end;
     const u32 gpr_reserve{0};
     const u32 fpr_reserve{0};
     const bool single_block_fast_path{false};

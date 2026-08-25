@@ -433,14 +433,7 @@ void JitTranslator::EmitVecFScalarBinaryTied(ir::Inst* inst, u32 lane_bits) {
     const bool right_is_vector = ir::IsFloatValueType(right_value.Type());
     auto right = right_is_vector ? context.V(right_value) : context.GetTmpV();
     if (result.GetCode() == left.GetCode()) {
-        auto left_value = inst->GetArg<ir::Value>(0);
-        while (left_value.Defined() && left_value.Def()->IsBitCastOperation()) {
-            left_value = left_value.Def()->GetArg<ir::Value>(0);
-        }
-        if (sse_scalar_tie && left_value.Defined() && left_value.Def() &&
-            left_value.Def()->GetOp() == ir::OpCode::GetHostFPR &&
-            left_value.Def()->GetArg<ir::Imm>(0).Get() >= 16 &&
-            context.IsHostReadCoalesced(left_value.Id())) {
+        if (sse_scalar_tie && result.GetCode() >= 16) {
             ASSERT_MSG(ReproveScalarFPRTie(inst),
                        "scalar FPR fixed-home tie proof diverged at IR {}", inst->Id());
         }

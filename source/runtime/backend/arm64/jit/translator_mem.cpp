@@ -768,14 +768,38 @@ bool JitTranslator::ReproveCoalescedHostFPRWrite(ir::Inst* inst) const {
             return false;
         }
     }
+    auto is_in_place_successor = [&](ir::Inst& successor) {
+        if (successor.Id() <= producer->Id() || successor.Id() != produced_end) {
+            return false;
+        }
+        const auto successor_values = successor.GetValues();
+        const bool consumes_produced = std::any_of(
+                successor_values.begin(), successor_values.end(), [producer](ir::Value value) {
+                    return ResolveHostCoalesceBitCast(value).Def() == producer;
+                });
+        if (!consumes_produced) {
+            return false;
+        }
+        for (auto& scan : cur_block->GetInstList()) {
+            if (scan.Id() <= successor.Id() || scan.GetOp() != ir::OpCode::SetHostFPR ||
+                scan.GetArg<ir::Imm>(1).Get() != target || scan.GetArg<ir::Imm>(2).Get() != 0 ||
+                !context.IsHostWriteCoalesced(scan.Id())) {
+                continue;
+            }
+            if (ResolveHostCoalesceBitCast(scan.GetArg<ir::Value>(0)).Def() == &successor) {
+                return ReproveCoalescedHostFPRWrite(&scan);
+            }
+        }
+        return false;
+    };
     for (auto& other : cur_block->GetInstList()) {
         if (&other == producer || &other == inst || !other.HasValue() ||
             other.IsBitCastOperation() || other.Id() > produced_end) {
             continue;
         }
         ir::Value value{&other};
-        if (context.SharesFPR(value, produced) &&
-            last_use(&other) > producer->Id()) {
+        if (context.SharesFPR(value, produced) && last_use(&other) > producer->Id() &&
+            !is_in_place_successor(other)) {
             return false;
         }
     }
@@ -812,25 +836,63 @@ bool JitTranslator::ReproveScalarFPRTie(ir::Inst* inst) const {
         !IsHostScalarFPRBinaryProducer(inst->GetOp())) {
         return false;
     }
-    auto left = ResolveHostCoalesceBitCast(inst->GetArg<ir::Value>(0));
-    if (!left.Defined() || !left.Def() ||
-        left.Def()->GetOp() != ir::OpCode::GetHostFPR ||
-        left.Def()->GetArg<ir::Imm>(1).Get() != 0 ||
-        !context.IsHostReadCoalesced(left.Id()) ||
-        context.V(left).GetCode() != context.V(ir::Value{inst}).GetCode()) {
+    const u32 target = context.V(ir::Value{inst}).GetCode();
+    if (target < 16 || target > 31) {
         return false;
     }
-    for (auto& scan : cur_block->GetInstList()) {
-        if (scan.Id() <= inst->Id() || scan.GetOp() != ir::OpCode::SetHostFPR ||
-            !context.IsHostWriteCoalesced(scan.Id())) {
-            continue;
+    auto last_use = [&](ir::Inst* definition) {
+        u32 end = definition->Id();
+        for (auto& scan : cur_block->GetInstList()) {
+            for (auto use : scan.GetValues()) {
+                if (ResolveHostCoalesceBitCast(use).Def() == definition) {
+                    end = std::max<u32>(end, scan.Id());
+                }
+            }
         }
-        auto value = ResolveHostCoalesceBitCast(scan.GetArg<ir::Value>(0));
-        if (value.Def() == inst) {
-            return ReproveCoalescedHostFPRWrite(&scan);
+        return end;
+    };
+    auto crosses_write = [&](u32 begin, u32 end, ir::Inst* owner) {
+        for (auto& scan : cur_block->GetInstList()) {
+            if (begin < scan.Id() && scan.Id() < end && scan.GetOp() == ir::OpCode::SetHostFPR &&
+                scan.GetArg<ir::Imm>(1).Get() == target &&
+                ResolveHostCoalesceBitCast(scan.GetArg<ir::Value>(0)).Def() != owner) {
+                return true;
+            }
         }
+        return false;
+    };
+    if (crosses_write(inst->Id(), last_use(inst), inst)) {
+        return false;
     }
-    return false;
+    for (auto* node = inst;;) {
+        auto left = ResolveHostCoalesceBitCast(node->GetArg<ir::Value>(0));
+        if (!left.Defined() || !left.Def() || context.V(left).GetCode() != target ||
+            last_use(left.Def()) != node->Id() ||
+            crosses_write(left.Id(), node->Id(), left.Def())) {
+            return false;
+        }
+        if (left.Def()->GetOp() == ir::OpCode::GetHostFPR) {
+            return left.Def()->GetArg<ir::Imm>(0).Get() == target &&
+                   left.Def()->GetArg<ir::Imm>(1).Get() == 0 &&
+                   context.IsHostReadCoalesced(left.Id());
+        }
+        if (!IsHostScalarFPRBinaryProducer(left.Def()->GetOp())) {
+            for (auto& scan : cur_block->GetInstList()) {
+                if (scan.Id() <= left.Id() || scan.Id() >= node->Id() ||
+                    scan.GetOp() != ir::OpCode::SetHostFPR ||
+                    scan.GetArg<ir::Imm>(1).Get() != target ||
+                    !context.IsHostWriteCoalesced(scan.Id())) {
+                    continue;
+                }
+                auto value = ResolveHostCoalesceBitCast(scan.GetArg<ir::Value>(0));
+                if (value.Def() == left.Def()) {
+                    return ReproveCoalescedHostFPRWrite(&scan);
+                }
+            }
+            return false;
+        }
+        node = left.Def();
+    }
 }
 
 #define __ masm.

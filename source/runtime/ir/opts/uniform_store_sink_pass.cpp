@@ -240,14 +240,6 @@ void UniformStoreSinkPass::CaptureLatestSnapshots(Block* block, const UniformInf
     auto capture = [&](Inst* boundary) {
         for (const auto& range : info.xmm_uniform_ranges) {
             for (u32 offset = range.begin; offset + 16 <= range.end; offset += 16) {
-                const auto mapped = info.uniform_regs_map.GetValueAt(offset);
-                if (!mapped.Null() && mapped.host_reg.is_fpr) {
-                    // Resident XMM homes are recovered from v17-v27 by the
-                    // fault path itself. Their canonical State stores are not
-                    // snapshot carriers, so planning them would add exactly
-                    // the publication tax this pass is designed to avoid.
-                    continue;
-                }
                 const auto& first = latest[offset];
                 if (!first.value.Defined() || first.value.Type() != ValueType::V128 ||
                     first.byte != 0) {
