@@ -1101,7 +1101,12 @@ void X64Decoder::DecodeAvxFpCvtSi2Scalar(const VexInsn& v, u32 dst_bits) {
 // that rule, which is why this is a two-line handler.
 void X64Decoder::DecodeAvxFpCvtScalar2Si(const VexInsn& v, u32 src_bits, bool truncate) {
     const u32 width = v.w ? 64u : 32u;
-    auto source = VexLoadScalar(v, src_bits);
+    auto source = v.RmIsRegister()
+            ? XmmScalarV(XmmOf(v.rm), src_bits)
+            : MemLoad(ir::Operand{VexAddress(v)},
+                      src_bits == 32 ? ir::ValueType::V32
+                                     : ir::ValueType::V64,
+                      VexTsoOrdered(v));
     auto result = __ VecFCvtFloatToInt(source,
                                        ir::Imm(src_bits),
                                        ir::Imm(width),

@@ -1213,39 +1213,68 @@ void JitTranslator::EmitVecFCvtIntToFloat(ir::Inst* inst) {
 }
 
 
+void JitTranslator::EmitFRINTTSFloatToInt(const Register& result,
+                                          const VRegister& source,
+                                          u32 src_bits,
+                                          u32 dst_bits,
+                                          bool host_rounding) {
+    auto rounded = context.GetTmpV();
+    if (dst_bits == 32) {
+        if (src_bits == 32) {
+            if (host_rounding) __ Frint32x(rounded.S(), source.S());
+            else __ Frint32z(rounded.S(), source.S());
+            __ Fcvtzs(result.W(), rounded.S());
+        } else {
+            if (host_rounding) __ Frint32x(rounded.D(), source.D());
+            else __ Frint32z(rounded.D(), source.D());
+            __ Fcvtzs(result.W(), rounded.D());
+        }
+    } else {
+        if (src_bits == 32) {
+            if (host_rounding) __ Frint64x(rounded.S(), source.S());
+            else __ Frint64z(rounded.S(), source.S());
+            __ Fcvtzs(result, rounded.S());
+        } else {
+            if (host_rounding) __ Frint64x(rounded.D(), source.D());
+            else __ Frint64z(rounded.D(), source.D());
+            __ Fcvtzs(result, rounded.D());
+        }
+    }
+}
+
 void JitTranslator::EmitVecFCvtFloatToInt(ir::Inst* inst) {
-    auto source = context.X(inst->GetArg<ir::Value>(0));
+    auto source_value = inst->GetArg<ir::Value>(0);
     auto result = context.X(ir::Value{inst});
-    auto fp = context.GetTmpV();
+    const u32 src_bits = inst->GetArg<ir::Imm>(1).Get();
+    const u32 dst_bits = inst->GetArg<ir::Imm>(2).Get();
+    const bool host_rounding = inst->GetArg<ir::Imm>(3).Get() != 0;
+    auto fp = GetVecScalarOperand(source_value, src_bits);
+
+    if (True(context.GetConfig().arm64_features & Arm64Features::FRINTTS)) {
+        EmitFRINTTSFloatToInt(result, fp, src_bits, dst_bits, host_rounding);
+        return;
+    }
+
     auto bound = context.GetTmpV();
     auto bound_bits = context.GetTmpX();
     auto converted = context.GetTmpX();
     auto invalid = context.GetTmpX();
     auto test = context.GetTmpX();
     auto indefinite = context.GetTmpX();
-    const u32 src_bits = inst->GetArg<ir::Imm>(1).Get();
-    const u32 dst_bits = inst->GetArg<ir::Imm>(2).Get();
-    const bool round_nearest = inst->GetArg<ir::Imm>(3).Get() != 0;
-
-    if (src_bits == 32) {
-        __ Fmov(fp.S(), source.W());
-    } else {
-        __ Fmov(fp.D(), source);
-    }
     if (dst_bits == 32) {
         if (src_bits == 32) {
-            if (round_nearest) __ Fcvtns(converted.W(), fp.S());
+            if (host_rounding) __ Fcvtns(converted.W(), fp.S());
             else __ Fcvtzs(converted.W(), fp.S());
         } else {
-            if (round_nearest) __ Fcvtns(converted.W(), fp.D());
+            if (host_rounding) __ Fcvtns(converted.W(), fp.D());
             else __ Fcvtzs(converted.W(), fp.D());
         }
     } else {
         if (src_bits == 32) {
-            if (round_nearest) __ Fcvtns(converted, fp.S());
+            if (host_rounding) __ Fcvtns(converted, fp.S());
             else __ Fcvtzs(converted, fp.S());
         } else {
-            if (round_nearest) __ Fcvtns(converted, fp.D());
+            if (host_rounding) __ Fcvtns(converted, fp.D());
             else __ Fcvtzs(converted, fp.D());
         }
     }

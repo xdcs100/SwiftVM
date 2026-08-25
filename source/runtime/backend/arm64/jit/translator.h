@@ -451,6 +451,11 @@ private:
                               ir::Inst *inst);
     void EmitVecFScalarBinaryLegacy(ir::Inst *inst, u32 lane_bits);
     void EmitVecFScalarBinaryTied(ir::Inst *inst, u32 lane_bits);
+    void EmitFRINTTSFloatToInt(const Register &result,
+                               const VRegister &source,
+                               u32 src_bits,
+                               u32 dst_bits,
+                               bool host_rounding);
     [[nodiscard]] bool UseAFPNaN(ir::Inst *inst) const;
     VRegister PreserveNaNColdSource(ir::Inst *inst,
                                     const VRegister &source,

@@ -74,7 +74,8 @@ enum class Arm64Features : std::uint32_t {
     Fcma = 1 << 11,
     FlagM = 1 << 12,
     AXFlag = 1 << 13,
-    RPRES = 1 << 14
+    RPRES = 1 << 14,
+    FRINTTS = 1 << 15
 };
 
 DECLARE_ENUM_FLAG_OPERATORS(Arm64Features)

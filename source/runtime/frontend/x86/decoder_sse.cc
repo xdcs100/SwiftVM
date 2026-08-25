@@ -1147,7 +1147,7 @@ void X64Decoder::DecodeCvtsi2sd(_DInst& insn) {
 void X64Decoder::DecodeCvttss2si(_DInst& insn) {
     auto& op0 = insn.ops[0];
     const u32 width = op0.size ? op0.size : 32;
-    auto src = LoadSrcLo(insn, insn.ops[1]);
+    auto src = LoadSrcScalarVec(insn, insn.ops[1], 32);
     auto result = __ VecFCvtFloatToInt(src, ir::Imm(32), ir::Imm(width), ir::Imm(0u));
     Dst(insn, op0, result.SetType(width == 64 ? ir::ValueType::U64 : ir::ValueType::U32));
 }
@@ -1156,7 +1156,7 @@ void X64Decoder::DecodeCvttsd2si(_DInst& insn) {
     // cvttsd2si r32/64, xmm/m64: dst = truncate_to_int(src[63:0]).
     auto& op0 = insn.ops[0];
     const u32 width = op0.size ? op0.size : 32;
-    auto src = LoadSrcLo(insn, insn.ops[1]);
+    auto src = LoadSrcScalarVec(insn, insn.ops[1], 64);
     auto result = __ VecFCvtFloatToInt(src, ir::Imm(64), ir::Imm(width), ir::Imm(0u));
     Dst(insn, op0, result.SetType(width == 64 ? ir::ValueType::U64 : ir::ValueType::U32));
 }
@@ -1164,7 +1164,7 @@ void X64Decoder::DecodeCvttsd2si(_DInst& insn) {
 void X64Decoder::DecodeCvtFloatToInt(_DInst& insn, u32 source_bits) {
     auto& op0 = insn.ops[0];
     const u32 width = op0.size ? op0.size : 32;
-    auto source = LoadSrcLo(insn, insn.ops[1]);
+    auto source = LoadSrcScalarVec(insn, insn.ops[1], source_bits);
     auto result = __ VecFCvtFloatToInt(
             source, ir::Imm(source_bits), ir::Imm(width), ir::Imm(1u));
     Dst(insn, op0, result.SetType(width == 64 ? ir::ValueType::U64 : ir::ValueType::U32));

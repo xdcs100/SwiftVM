@@ -25,6 +25,9 @@
 #ifndef HWCAP2_AFP
 #define HWCAP2_AFP (1UL << 20)
 #endif
+#ifndef HWCAP2_FRINT
+#define HWCAP2_FRINT (1UL << 8)
+#endif
 #endif
 #include "fmt/format.h"
 #include "base/scope_exit.h"
@@ -208,6 +211,9 @@ static Arm64Features DetectArm64Features() {
     if (sysctl_feature("hw.optional.arm.FEAT_FlagM2")) {
         features |= Arm64Features::AXFlag;
     }
+    if (sysctl_feature("hw.optional.arm.FEAT_FRINTTS")) {
+        features |= Arm64Features::FRINTTS;
+    }
 #elif defined(__aarch64__) && defined(__linux__)
     // HWCAP is a process constant.  Cache both auxv reads so every Instance
     // receives the same feature bitmap, which is then part of ConfigHash.
@@ -221,6 +227,9 @@ static Arm64Features DetectArm64Features() {
         }
         if ((getauxval(AT_HWCAP2) & HWCAP2_AFP) != 0) {
             detected |= Arm64Features::AFP;
+        }
+        if ((getauxval(AT_HWCAP2) & HWCAP2_FRINT) != 0) {
+            detected |= Arm64Features::FRINTTS;
         }
         return detected;
     }();
