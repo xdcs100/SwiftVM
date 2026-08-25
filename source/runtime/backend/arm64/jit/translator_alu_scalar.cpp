@@ -502,6 +502,22 @@ void JitTranslator::EmitOr(ir::Inst* inst) {
 }
 
 void JitTranslator::EmitXor(ir::Inst* inst) {
+    auto pseudo_flags = GetPseudoFlags(inst);
+    auto result = context.R(ir::Value{inst});
+    if (scalar_identity_analysis.IsSelfXor(inst)) {
+        if (!pseudo_flags.Null()) {
+            if (!pseudo_flags.branch_only) {
+                BeginFlagsTokenProducer(pseudo_flags);
+            }
+            Register zero = result.Is64Bits() ? Register{xzr} : Register{wzr};
+            __ Ands(result, zero, Operand{zero});
+            RecordLogicalResultFlags(result, pseudo_flags);
+        } else {
+            __ Mov(result, 0);
+        }
+        return;
+    }
+
     auto left = inst->GetArg<ir::Value>(0);
     auto right = inst->GetArg<ir::Operand>(1);
     auto pinned_w = [&](ir::Value value) -> std::optional<WRegister> {
@@ -526,11 +542,8 @@ void JitTranslator::EmitXor(ir::Inst* inst) {
                                                        : 32)
                        ? Operand{static_cast<s64>(right.GetLeft().imm.Get())}
                        : EmitOperand(right));
-    auto result = context.R(ir::Value{inst});
     auto left_pinned = pinned_w(left);
     Register left_register = left_pinned ? Register{*left_pinned} : context.R(left, true);
-
-    auto pseudo_flags = GetPseudoFlags(inst);
 
     if (!pseudo_flags.Null() && !pseudo_flags.branch_only) {
         BeginFlagsTokenProducer(pseudo_flags);

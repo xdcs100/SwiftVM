@@ -12,6 +12,7 @@
 #include "base/common_funcs.h"
 #include "jit_context.h"
 #include "scalar_fpr_liveness.h"
+#include "scalar_identity_analysis.h"
 #include "runtime/backend/code_cache.h"
 #include "runtime/common/types.h"
 #include "runtime/include/config.h"
@@ -383,6 +384,7 @@ private:
 
     // Compute N/Z from a result value and merge them (for ops without a flag setting form)
     void SaveLogicalResultFlags(Register &result, ir::ValueType type, const PseudoFlags &pseudo);
+    void RecordLogicalResultFlags(Register& result, const PseudoFlags& pseudo);
     void EmitLogicalNZFlags(const Register& value, ir::ValueType type);
 
     // Materialize an IR operand into a scratch register
@@ -543,6 +545,7 @@ private:
     std::map<ir::Inst*, ScalarFPRPublication> scalar_load_fpr_fusions{};
     std::map<ir::Inst*, ScalarFPRPublication> scalar_value_fpr_fusions{};
     ScalarFPRLiveness scalar_fpr_liveness{};
+    ScalarIdentityAnalysis scalar_identity_analysis{};
     ir::Flags flags_set{};
     ir::Flags flags_clear{};
     bool save_in_nzcv{true};

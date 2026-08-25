@@ -400,6 +400,9 @@ bool JitTranslator::ReproveLow32Copy(ir::Inst* inst) const {
 }
 
 void JitTranslator::EmitBitExtract(ir::Inst* inst) {
+    if (scalar_identity_analysis.InputDiscarded(inst)) {
+        return;
+    }
     auto value = inst->GetArg<ir::Value>(0);
     auto left = inst->GetArg<ir::Imm>(1).Get();
     auto bits = inst->GetArg<ir::Imm>(2).Get();

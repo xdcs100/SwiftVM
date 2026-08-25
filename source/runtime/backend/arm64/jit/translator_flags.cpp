@@ -368,6 +368,11 @@ void JitTranslator::SaveLogicalResultFlags(Register& result,
         }
         __ Tst(scratch, scratch);
     }
+    RecordLogicalResultFlags(result, pseudo);
+}
+
+void JitTranslator::RecordLogicalResultFlags(Register& result,
+                                             const PseudoFlags& pseudo) {
     if (pseudo.branch_only) {
         return;
     }
