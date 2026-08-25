@@ -6150,6 +6150,29 @@ TEST_CASE("scalar FPR fixed-home tie requires an exact safe publication window")
         REQUIRE(on_code.bytes + 3 * vixl::aarch64::kInstructionSize == off_code.bytes);
     }
 
+    SECTION("a scalar chain crosses an in-place unary producer") {
+        IntrusivePtr<Block> block{new Block(0, Location{0x10480})};
+        auto left = block->GetHostFPR(HostRegIndex(target), Imm{0u})
+                            .SetType(ValueType::V128);
+        auto right = block->LoadUniform(Uniform{16, ValueType::V128})
+                             .SetType(ValueType::V128);
+        auto first = block->VecFMulScalar32(left, right).SetType(ValueType::V128);
+        auto unary = block->VecFUnary(first, first, Imm{32u}, Imm{0u}, Imm{1u})
+                             .SetType(ValueType::V128);
+        auto second = block->VecFMulScalar32(unary, right).SetType(ValueType::V128);
+        auto* publish = block->AppendInst(
+                OpCode::SetHostFPR, second, HostRegIndex(target), Imm{0u});
+        block->SetTerminal(terminal::ReturnToDispatch{});
+        block->ReIdInstr();
+
+        auto on = allocate(block.get(), true);
+        REQUIRE(on->ValueFPR(first).id == target);
+        REQUIRE(on->ValueFPR(unary).id == target);
+        REQUIRE(on->ValueFPR(second).id == target);
+        REQUIRE(on->IsHostWriteCoalesced(publish->Id()));
+        REQUIRE_NOTHROW(emit(block.get(), *on, 0x12480, true));
+    }
+
     SECTION("a third-party fixed-home write rejects the scalar tie") {
         auto item = make_case(OpCode::VecFAddScalar64, 0x10500, false, true);
         auto features = FeatureSet{};

@@ -859,8 +859,17 @@ bool JitTranslator::ReproveScalarFPRTie(ir::Inst* inst) const {
     if (crosses_write(inst->Id(), last_use(inst), inst)) {
         return false;
     }
+    auto tie_source = [&](ir::Inst* node) -> ir::Value {
+        if (IsHostScalarFPRBinaryProducer(node->GetOp())) {
+            return node->GetArg<ir::Value>(0);
+        }
+        if (IsHostScalarUnaryProducer(*node, sse_scalar_tie)) {
+            return node->GetArg<ir::Value>(1);
+        }
+        return {};
+    };
     for (auto* node = inst;;) {
-        auto left = ResolveHostCoalesceBitCast(node->GetArg<ir::Value>(0));
+        auto left = ResolveHostCoalesceBitCast(tie_source(node));
         if (!left.Defined() || !left.Def() || context.V(left).GetCode() != target ||
             last_use(left.Def()) != node->Id() ||
             crosses_write(left.Id(), node->Id(), left.Def())) {
@@ -871,7 +880,8 @@ bool JitTranslator::ReproveScalarFPRTie(ir::Inst* inst) const {
                    left.Def()->GetArg<ir::Imm>(1).Get() == 0 &&
                    context.IsHostReadCoalesced(left.Id());
         }
-        if (!IsHostScalarFPRBinaryProducer(left.Def()->GetOp())) {
+        if (!IsHostScalarFPRBinaryProducer(left.Def()->GetOp()) &&
+            !IsHostScalarUnaryProducer(*left.Def(), sse_scalar_tie)) {
             for (auto& scan : cur_block->GetInstList()) {
                 if (scan.Id() <= left.Id() || scan.Id() >= node->Id() ||
                     scan.GetOp() != ir::OpCode::SetHostFPR ||

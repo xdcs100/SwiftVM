@@ -275,7 +275,9 @@ void CoalesceGuestFPRWrites(
                     use_end[left.Id()] != producer->Id() ||
                     (!reg_alloc->IsHostReadCoalesced(left.Id()) &&
                      (!left.Def() ||
-                      !IsScalarFPRBinaryProducer(left.Def()->GetOp())))) {
+                      (!IsScalarFPRBinaryProducer(left.Def()->GetOp()) &&
+                       !IsResidentScalarUnaryProducer(
+                               *left.Def(), features.sse_scalar_tie))))) {
                     continue;
                 }
             } else if (mapped_to(left, target)) {
