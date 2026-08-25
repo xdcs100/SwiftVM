@@ -915,6 +915,15 @@ peepholes.
   The exclusive-use proof passes 17 assertions, the complete 256-immediate cached/uncached sweep
   passes 6,914 and the FeatureSet contract passes 158. This stage ran no long benchmark, stress
   test or full suite.
+- `90dcaf6` keeps the compact FCMP ordering carrier live across `InvertCarry`. `CFINV` changes only
+  host PSTATE carry and leaves the raw ordering bit in the carrier GPR intact, so the hot compare
+  path writes that carrier directly instead of routing it through a temporary GPR and `BFXIL`.
+  The bounded Orb screen completes in 3.604 seconds with identical 2,755-PC / 3,621-version sets,
+  99.995707% retained-host coverage, all top-20 PCs, no growing PC and exact PPM SHA
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. The comparable total
+  falls `4,111,648 -> 4,061,499` (`-50,149`, `-1.219681%`). The COMIS all-consumer JIT/interpreter
+  differential passes 3,482 assertions. This stage ran no long benchmark, stress test or full
+  suite.
 
 ## Orb loop
 
