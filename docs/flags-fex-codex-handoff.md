@@ -1027,6 +1027,17 @@ peepholes.
   its three GCC-only harness failures from disassembly beyond `CurrentBufferSize` and the forced-x18
   spill setup; the new chain case itself passes. This stage ran no long benchmark, stress test or
   full suite.
+- `803900d` removes the obsolete single-sided-operand normalization now that null operand sides and
+  immediate-left materialization are native runtime contracts. This restores ordinary immediate
+  folding and avoids synthetic `ADD #0` instructions. Scalar `GetHostFPR` producers may also target
+  the final pinned GPR directly under the existing publication, alias and observer proofs. The
+  bounded Orb screen completes in 2.786 seconds with identical 2,755-PC / 3,621-version sets,
+  99.995707% retained-host coverage, all top-30 PCs, no growing PC and exact PPM SHA
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. The comparable total falls
+  `3,685,233 -> 3,664,930` (`-20,303`, `-0.550929%`); `0x413f60` accounts for 11,520 and falls
+  `31 -> 26`. Short host and move-class dynamic counts fall by 439 after the operand normalization
+  stage. The GPR publication proof passes 381 assertions on local Clang and Orb GCC builds. This
+  stage ran no long benchmark, stress test or full suite.
 
 ## Orb loop
 
