@@ -199,6 +199,13 @@ public:
         loop_hoist_metadata = metadata;
     }
 
+    void SetDeadEdgeIntegerBranchProof(bool proven) {
+        dead_edge_integer_branch_proven = proven;
+    }
+    [[nodiscard]] bool HasDeadEdgeIntegerBranchProof() const {
+        return dead_edge_integer_branch_proven;
+    }
+
 #define INST(name, ret, ...)                                                                       \
     template <typename RetType = TypedValue<ValueType::VOID>, typename... Args>                    \
     ret name(const Args&... args) {                                                                \
@@ -238,6 +245,7 @@ private:
     backend::JitCache jit_cache{};
     std::vector<UniformSnapshotPlan> uniform_snapshot_plans{};
     LoopHoistMetadata loop_hoist_metadata{};
+    bool dead_edge_integer_branch_proven{};
 };
 
 using BlockList = IntrusiveList<&Block::list_node>;

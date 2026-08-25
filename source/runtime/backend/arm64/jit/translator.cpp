@@ -751,6 +751,7 @@ JitTranslator::PrepareBlockState(ir::Block* block) {
     // before the per-block backedge proof marks the two sunk IR instructions.
     disable_instructions.resize(
             std::max<size_t>(disable_instructions.size(), block->MaxInstrId()));
+    PrepareDeadEdgeIntegerBranch(block);
     PrepareBooleanSelects(block);
     resident_scalar_fpr_analysis.Analyze(block);
     for (auto& inst : block->GetInstList()) {
@@ -761,7 +762,9 @@ JitTranslator::PrepareBlockState(ir::Block* block) {
     scalar_fpr_liveness.Analyze(block);
     scalar_identity_analysis.Analyze(block);
     PrepareScalarFPRPublications(block);
-    backedge_flags_plan = PlanBackedgeFlags(block);
+    backedge_flags_plan = dead_edge_integer_branch
+            ? nullptr
+            : PlanBackedgeFlags(block);
     if (backedge_flags_plan) {
         if (backedge_flags_plan->polarity_load) {
             disable_instructions.set(backedge_flags_plan->polarity_load->Id());

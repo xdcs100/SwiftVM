@@ -317,3 +317,79 @@ TEST_CASE("dead-edge FP compares branch on raw host flags") {
                  Contains(instructions, test.inverse)));
     }
 }
+
+TEST_CASE("dead-edge integer compares branch on raw host flags") {
+    struct Case {
+        swift::u8 opcode;
+        std::string_view condition;
+        std::string_view inverse;
+    };
+    for (const auto& test : {
+                 Case{0x74, "b.eq", "b.ne"},
+                 Case{0x75, "b.ne", "b.eq"},
+         }) {
+        const std::array<swift::u8, 12> code{
+                0x3c, 0x50,
+                test.opcode, 0x04,
+                0x39, 0xc0,
+                0xf4, 0x90,
+                0x39, 0xc9,
+                0xf4,
+        };
+        DirectMemory memory;
+        const auto address = reinterpret_cast<swift::VAddr>(code.data());
+        IntrusivePtr<Block> block{new Block(0, Location{address})};
+        Assembler assembler{block.get()};
+        FeatureSet features{};
+        constexpr auto arm64_features = Arm64Features::FlagM;
+        swift::x86::X64Decoder decoder{
+                address, &memory, &assembler, true, arm64_features, false, false,
+                features};
+        decoder.Decode();
+
+        auto count_op = [&](OpCode op) {
+            std::size_t count{};
+            for (const auto& inst : block->GetInstList()) {
+                count += inst.GetOp() == op;
+            }
+            return count;
+        };
+        CAPTURE(test.opcode);
+        REQUIRE(count_op(OpCode::BranchOnlyEdges) == 1);
+        REQUIRE(count_op(OpCode::InvertCarry) == 1);
+
+        FlagsEliminationPass::Run(block.get(), nullptr, features);
+        REQUIRE(count_op(OpCode::BranchOnlyEdges) == 0);
+        REQUIRE(count_op(OpCode::InvertCarry) == 1);
+        REQUIRE(block->HasDeadEdgeIntegerBranchProof());
+
+        block->ReIdInstr();
+        Config config{
+                .loc_start = 0,
+                .loc_end = 1ull << 48,
+                .enable_jit = true,
+                .has_local_operation = false,
+                .backend_isa = kArm64,
+                .global_opts = Optimizations::All,
+                .arm64_features = arm64_features,
+        };
+        AddressSpace address_space{config};
+        RegAlloc alloc{block->MaxInstrId(),
+                       address_space.GetTrampolines().GetGPRRegs(),
+                       address_space.GetTrampolines().GetFPRRegs(), features};
+        RegisterAllocPass::Run(block.get(), &alloc, false, features);
+        arm64::JitContext context{address_space.GetDefaultModule(), alloc};
+        arm64::JitTranslator translator{context};
+        translator.Translate(block.get());
+        context.Finish();
+
+        const auto instructions = Disassemble(context);
+        REQUIRE(Count(instructions, "subs") == 1);
+        REQUIRE(Count(instructions, "cfinv") == 0);
+        REQUIRE(Count(instructions, "cset") == 0);
+        REQUIRE(Count(instructions, "mrs") == 0);
+        REQUIRE(Count(instructions, "bfi") == 0);
+        REQUIRE((Contains(instructions, test.condition) ||
+                 Contains(instructions, test.inverse)));
+    }
+}

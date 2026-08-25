@@ -772,6 +772,9 @@ bool JitTranslator::RegionBranchPFAFActive(ir::Inst* producer) const {
 }
 
 JitTranslator::PseudoFlags JitTranslator::GetPseudoFlags(ir::Inst* inst) {
+    if (IsDeadEdgeIntegerBranchProducer(inst)) {
+        return {ir::Flags::Zero, ir::Flags::None, true};
+    }
     ir::Flags result_set{};
     ir::Flags result_clear{};
     bool branch_only = false;

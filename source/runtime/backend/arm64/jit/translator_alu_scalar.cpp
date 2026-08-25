@@ -795,7 +795,8 @@ void JitTranslator::EmitCondSet(ir::Inst* inst) {
 }
 
 void JitTranslator::EmitLocalCondSet(ir::Inst* inst) {
-    auto cond = inst->GetArg<ir::Cond>(0);
+    auto cond = DeadEdgeIntegerBranchCondition(inst).value_or(
+            inst->GetArg<ir::Cond>(0));
     ASSERT(inst->ReturnType() != ir::ValueType::VOID);
     if (RecordLocalCondition(inst, cond)) {
         return;

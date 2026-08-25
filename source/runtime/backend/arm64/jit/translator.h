@@ -370,6 +370,17 @@ private:
     [[nodiscard]] bool CanUseCompactFCmpCarrier(ir::Inst* fcmp) const;
     [[nodiscard]] ir::Inst* RawFCmpCondition(ir::Inst* fcmp) const;
 
+    struct DeadEdgeIntegerBranchPlan {
+        ir::Inst* producer{};
+        ir::Inst* condition{};
+        std::unordered_set<ir::Inst*> discarded{};
+    };
+
+    void PrepareDeadEdgeIntegerBranch(ir::Block* block);
+    [[nodiscard]] bool IsDeadEdgeIntegerBranchProducer(ir::Inst* inst) const;
+    [[nodiscard]] std::optional<ir::Cond>
+    DeadEdgeIntegerBranchCondition(ir::Inst* inst) const;
+
     // Merge pending guest flags kept in host NZCV into the flags register.
     // B0 tags the existing sequence only; the tags never affect emission.
     void MergeNZCV();
@@ -548,6 +559,7 @@ private:
     std::map<ir::Inst*, u16> fused_pin_gpr_reads{};
     std::map<ir::Inst*, ScalarFPRPublication> scalar_load_fpr_fusions{};
     std::map<ir::Inst*, ScalarFPRPublication> scalar_value_fpr_fusions{};
+    std::optional<DeadEdgeIntegerBranchPlan> dead_edge_integer_branch{};
     ResidentScalarFPRAnalysis resident_scalar_fpr_analysis{};
     ScalarFPRLiveness scalar_fpr_liveness{};
     ScalarIdentityAnalysis scalar_identity_analysis{};

@@ -223,6 +223,33 @@ bool IsPolarityStoreShape(const Inst* inst) {
            value.Def()->GetArg<Imm>(0).Get() <= 1;
 }
 
+bool HasBackendSubBranchMarker(Block* block) {
+    auto terminal = block->GetTerminal();
+    auto* branch = boost::get<terminal::If>(&terminal);
+    if (!branch || !branch->cond.Def() ||
+        branch->cond.Def()->GetOp() != OpCode::LocalCondSet ||
+        branch->cond.Def()->GetUses() != 1) {
+        return false;
+    }
+    const auto condition = branch->cond.Def()->GetArg<Cond>(0);
+    if (condition != Cond::EQ && condition != Cond::NE) {
+        return false;
+    }
+
+    bool marker = false;
+    bool invert = false;
+    bool sub_flags = false;
+    for (auto& inst : block->GetInstList()) {
+        marker |= inst.GetOp() == OpCode::BranchOnlyEdges;
+        invert |= inst.GetOp() == OpCode::InvertCarry;
+        if (inst.GetOp() == OpCode::SaveFlags) {
+            auto value = inst.GetArg<Value>(0);
+            sub_flags |= value.Def() && value.Def()->GetOp() == OpCode::Sub;
+        }
+    }
+    return marker && invert && sub_flags;
+}
+
 bool PreservesRawFCmp(OpCode op) {
     switch (op) {
         case OpCode::LoadUniform:
@@ -545,6 +572,7 @@ void FlagsEliminationPass::Run(Block* block, HIRFunction* hir_function,
         const LiveMap no_live_in;
         TryBranchOnly(block, nullptr, nullptr, no_live_in, stats);
     }
+    block->SetDeadEdgeIntegerBranchProof(HasBackendSubBranchMarker(block));
     // The marker is proof input, never executable IR. Remove it on every
     // conservative rejection as well as on accepted paths.
     for (auto it = inst_list.begin(); it != inst_list.end();) {
