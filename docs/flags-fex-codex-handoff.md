@@ -694,7 +694,7 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 | Full split-arm pack / invert loop branch | hang rc=124 |
 | Mark BranchOnly TEST dirty so `then_covers` fires | SIGABRT FLAGS=1 |
 | Fallthrough-only defer / else-only Merge without requested | no density or hang |
-| β.1 `needed=All` → `ComputeFunctionLiveIn` | FLAGS=1 **0**; PF/AF already skipped on producers |
+| Function CFG live-out for ordinary flag deletion | Re-tested after condition-specific liveness. Bounded smallpt changes 2,802/3,435 units/versions to 2,790/3,011, covers only 98.918559% of baseline host weight and grows the common subset `395,147 -> 396,850` (`+0.430979%`); fully reverted. |
 | `SVM_RA_WIDTH_CHAIN=1` | 0 on coremark |
 | `GetHostGPR` 32-bit `Mov W` for callee-saved pins | 0 |
 | `SVM_FUNC_LAZY=128` before `15e5165` | **31.3B** host, RE=0-shaped entries |
@@ -715,6 +715,7 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 | Remaining absolute `GetOperand` materialization | 21.75M left-immediate instances are true two-part constants; ADRP/literal alternatives do not preserve the current relocation and mapping contract |
 | Saved-flags compound `CondSet` | two-instruction HI/LS and GE/LT forms were implemented and validated, but execute 0 times in formal smallpt/CoreMark and the c-ray audit sample; GT/LE still need three inputs, so the zero-gain prototype was removed |
 | General narrow `TEST` direct-`And` flags | 496-PC bounded A/B had 29 shrinking and 31 growing PCs, only 13 net static instructions and `-623` retained-formal-weighted instructions; fully reverted |
+| `SVM_FLAG_FULL_ELIM=1` after condition-specific liveness | Exact oracle and unit/version sets, but bounded smallpt grows `399,467 -> 408,275` (`+2.204938%`), dominated by partial-NZCV publication at `0x419287`; remains OFF. |
 | Global inverted-carry ABI default | Re-tested after the scalar-FPR proof fix. The oracle stays exact, but bounded smallpt changes 2,802/3,435 units/versions to 3,207/3,493 and grows the strict common subset `370,990 -> 394,889` (`+6.441953%`). Hot `TEST`/logical producers make Direct carry dominant in execution even though the emitted producer census favors subtraction. Fully reverted; any remaining carry work needs explicit edge polarity. |
 | IR-rewriting integer `Sub` branch-only carry normalization | the non-carry-only form still changed the bounded unit/version set from 2,755/3,621 to 2,785/3,056; strict coverage was 99.648660% with two growing PCs, below the 99.9% gate despite `-0.908475%` on the comparable subset, fully reverted. `86aaac4` is a separate backend-only EQ/NE proof and does not revive this rewrite. |
 
