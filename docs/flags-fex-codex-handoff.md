@@ -924,6 +924,16 @@ peepholes.
   falls `4,111,648 -> 4,061,499` (`-50,149`, `-1.219681%`). The COMIS all-consumer JIT/interpreter
   differential passes 3,482 assertions. This stage ran no long benchmark, stress test or full
   suite.
+- `7196145` extends resident scalar-FPR ownership through an intermediate publication. When a
+  scalar producer already occupies the exact fixed XMM home and dies at the next scalar operation,
+  the successor remains in that home; the backend reuses the existing recursive chain proof before
+  suppressing either publication. The bounded Orb screen completes in 4.024 seconds with identical
+  2,755-PC / 3,621-version sets, 99.995707% retained-host coverage, all top-20 PCs, no growing PC
+  and exact PPM SHA
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. The comparable total
+  falls `4,061,499 -> 4,039,995` (`-21,504`, `-0.529460%`); `0x40248e` and `0x402497` each lose
+  seven instructions per entry. Ten focused scalar-FPR, differential and fault tests pass 521
+  assertions locally. This stage ran no long benchmark, stress test or full suite.
 
 ## Orb loop
 
