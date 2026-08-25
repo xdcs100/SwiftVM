@@ -1014,6 +1014,19 @@ peepholes.
   18,432 and `0x401e2a` for 15,240. Eight focused identity, biased-address, fault and scalar SSE
   cases pass 926 assertions on both local Clang and Orb GCC builds. This stage ran no long
   benchmark, stress test or full suite.
+- `3e1a605` extends zero-register stores through closed `LoadImm(0) -> ZeroExtend32` and
+  `ZeroExtend32To64` chains. Every use must be another proven zero-preserving width node or a
+  compatible StoreUniform, StoreMemory or SetHostFPR payload; spills and any additional observer
+  retain materialization. The bounded Orb screen completes in 2.753 seconds with identical
+  2,755-PC / 3,621-version sets, 99.995707% retained-host coverage, all top-30 PCs, no growing PC
+  and exact PPM SHA `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`.
+  The comparable total falls `3,711,542 -> 3,685,233` (`-26,309`, `-0.708843%`); `0x45d000`
+  accounts for 26,169 and falls `57 -> 46`. Short host and move-class dynamic counts both fall by
+  1,865. Seven focused chain, zero-store and width cases pass 654 assertions locally; the new chain
+  and width cases pass 117 unique assertions on Orb. Orb's older direct zero-store matrix still has
+  its three GCC-only harness failures from disassembly beyond `CurrentBufferSize` and the forced-x18
+  spill setup; the new chain case itself passes. This stage ran no long benchmark, stress test or
+  full suite.
 
 ## Orb loop
 
