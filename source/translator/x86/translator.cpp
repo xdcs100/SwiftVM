@@ -51,8 +51,8 @@ using namespace swift::x86;
 // frame registers; x19-x21 are AArch64 ABI callee-saved and do not overlap the
 // runtime's x24-x28 state/cache/flags/RSB/page-table assignments.
 // SVM_X86_PIN_EXT=1 extends the map with RAX/RCX in callee-saved x22/x23 and
-// RDX in x29. Level 2 additionally keeps RSI/RDI/R8-R11 in caller-saved
-// x0-x6; level 3 completes the GPR map with R13-R15 in x7-x9. EmitHostCall
+// RDX in x29. Level 2 additionally keeps RSI/RDI/R8-R12/R14 in caller-saved
+// x0-x7; level 3 completes the GPR map with R12-R15 in x6-x9. EmitHostCall
 // snapshots every caller-saved pin around each helper. Descriptors stay sorted
 // by uniform offset so the trampoline can pair adjacent saves.
 // The trampoline reserves them from linear scan, restores them on runtime
@@ -88,6 +88,7 @@ static UniformMapDesc arm64_backend_gpr_regs_ext2_map[] = {
         {offsetof(ThreadContext64, r10), 8, 4, false},
         {offsetof(ThreadContext64, r11), 8, 5, false},
         {offsetof(ThreadContext64, r12), 8, 6, false},
+        {offsetof(ThreadContext64, r14), 8, 7, false},
 };
 static UniformMapDesc arm64_backend_gpr_regs_ext3_map[] = {
         {offsetof(ThreadContext64, rax), 8, 22, false},
