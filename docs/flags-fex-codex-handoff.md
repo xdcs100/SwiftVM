@@ -1001,6 +1001,19 @@ peepholes.
   `0x47f570` POP chain was also rechecked and already uses post-index loads for every stack advance;
   its remaining state stores are not redundant RSP updates. This stage ran no long benchmark,
   stress test or full suite.
+- `4a446bf` preserves encodable scalar SSE memory operands through the frontend instead of
+  materializing `GetOperand`. The shared helper covers scalar arithmetic and conversion sources,
+  MOVSS/MOVSD loads and stores, low-half sources and MOVHPS/MOVLPS; it reuses the existing identity-
+  mode width proof and retains the materialized path for biased addressing. The bounded Orb screen
+  completes in 2.813 seconds with identical 2,755-PC / 3,621-version sets, 99.995707% retained-host
+  coverage, all top-30 PCs, no growing PC and exact PPM SHA
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. The comparable total falls
+  `3,815,145 -> 3,711,542` (`-103,603`, `-2.715572%`). The two largest blocks, `0x40248e` and
+  `0x402497`, each remove all 16 `ADD base,#disp` address instructions and fall `123 -> 107` and
+  `122 -> 106`; their weighted reductions are 25,376 and 23,776. `0x4023c0` accounts for another
+  18,432 and `0x401e2a` for 15,240. Eight focused identity, biased-address, fault and scalar SSE
+  cases pass 926 assertions on both local Clang and Orb GCC builds. This stage ran no long
+  benchmark, stress test or full suite.
 
 ## Orb loop
 
