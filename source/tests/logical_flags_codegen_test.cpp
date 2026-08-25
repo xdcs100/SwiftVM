@@ -123,6 +123,45 @@ std::vector<std::string> Disassemble(arm64::JitContext& context) {
     return instructions;
 }
 
+std::vector<std::string> EmitParityOnlyLogicalBeforeSelect() {
+    Config config{
+            .loc_start = 0,
+            .loc_end = 1ull << 48,
+            .enable_jit = true,
+            .has_local_operation = false,
+            .backend_isa = kArm64,
+            .global_opts = Optimizations::All,
+    };
+    AddressSpace address_space{config};
+    auto module = address_space.GetDefaultModule();
+
+    IntrusivePtr<Block> block{new Block(0, Location{0x89e0})};
+    auto source = block->LoadUniform<TypedValue<ValueType::U64>>(
+            Uniform{0, ValueType::U64});
+    auto parity = block->Or(source, Operand{Imm{swift::u64{0}}})
+                          .SetType(ValueType::U64);
+    block->SaveFlags(parity, Flags::Parity);
+    auto condition = block->LoadImm(Imm{swift::u64{1}}).SetType(ValueType::U8);
+    auto true_value = block->LoadImm(Imm{swift::u64{2}}).SetType(ValueType::U64);
+    auto false_value = block->LoadImm(Imm{swift::u64{3}}).SetType(ValueType::U64);
+    auto selected = block->Select(condition, true_value, false_value)
+                            .SetType(ValueType::U64);
+    block->StoreUniform(Uniform{8, ValueType::U64}, selected);
+    block->SetTerminal(terminal::ReturnToDispatch{});
+    block->ReIdInstr();
+
+    FeatureSet features{};
+    RegAlloc alloc{block->MaxInstrId(),
+                   address_space.GetTrampolines().GetGPRRegs(),
+                   address_space.GetTrampolines().GetFPRRegs(), features};
+    RegisterAllocPass::Run(block.get(), &alloc, false, features);
+    arm64::JitContext context{module, alloc};
+    arm64::JitTranslator translator{context};
+    translator.Translate(block.get());
+    context.Finish();
+    return Disassemble(context);
+}
+
 }  // namespace
 
 TEST_CASE("dead narrow logical identities publish NZ in one instruction") {
@@ -135,6 +174,13 @@ TEST_CASE("dead narrow logical identities publish NZ in one instruction") {
 TEST_CASE("observed narrow logical identities keep their result") {
     const auto emission = EmitLogicalFlagIdentity(true);
     REQUIRE_FALSE(emission.extract_tied);
+}
+
+TEST_CASE("parity-only logical publication leaves NZCV clean") {
+    const auto instructions = EmitParityOnlyLogicalBeforeSelect();
+    REQUIRE_FALSE(Contains(instructions, "tst "));
+    REQUIRE(Contains(instructions, "cmp "));
+    REQUIRE(Contains(instructions, "csel "));
 }
 
 TEST_CASE("narrow register self tests skip the redundant AND") {

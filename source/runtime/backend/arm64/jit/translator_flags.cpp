@@ -340,11 +340,12 @@ void JitTranslator::MergeLogicalFlagsNZ(ir::Flags requested) {
 void JitTranslator::SaveLogicalResultFlags(Register& result,
                                            ir::ValueType type,
                                            const PseudoFlags& pseudo) {
+    const bool needs_nz = True(pseudo.set & ir::Flags::NZ);
     const bool needs_parity_value =
             !FlagsRegsEnabled() && True(pseudo.set & ir::Flags::Parity);
-    if (pseudo.branch_only || !needs_parity_value) {
+    if (needs_nz && (pseudo.branch_only || !needs_parity_value)) {
         EmitLogicalNZFlags(result, type);
-    } else {
+    } else if (needs_nz) {
         const auto scratch = context.GetSharedTmpX();
         switch (type) {
             case ir::ValueType::S8:
@@ -377,8 +378,11 @@ void JitTranslator::RecordLogicalResultFlags(Register& result,
         return;
     }
     if (FlagsRegsEnabled()) {
-        nzcv_requested |= GuestNZCVToHost(pseudo.set & ir::Flags::NZ);
-        nzcv_dirty = true;
+        const auto requested = GuestNZCVToHost(pseudo.set & ir::Flags::NZ);
+        if (True(requested)) {
+            nzcv_requested |= requested;
+            nzcv_dirty = true;
+        }
     } else {
         MergeLogicalFlagsNZ(pseudo.set);
     }
