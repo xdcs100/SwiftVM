@@ -75,6 +75,26 @@ IntrusivePtr<Block> MakeSharedHighZero() {
     return block;
 }
 
+IntrusivePtr<Block> MakeSharedHighZeroLoads() {
+    IntrusivePtr<Block> block{new Block(0, Location{0x8810})};
+    auto high = block->LoadImm(Imm{swift::u64{0}}).SetType(ValueType::U64);
+    auto address0 = block->LoadUniform(Uniform{0, ValueType::U64});
+    auto low0 = block->LoadMemory(Operand{address0}).SetType(ValueType::U64);
+    block->AppendInst(
+            OpCode::SetHostFPR, low0, HostRegIndex(kTarget), Imm{0u});
+    block->AppendInst(
+            OpCode::SetHostFPR, high, HostRegIndex(kTarget), Imm{8u});
+    auto address1 = block->LoadUniform(Uniform{8, ValueType::U64});
+    auto low1 = block->LoadMemory(Operand{address1}).SetType(ValueType::U64);
+    block->AppendInst(
+            OpCode::SetHostFPR, low1, HostRegIndex(kTarget + 1), Imm{0u});
+    block->AppendInst(
+            OpCode::SetHostFPR, high, HostRegIndex(kTarget + 1), Imm{8u});
+    block->SetTerminal(terminal::ReturnToDispatch{});
+    block->ReIdInstr();
+    return block;
+}
+
 std::vector<std::string> Emit(IntrusivePtr<Block> block) {
     GPRSMask gprs{~((1u << 8) - 1u)};
     FPRSMask fprs{0};
@@ -150,6 +170,12 @@ TEST_CASE("shared high zero is removed only after every scalar publication fuses
     REQUIRE(Count(emitted, "fmov d17") == 1);
     REQUIRE(Count(emitted, "fmov d18") == 1);
     REQUIRE(Count(emitted, "mov x") == 0);
+
+    const auto loads = Emit(MakeSharedHighZeroLoads());
+    REQUIRE(Count(loads, "ldr d17") == 1);
+    REQUIRE(Count(loads, "ldr d18") == 1);
+    REQUIRE(Count(loads, "fmov d17") == 0);
+    REQUIRE(Count(loads, "fmov d18") == 0);
 }
 
 TEST_CASE("faulting scalar memory load leaves the resident XMM home unchanged") {
