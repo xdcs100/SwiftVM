@@ -897,6 +897,14 @@ peepholes.
   SSE edge sweep passes. The 7,699-assertion AVX/Rosetta run reports zero conversion mismatches;
   its two existing aggregate failures contain only `VUCOMISS` flag differences. This stage ran no
   long benchmark, stress test or full suite.
+- `bb197d8` keeps live host NZCV across direct `Select`/CMOV consumers. These instructions preserve
+  PSTATE, so the old unconditional merge was premature; only the independently carried PF/AF token
+  is committed at the select. The bounded Orb screen keeps identical PC/version sets, 99.995707%
+  retained-host coverage, all top-20 PCs and exact PPM SHA. The comparable total falls
+  `4,181,743 -> 4,143,628` (`-38,115`, `-0.911462%`) with no growing PC. The COMIS all-consumer
+  differential passes 3,482 assertions and the focused flags units pass 66. The existing
+  setcc/CMOV/Jcc fuzz has the same 124 known flag differences in baseline and candidate. This stage
+  ran no long benchmark, stress test or full suite.
 
 ## Orb loop
 
