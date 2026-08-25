@@ -716,7 +716,7 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 | Saved-flags compound `CondSet` | two-instruction HI/LS and GE/LT forms were implemented and validated, but execute 0 times in formal smallpt/CoreMark and the c-ray audit sample; GT/LE still need three inputs, so the zero-gain prototype was removed |
 | General narrow `TEST` direct-`And` flags | 496-PC bounded A/B had 29 shrinking and 31 growing PCs, only 13 net static instructions and `-623` retained-formal-weighted instructions; fully reverted |
 | Global inverted-carry ABI default | bounded smallpt aborted on the scalar-FPR fixed-home proof before producing an oracle; a safe version requires explicit edge polarity rather than changing the decoder default, fully reverted |
-| Integer `Sub` branch-only carry normalization | the non-carry-only form still changed the bounded unit/version set from 2,755/3,621 to 2,785/3,056; strict coverage was 99.648660% with two growing PCs, below the 99.9% gate despite `-0.908475%` on the comparable subset, fully reverted |
+| IR-rewriting integer `Sub` branch-only carry normalization | the non-carry-only form still changed the bounded unit/version set from 2,755/3,621 to 2,785/3,056; strict coverage was 99.648660% with two growing PCs, below the 99.9% gate despite `-0.908475%` on the comparable subset, fully reverted. `86aaac4` is a separate backend-only EQ/NE proof and does not revive this rewrite. |
 
 ## Next ready (pick one, measure, revert on 124/134)
 
@@ -760,7 +760,10 @@ peepholes.
    trailing-constant proof.
 4. **Remaining FPR publication** — the older SetHostFPR, scalar64-copy and low-load/high-zero
    accounts predate both platform-neutral scalar insert and the full XMM0-15 resident ABI below.
-   Recount this category before treating any former subpool as a remaining target. Non-AFP hosts
+   The current weighted ledger has 76,229 emitted `SetHostFPR` instructions. A bounded rejection
+   census found that the apparent remaining scalar candidates are dominated by publication to a
+   second resident home and chains whose high lanes originate in another XMM home; these are real
+   guest copies, not an unclosed fixed-home tie. Fault snapshots remain load-bearing. Non-AFP hosts
    retain the legacy scalar high-lane preservation sequence, and resident-disabled configurations
    retain ordinary State publication. The indexed-shuffle pool remains closed; do not broadly
    whitelist scalar merge-home shapes.
@@ -1052,6 +1055,20 @@ peepholes.
   `0x402731` and `0x40274f` account for 17,490 each. Two captures have identical static shapes.
   Local Clang and Orb GCC pass 44 flag-elimination, 85 FP-branch and 3,482 COMIS differential
   assertions. This stage ran no long benchmark, stress test or full suite.
+- `86aaac4` keeps dead-edge integer EQ/NE branches on the raw `SUBS` zero flag. The frontend's
+  two-successor dead-flags proof is retained as transient block metadata while the marker itself is
+  still removed from executable IR. ARM64 independently requires one `Sub` producer, one carry
+  inversion, one local EQ/NE condition, no other flag producer, no fault/observer and a fully
+  PSTATE-preserving interval. It then suppresses PF/AF publication, carry normalization, the
+  polarity store and the now-obsolete backedge flags plan. Carry-reading and compound conditions
+  retain the existing path. The exact HEAD/candidate Orb `smallpt_wh_x64 4 8 6` A/B keeps the PPM
+  SHA `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`, zero spills,
+  99.929555% retained-host coverage, 99.947333% entry coverage and all top-30 PCs. Comparable host
+  instructions fall `3,552,297 -> 3,523,261` (`-29,036`, `-0.817387%`) with no growing PC;
+  `0x47f518` contributes 23,555 and `0x419250` contributes 5,004. Local and Orb integer/FP
+  dead-edge tests pass 22 / 72 assertions. The fixed-seed 256-iteration Orb setcc/cmov/jcc
+  differential retains the documented 95 existing mismatches. This stage ran no long benchmark,
+  stress test or full suite.
 
 ## Orb loop
 
