@@ -36,7 +36,7 @@ using namespace swift::runtime::ir;
 constexpr const char* kPhaseEnv = "DIRECT_LINK_CACHE_PHASE";
 constexpr const char* kDirEnv = "DIRECT_LINK_CACHE_DIR";
 constexpr const char* kRoundTripTest =
-        "disk cache v8 round trips direct-link sites across processes";
+        "disk cache v9 round trips direct-link sites across processes";
 
 IntrusivePtr<Block> BuildTarget(VAddr guest, u64 fingerprint) {
     IntrusivePtr<Block> block{new Block(0, Location{guest})};
@@ -424,7 +424,7 @@ TEST_CASE("disk cache scanner keeps move-wide constants and rejects PC-relative 
     }
 }
 
-TEST_CASE("disk cache v8 serializes flags contracts and link-site records",
+TEST_CASE("disk cache v9 serializes flags contracts and link-site records",
           "[direct-link][jit-cache][serializer]") {
     SerialUnit input{};
     input.guest_start = 0x1000;

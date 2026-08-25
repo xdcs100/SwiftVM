@@ -566,7 +566,7 @@ struct X86Instance::Impl final {
                 enable_xmm_resident && svm_config.xmm_resident_hi;
         if (enable_xmm_resident) {
             static_regs_storage.assign(static_regs.begin(), static_regs.end());
-            const size_t resident_end = enable_xmm_resident_hi ? 12 : 8;
+            const size_t resident_end = enable_xmm_resident_hi ? 16 : 8;
             static_regs_storage.insert(static_regs_storage.end(),
                                        arm64_backend_xmm_resident_map.begin(),
                                        arm64_backend_xmm_resident_map.begin() + resident_end);

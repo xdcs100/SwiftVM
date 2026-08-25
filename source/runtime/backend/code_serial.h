@@ -245,7 +245,7 @@ struct ValidityKey {
     bool operator==(const ValidityKey&) const = default;
 };
 
-constexpr u64 kCacheFormatVersion = 8;
+constexpr u64 kCacheFormatVersion = 9;
 
 u64 HashBytes(const void* data, std::size_t size, u64 seed);
 u64 HashU64(u64 value, u64 seed);

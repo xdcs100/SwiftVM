@@ -710,7 +710,6 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 | Sole TestZero/TestNotZero identity/general Select fusion | strict local `4 8 6` saves only 79 (`-0.013547%`); exact PPM and no growth, but the extra planner state is not justified and was fully reverted |
 | Zero-register `SetHostGPR` publication | smallpt / c-ray equal-entry only `-1` / `-22`; existing GPR coalescing already absorbs it, fully reverted |
 | Transparent `BitCast` zero-store graph | formal smallpt and c-ray are byte-identical at every equal-entry PC; the proof reaches no remaining materialization and was fully reverted |
-| XMM12-15 resident expansion | XMM0-11 are now resident by default; extending the ABI through XMM15 reintroduces the closed FPR-pool pressure and remains rejected |
 | Remaining absolute `GetOperand` materialization | 21.75M left-immediate instances are true two-part constants; ADRP/literal alternatives do not preserve the current relocation and mapping contract |
 | Saved-flags compound `CondSet` | two-instruction HI/LS and GE/LT forms were implemented and validated, but execute 0 times in formal smallpt/CoreMark and the c-ray audit sample; GT/LE still need three inputs, so the zero-gain prototype was removed |
 | General narrow `TEST` direct-`And` flags | 496-PC bounded A/B had 29 shrinking and 31 growing PCs, only 13 net static instructions and `-623` retained-formal-weighted instructions; fully reverted |
@@ -755,15 +754,12 @@ peepholes.
    entry; continue this direction only with an explicit partial-mask or observing-target ABI. The
    remaining `SetLocation` tail is dynamic or has a later observer and must not inherit the
    trailing-constant proof.
-4. **Remaining FPR publication** — SetHostFPR is about 30,193,585 (`2.848%`), with about
-   8,317,804 (`0.785%`) full writes. Low-load/high-zero remain 10,641,609 (`1.004%`) /
-   10,093,484 (`0.952%`); all-compatible high-zero materialization is gone. About 8.29M adjacent
-   candidates were rejected by exact fault/alias/home gates and must not be recovered heuristically.
-   The older bounded full-write census attributed most explicit copies to scalar64 FP producers.
-   That pool is superseded on AFP-capable hosts by the platform-neutral scalar-insert path below;
-   recount it before treating scalar64 publication as a remaining target. Non-AFP hosts retain the
-   legacy low-lane arithmetic plus high-lane preservation sequence. The indexed-shuffle pool is
-   closed; do not broadly whitelist scalar merge-home shapes.
+4. **Remaining FPR publication** — the older SetHostFPR, scalar64-copy and low-load/high-zero
+   accounts predate both platform-neutral scalar insert and the full XMM0-15 resident ABI below.
+   Recount this category before treating any former subpool as a remaining target. Non-AFP hosts
+   retain the legacy scalar high-lane preservation sequence, and resident-disabled configurations
+   retain ordinary State publication. The indexed-shuffle pool remains closed; do not broadly
+   whitelist scalar merge-home shapes.
 5. **Remaining composite EA** — identity `[base+imm]`, `[base+index]` and matching scaled-index
    forms are now direct. Remaining materialized forms involve bias/32-bit wrapping, shifts or an
    AArch64-unencodable scale; require an exact encoding and wrap proof before extending the gate.
@@ -852,6 +848,15 @@ peepholes.
   host instructions fall `4,804,966 -> 4,598,890` (`-206,076`, `-4.288813%`); move-class work falls
   by the same `206,076`, from `1,313,749` to `1,107,673`. Programmatic cache identity now hashes
   effective scalar-insert policy. This stage ran no long benchmark, stress test or full suite.
+- With Linux scalar insert active, extending the resident ABI from XMM0-11 to XMM0-15 no longer
+  creates FPR spills. The bounded Orb `smallpt_wh_x64 4 32 24` comparison retains identical
+  2,793-PC / 3,647-version sets, 100% host, entry and top-20 coverage, exact PPM SHA
+  `fe779f46a4c8f0f75ab42b573253492e5f1da2ee508fdb6aee62389787244cd0` and zero spills. Weighted
+  host instructions fall `4,598,890 -> 4,516,623` (`-82,267`, `-1.788845%`). State sequences fall
+  from 64 to one; move-class work grows `1,107,673 -> 1,214,973`, but the eliminated State traffic
+  is larger. The Mac 558-PC static screen is exact and falls `62,372 -> 62,209` (`-0.261335%`).
+  Cache format is v9. Resident ABI, rollback, fault, AFP and cache tests pass locally; this stage ran
+  no long benchmark, stress test or full suite.
 
 ## Orb loop
 

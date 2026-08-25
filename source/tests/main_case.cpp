@@ -4954,7 +4954,7 @@ TEST_CASE("guest GPR coalescing keeps publication and snapshot proofs local") {
     }
 }
 
-TEST_CASE("resident XMM ABI maps the low register bank") {
+TEST_CASE("resident XMM ABI maps the configured register bank") {
     using namespace swift::runtime;
     using namespace swift::translator::x86;
 
@@ -4972,15 +4972,17 @@ TEST_CASE("resident XMM ABI maps the low register bank") {
                    desc.size == sizeof(swift::x86::Xmm) && desc.reg == host;
         });
     };
-    const bool xmm0_mapped = mapped(0, 16);
-    std::array<bool, 7> low_mapped{};
-    for (swift::u32 index = 1; index < 8; ++index) {
-        low_mapped[index - 1] = mapped(index, 16 + index);
+    const swift::u32 resident_count = GetSvmConfig().xmm_resident_hi ? 16 : 8;
+    std::array<bool, 16> resident_mappings{};
+    for (swift::u32 index = 0; index < 16; ++index) {
+        resident_mappings[index] = mapped(index, 16 + index);
     }
     X86Instance::Destroy(instance);
 
-    REQUIRE(xmm0_mapped);
-    REQUIRE(std::ranges::all_of(low_mapped, [](bool value) { return value; }));
+    for (swift::u32 index = 0; index < 16; ++index) {
+        INFO("XMM" << index);
+        REQUIRE(resident_mappings[index] == (index < resident_count));
+    }
 }
 
 TEST_CASE("resident XMM coalescing preserves snapshots and fixed-home windows") {
