@@ -373,6 +373,8 @@ private:
     struct DeadEdgeIntegerBranchPlan {
         ir::Inst* producer{};
         ir::Inst* condition{};
+        ir::Flags required{};
+        ir::Cond raw_condition{};
         std::unordered_set<ir::Inst*> discarded{};
     };
 

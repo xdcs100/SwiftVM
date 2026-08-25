@@ -373,6 +373,10 @@ TEST_CASE("dead-edge integer compares branch on raw host flags") {
     for (const auto& test : {
                  Case{0x74, "b.eq", "b.ne"},
                  Case{0x75, "b.ne", "b.eq"},
+                 Case{0x72, "b.lo", "b.hs"},
+                 Case{0x73, "b.hs", "b.lo"},
+                 Case{0x77, "b.hi", "b.ls"},
+                 Case{0x76, "b.ls", "b.hi"},
          }) {
         const std::array<swift::u8, 12> code{
                 0x3c, 0x50,

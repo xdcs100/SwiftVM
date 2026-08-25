@@ -18,10 +18,12 @@ void X64Decoder::DecodeCondJump(_DInst& insn, Cond cond) {
         __ ReturnToDispatcher();
     } else {
         if (!address.IsValue()) {
-            if (auto local = TryLocalCondition(cond)) {
-                if (FlagsBranchOnlyEnabled() &&
+            const bool dead_edges =
+                    FlagsBranchOnlyEnabled() &&
                     SuccessorFlagsDead(address.GetImm().Get()) &&
-                    SuccessorFlagsDead(pc)) {
+                    SuccessorFlagsDead(pc);
+            if (auto local = TryLocalCondition(cond)) {
+                if (dead_edges) {
                     __ BranchOnlyEdges();
                 }
                 ir::BOOL check_result =
@@ -36,6 +38,14 @@ void X64Decoder::DecodeCondJump(_DInst& insn, Cond cond) {
                                 : __ LocalCondSet(local->arm).SetType(ir::ValueType::U8);
                 CondGoto(check_result, address, pc);
                 return;
+            }
+            if (dead_edges && local_nzcv_next_pc_ == insn_pc &&
+                carry_ == CarryPolarity::Direct &&
+                True(local_nzcv_valid_ & ir::Flags::Carry) &&
+                True(local_nzcv_valid_ & ir::Flags::Zero) &&
+                (cond == Cond::HI || cond == Cond::AT ||
+                 cond == Cond::LS || cond == Cond::BE)) {
+                __ BranchOnlyEdges();
             }
         }
         auto check_result = CheckCond(cond);

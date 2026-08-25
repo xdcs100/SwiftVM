@@ -226,16 +226,21 @@ bool IsPolarityStoreShape(const Inst* inst) {
 bool HasBackendSubBranchMarker(Block* block) {
     auto terminal = block->GetTerminal();
     auto* branch = boost::get<terminal::If>(&terminal);
-    if (!branch || !branch->cond.Def() ||
-        branch->cond.Def()->GetOp() != OpCode::LocalCondSet ||
-        branch->cond.Def()->GetUses() != 1) {
+    if (!branch || !branch->cond.Def() || branch->cond.Def()->GetUses() != 1) {
         return false;
     }
-    const auto condition = branch->cond.Def()->GetArg<Cond>(0);
-    if (condition != Cond::EQ && condition != Cond::NE) {
+    const auto condition_op = branch->cond.Def()->GetOp();
+    if (condition_op != OpCode::LocalCondSet &&
+        condition_op != OpCode::And && condition_op != OpCode::Or) {
         return false;
     }
-
+    if (condition_op == OpCode::LocalCondSet) {
+        const auto condition = branch->cond.Def()->GetArg<Cond>(0);
+        if (condition != Cond::EQ && condition != Cond::NE &&
+            condition != Cond::CS && condition != Cond::CC) {
+            return false;
+        }
+    }
     bool marker = false;
     bool invert = false;
     bool sub_flags = false;

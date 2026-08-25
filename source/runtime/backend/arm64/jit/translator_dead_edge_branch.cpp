@@ -6,6 +6,80 @@ namespace swift::runtime::backend::arm64 {
 
 namespace {
 
+struct ConditionPlan {
+    ir::Flags required{};
+    ir::Cond raw_condition{};
+    std::unordered_set<ir::Inst*> discarded{};
+};
+
+ir::Inst* OperandDefinition(const ir::Operand& operand) {
+    const auto value = operand.GetLeft();
+    return value.IsValue() ? value.value.Def() : nullptr;
+}
+
+std::optional<ConditionPlan> AnalyzeCondition(ir::Inst* condition) {
+    if (!condition || condition->GetUses() != 1) {
+        return std::nullopt;
+    }
+    if (condition->GetOp() == ir::OpCode::LocalCondSet) {
+        switch (condition->GetArg<ir::Cond>(0)) {
+            case ir::Cond::EQ:
+            case ir::Cond::NE:
+                return ConditionPlan{ir::Flags::Zero,
+                                     condition->GetArg<ir::Cond>(0)};
+            case ir::Cond::CS:
+                return ConditionPlan{ir::Flags::Carry, ir::Cond::CC};
+            case ir::Cond::CC:
+                return ConditionPlan{ir::Flags::Carry, ir::Cond::CS};
+            default:
+                return std::nullopt;
+        }
+    }
+    if (condition->GetOp() != ir::OpCode::And &&
+        condition->GetOp() != ir::OpCode::Or) {
+        return std::nullopt;
+    }
+
+    auto* left = condition->GetArg<ir::Value>(0).Def();
+    auto* right = OperandDefinition(condition->GetArg<ir::Operand>(1));
+    auto is_zero_cond = [](ir::Inst* inst, ir::Cond cond) {
+        return inst && inst->GetOp() == ir::OpCode::CondSet &&
+               inst->GetUses() == 1 && inst->GetArg<ir::Cond>(0) == cond;
+    };
+    ir::Inst* predicate = left;
+    ir::Inst* zero_condition = right;
+    if (is_zero_cond(left, ir::Cond::EQ) ||
+        is_zero_cond(left, ir::Cond::NE)) {
+        predicate = right;
+        zero_condition = left;
+    }
+    if (!predicate || predicate->GetUses() != 1 ||
+        !zero_condition || zero_condition->GetUses() != 1) {
+        return std::nullopt;
+    }
+    const bool high = condition->GetOp() == ir::OpCode::And &&
+                      predicate->GetOp() == ir::OpCode::TestZero &&
+                      is_zero_cond(zero_condition, ir::Cond::NE);
+    const bool low_same = condition->GetOp() == ir::OpCode::Or &&
+                          predicate->GetOp() == ir::OpCode::TestNotZero &&
+                          is_zero_cond(zero_condition, ir::Cond::EQ);
+    if (!high && !low_same) {
+        return std::nullopt;
+    }
+    auto* carry_test = predicate->GetArg<ir::Value>(0).Def();
+    if (!carry_test || carry_test->GetOp() != ir::OpCode::TestFlags ||
+        carry_test->GetUses() != 1 ||
+        carry_test->GetArg<ir::Flags>(0) != ir::Flags::Carry) {
+        return std::nullopt;
+    }
+    ConditionPlan plan{ir::Flags::Carry | ir::Flags::Zero,
+                       high ? ir::Cond::HI : ir::Cond::LS};
+    plan.discarded.insert(carry_test);
+    plan.discarded.insert(predicate);
+    plan.discarded.insert(zero_condition);
+    return plan;
+}
+
 bool IsPolarityStore(const ir::Inst& inst) {
     if (inst.GetOp() != ir::OpCode::StoreUniform) {
         return false;
@@ -52,13 +126,8 @@ void JitTranslator::PrepareDeadEdgeIntegerBranch(ir::Block* block) {
     auto terminal = block->GetTerminal();
     auto* branch = boost::get<ir::terminal::If>(&terminal);
     auto* condition = branch ? branch->cond.Def() : nullptr;
-    if (!condition || condition->GetOp() != ir::OpCode::LocalCondSet ||
-        condition->GetUses() != 1) {
-        return;
-    }
-
-    const auto condition_code = condition->GetArg<ir::Cond>(0);
-    if (condition_code != ir::Cond::EQ && condition_code != ir::Cond::NE) {
+    auto condition_plan = AnalyzeCondition(condition);
+    if (!condition_plan) {
         return;
     }
 
@@ -91,11 +160,17 @@ void JitTranslator::PrepareDeadEdgeIntegerBranch(ir::Block* block) {
 
     DeadEdgeIntegerBranchPlan plan{
             .condition = condition,
+            .required = condition_plan->required,
+            .raw_condition = condition_plan->raw_condition,
+            .discarded = std::move(condition_plan->discarded),
     };
     u32 inverts = 0;
     u32 polarity_stores = 0;
     for (size_t i = producer_begin; i < condition_index; ++i) {
         auto* inst = instructions[i];
+        if (plan.discarded.contains(inst)) {
+            continue;
+        }
         switch (inst->GetOp()) {
             case ir::OpCode::SaveFlags: {
                 plan.discarded.insert(inst);
@@ -154,6 +229,7 @@ void JitTranslator::PrepareDeadEdgeIntegerBranch(ir::Block* block) {
     for (auto* inst : plan.discarded) {
         disable_instructions.set(inst->Id());
     }
+    local_conditions.emplace(condition, MapCond(plan.raw_condition));
     dead_edge_integer_branch = std::move(plan);
 }
 
@@ -166,7 +242,7 @@ std::optional<ir::Cond> JitTranslator::DeadEdgeIntegerBranchCondition(
     if (!dead_edge_integer_branch || dead_edge_integer_branch->condition != inst) {
         return std::nullopt;
     }
-    return inst->GetArg<ir::Cond>(0);
+    return dead_edge_integer_branch->raw_condition;
 }
 
 }  // namespace swift::runtime::backend::arm64
