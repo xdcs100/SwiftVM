@@ -391,11 +391,13 @@ private:
     };
 
     // A local condition is available only for the guest instruction
-    // immediately following its producer.  The returned ARM condition reads
-    // the still-current host NZCV; fcmp is non-null for an FP relation.
+    // immediately following its producer or an audited MOVSD.  The returned
+    // ARM condition reads the still-current host NZCV; fcmp is non-null for
+    // an FP relation.
     [[nodiscard]] std::optional<LocalCondition> TryLocalCondition(Cond cond);
     void MarkLocalNZCV(ir::Flags valid, ir::Value result);
     void PublishFCmpFlags(ir::Value packed);
+    void ExtendLocalFCmp(const _DInst& insn);
     [[nodiscard]] bool FlagsNarrowAlignEnabled() const;
     [[nodiscard]] bool FlagsCfinvEnabled() const;
     [[nodiscard]] bool FlagsTerminalJccEnabled() const;

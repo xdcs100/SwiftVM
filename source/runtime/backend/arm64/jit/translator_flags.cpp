@@ -899,14 +899,8 @@ bool JitTranslator::CanUseCompactFCmpCarrier(ir::Inst* fcmp) const {
         saw_condition = true;
         auto scan = publish;
         for (++scan; scan != list.end() && &*scan != &user; ++scan) {
-            switch (scan->GetOp()) {
-                case ir::OpCode::LoadImm:
-                case ir::OpCode::StoreUniform:
-                case ir::OpCode::AdvancePC:
-                case ir::OpCode::BitCast:
-                    break;
-                default:
-                    return false;
+            if (!PreservesHostNZCV(scan->GetOp())) {
+                return false;
             }
         }
         if (scan == list.end()) {

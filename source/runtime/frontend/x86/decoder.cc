@@ -803,10 +803,10 @@ private:
             decoder.Interrupt(InterruptReason::FALLBACK);
             return false;
         }
-
         swift::runtime::PerfDecodeScope2 perf_bookkeeping{
                 swift::runtime::GetPerfStats2().decode_bookkeeping,
                 swift::runtime::PerfDecodePath2::Bookkeeping};
+        decoder.ExtendLocalFCmp(insn);
         {
             swift::runtime::PerfDecodeScope2 perf_advance{
                     swift::runtime::GetPerfStats2().decode_advance_pc,
@@ -1224,6 +1224,16 @@ void X64Decoder::PublishFCmpFlags(ir::Value packed) {
     StorePolarity(compact);
     local_fcmp_next_pc_ = pc;
     local_fcmp_value_ = packed;
+}
+
+void X64Decoder::ExtendLocalFCmp(const _DInst& insn) {
+    if (insn.opcode != I_MOVSD || local_fcmp_next_pc_ != insn_pc ||
+        META_GET_FC(insn.meta) != FC_NONE ||
+        insn.testedFlagsMask != 0 || insn.modifiedFlagsMask != 0 ||
+        insn.undefinedFlagsMask != 0) {
+        return;
+    }
+    local_fcmp_next_pc_ = pc;
 }
 
 std::optional<X64Decoder::LocalCondition> X64Decoder::TryLocalCondition(Cond cond) {
