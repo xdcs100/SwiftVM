@@ -23,6 +23,41 @@ namespace swift::runtime::backend::arm64 {
 static_assert(kMaxSpillSlots == sizeof(State::spill_area) / sizeof(u64),
               "spill slot count mismatch between reg_alloc.h and context.h");
 
+namespace {
+
+#if defined(__linux__) && !defined(__ANDROID__)
+bool IsSpillForwardBarrier(ir::OpCode op) {
+    using O = ir::OpCode;
+    switch (op) {
+        case O::LoadMemory:
+        case O::StoreMemory:
+        case O::LoadMemoryTSO:
+        case O::StoreMemoryTSO:
+        case O::MemoryCopy:
+        case O::MemoryCopyTSO:
+        case O::CompareAndSwap:
+        case O::CompareAndSwap128:
+        case O::CheckMemoryAlignment:
+        case O::AtomicExchange:
+        case O::AtomicFetchAdd:
+        case O::AtomicRMW:
+        case O::CallLambda:
+        case O::CallLocation:
+        case O::CallDynamic:
+        case O::X87Op:
+        case O::Sse42Str:
+        case O::Goto:
+        case O::NotGoto:
+        case O::BindLabel:
+            return true;
+        default:
+            return false;
+    }
+}
+#endif
+
+}  // namespace
+
 JitContext::JitContext(const std::shared_ptr<Module>& module,
                        RegAlloc& reg_alloc,
                        bool enable_direct_link)
@@ -292,7 +327,8 @@ Register JitContext::SpillGPR(const ir::Value& value) {
         }
         auto tmp = GetSpillTmpX();
         spill_def_scratch.emplace(value.Id(), static_cast<u8>(tmp.GetCode()));
-        pending_spill_writes.push_back({slot.offset, static_cast<u8>(tmp.GetCode()), false});
+        pending_spill_writes.push_back(
+                {value.Id(), slot.offset, static_cast<u8>(tmp.GetCode()), false});
         return tmp;
     }
     // Use access: reload from the spill slot. Any write-back of a value
@@ -327,7 +363,8 @@ VRegister JitContext::SpillFPR(const ir::Value& value) {
         }
         auto tmp = GetSpillTmpV();
         spill_def_scratch.emplace(value.Id(), static_cast<u8>(tmp.GetCode()));
-        pending_spill_writes.push_back({slot.offset, static_cast<u8>(tmp.GetCode()), true});
+        pending_spill_writes.push_back(
+                {value.Id(), slot.offset, static_cast<u8>(tmp.GetCode()), true});
         return tmp;
     }
     // See SpillGPR: one reload per (instruction, value).
@@ -343,7 +380,29 @@ VRegister JitContext::SpillFPR(const ir::Value& value) {
 }
 
 void JitContext::FlushSpillWrites() {
+    (void)FlushSpillWrites(nullptr);
+}
+
+bool JitContext::FlushSpillWrites(ir::Inst* consumer) {
+    bool forwarded = false;
+    std::optional<PendingSpillWrite> retained;
     for (auto& write : pending_spill_writes) {
+#if defined(__linux__) && !defined(__ANDROID__)
+        if (consumer && !forwarded && !write.is_fpr && write.reg == spill_scratch.GetCode() &&
+            !IsSpillForwardBarrier(consumer->GetOp())) {
+            for (const auto& value : consumer->GetValues()) {
+                if (value.Defined() && value.Id() == write.value) {
+                    spill_use_scratch.emplace(write.value, write.reg);
+                    retained = write;
+                    forwarded = true;
+                    break;
+                }
+            }
+            if (forwarded) {
+                continue;
+            }
+        }
+#endif
         const u32 offset = state_offset_spill_area + write.slot * sizeof(u64);
         if (write.is_fpr) {
             __ Str(VRegister::GetVRegFromCode(write.reg).Q(), MemOperand(state, offset));
@@ -354,6 +413,10 @@ void JitContext::FlushSpillWrites() {
         RecordHotSpillWriteback();
     }
     pending_spill_writes.clear();
+    if (retained) {
+        pending_spill_writes.push_back(*retained);
+    }
+    return forwarded;
 }
 
 backend::ScratchNeed JitContext::CurrentBudget() const {
@@ -1189,13 +1252,9 @@ void JitContext::SetCurrent(ir::Function* function) {
 
 void JitContext::TickIR(ir::Inst* instr) {
     EndVixlScratch();
-    // Deferred spill write-back for the previous instruction's def (if
-    // any) must land before anything else: from this instruction on the
-    // scratch register holding it may be reused, and uses reload from the
-    // slot.
-    FlushSpillWrites();
     spill_def_scratch.clear();
     spill_use_scratch.clear();
+    const bool forwarded_spill = FlushSpillWrites(instr);
     cur_inst = instr;
     reg_alloc.SetCurrent(instr);
     cur_dirty_gprs = reg_alloc.GetDirtyGPR();
@@ -1206,7 +1265,7 @@ void JitContext::TickIR(ir::Inst* instr) {
     spill_tmp_gprs = 0;
     spill_tmp_fprs = 0;
 #if defined(__linux__) && !defined(__ANDROID__)
-    spill_scratch_in_use = false;
+    spill_scratch_in_use = forwarded_spill;
 #endif
     shared_tmp_gpr = -1;
     auxiliary_scratch = false;

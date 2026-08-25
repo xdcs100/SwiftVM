@@ -283,18 +283,12 @@ private:
 
     // --- RegAlloc::MEM (spilled value) support ---------------------------
     // A value the linear scan could not keep in a host register lives in
-    // State::spill_area (backend/context.h). Every *use* reloads it into a
-    // scratch register (Ldr). A spilled *def* computes into a scratch
-    // register exactly like a register-allocated def; the write-back (Str)
-    // is deferred to the next TickIR / block-exit boundary because
-    // JitContext never observes the moment an emitter finishes writing the
-    // destination register. Reads of the just-defined value from the same
-    // instruction or from the block terminal are served the scratch
-    // register directly (value.Def() == cur_inst), so no stale slot is
-    // ever observed.
+    // State::spill_area (backend/context.h). Spilled defs compute into a
+    // scratch register and are written back at the next instruction or block
+    // boundary. A Linux x18 def may stay resident for an adjacent safe direct
+    // consumer; all other uses reload from the slot.
     //
-    // Limitations (spilling has never triggered on current workloads, so
-    // this path is defensive):
+    // Platform and capacity constraints:
     //  - On desktop Linux, units with any spill are reallocated with x18 in
     //    their private reserved baseline. The first scalar spill reload/write-
     //    back of each instruction uses x18; further scalar reloads use the
@@ -312,6 +306,7 @@ private:
     [[nodiscard]] Register SpillGPR(const ir::Value& value);
     [[nodiscard]] VRegister SpillFPR(const ir::Value& value);
     void FlushSpillWrites();
+    [[nodiscard]] bool FlushSpillWrites(ir::Inst* consumer);
     [[nodiscard]] static bool IsFloatValue(const ir::Value& value);
 
     // Scratch handed to a spill reload rather than to the emitter. Budgeted
@@ -325,6 +320,7 @@ private:
     void ExcludeVixlScratch(const XRegister& reg);
 
     struct PendingSpillWrite {
+        u32 value;
         u16 slot;    // spill slot index
         u8 reg;      // scratch register code holding the value
         bool is_fpr;
