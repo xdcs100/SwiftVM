@@ -976,6 +976,17 @@ peepholes.
   `3,894,028 -> 3,870,936` (`-23,092`, `-0.593011%`); `0x40248e` loses eight instructions per entry
   and `0x402497` loses seven. Eleven focused liveness, resident-FPR, tie and AFP cases pass 282
   assertions. This stage ran no long benchmark, stress test or full suite.
+- `25bc815` recognizes scalar self-XOR only when both SSA inputs are identical or equivalent pure
+  `BitCast` / `BitExtract` views of the same snapshot. Exclusive view instructions are discarded,
+  and the Arm64 emitter uses one `ANDS` to materialize zero and produce logical NZCV together. The
+  bounded Orb screen completes in 3.912 seconds with identical 2,755-PC / 3,621-version sets,
+  99.995707% retained-host coverage, all top-30 PCs, no growing PC and exact PPM SHA
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. The comparable total falls
+  `3,870,936 -> 3,848,132` (`-22,804`, `-0.589108%`); `0x41ef00` accounts for 12,288 and `0x45d000`
+  for 4,758. The static screen has 95 shrinking PCs, none growing and `-154` instructions. Twelve
+  focused identity and flags cases pass 64 assertions. A direct frontend rewrite to a shared zero
+  constant was rejected because it perturbed constant CSE and register allocation, growing the
+  static screen by 56 instructions. This stage ran no long benchmark, stress test or full suite.
 
 ## Orb loop
 
