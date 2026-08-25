@@ -1192,6 +1192,18 @@ peepholes.
   5,868,557,584`. Local and Orb spill focuses pass four cases with 24,282 / 26,859 assertions; the
   Orb scalar focus passes 22 cases / 1,023 assertions. This stage ran no long benchmark, stress test
   or full suite.
+- `e64c635` drops the deferred x18 writeback when the adjacent consumer contains every remaining
+  direct and pseudo use of the spilled SSA definition. Multi-use values keep the dirty slot and the
+  previous forwarding behavior; the proof changes neither its barrier set nor the scratch ABI.
+  Against `a134c32`, the bounded c-ray static common set falls `214,974 -> 214,952`; three PCs
+  shrink, none grow, and `0x402e70` falls `829 -> 811`. On the same explicitly partial
+  22.719351%-covered retained-entry subset, host work falls `9,480,528,636 -> 9,421,515,964`
+  (`-59,012,672`, `-0.622462%`), of which `0x402e70` contributes `-59,009,238`; this remains a
+  bounded projection rather than a full formal claim. The deterministic c-ray oracle remains SHA
+  `89ccd2e15dba67378197d05524a6223795f8b8ab2d11f4d40deaef4af9f35c6e`. Smallpt stays exact at
+  `399,441`, and CoreMark keeps 2,846 PCs / 3,379 versions plus `crcfinal=0x382f` while moving
+  `5,868,557,584 -> 5,868,557,582` and 22 -> 20 dynamic spill operations. The Orb spill focus
+  passes four cases / 26,861 assertions. This stage ran no long benchmark, stress test or full suite.
 
 ## Orb loop
 
