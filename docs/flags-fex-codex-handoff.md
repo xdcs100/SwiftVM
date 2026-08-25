@@ -715,6 +715,7 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 | Remaining absolute `GetOperand` materialization | 21.75M left-immediate instances are true two-part constants; ADRP/literal alternatives do not preserve the current relocation and mapping contract |
 | Saved-flags compound `CondSet` | two-instruction HI/LS and GE/LT forms were implemented and validated, but execute 0 times in formal smallpt/CoreMark and the c-ray audit sample; GT/LE still need three inputs, so the zero-gain prototype was removed |
 | General narrow `TEST` direct-`And` flags | 496-PC bounded A/B had 29 shrinking and 31 growing PCs, only 13 net static instructions and `-623` retained-formal-weighted instructions; fully reverted |
+| Global inverted-carry ABI default | bounded smallpt aborted on the scalar-FPR fixed-home proof before producing an oracle; a safe version requires explicit edge polarity rather than changing the decoder default, fully reverted |
 
 ## Next ready (pick one, measure, revert on 124/134)
 
@@ -1038,6 +1039,18 @@ peepholes.
   `31 -> 26`. Short host and move-class dynamic counts fall by 439 after the operand normalization
   stage. The GPR publication proof passes 381 assertions on local Clang and Orb GCC builds. This
   stage ran no long benchmark, stress test or full suite.
+- `dbb1574` extends the existing branch-only edge proof to `FCmpCondSet`. When an adjacent FP compare
+  feeds only a terminal Jcc and both successors overwrite incoming flags before any observation, the
+  pass removes `PublishFCmpFlags`, carry normalization and the compact relation carrier. ARM64
+  independently reproves a sole condition use, PSTATE-preserving interval and absence of fault or
+  helper observers before branching on raw FCMP NZCV. The bounded Orb screen completes in 2.821
+  seconds with identical 2,755-PC / 3,621-version sets, 99.995707% retained-host coverage, all
+  top-30 PCs, no growing PC and exact PPM SHA
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. The comparable total falls
+  `3,664,930 -> 3,554,284` (`-110,646`, `-3.019048%`). `0x402777` accounts for 18,432;
+  `0x402731` and `0x40274f` account for 17,490 each. Two captures have identical static shapes.
+  Local Clang and Orb GCC pass 44 flag-elimination, 85 FP-branch and 3,482 COMIS differential
+  assertions. This stage ran no long benchmark, stress test or full suite.
 
 ## Orb loop
 
