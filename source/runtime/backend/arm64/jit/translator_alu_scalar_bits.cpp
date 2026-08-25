@@ -550,6 +550,9 @@ void JitTranslator::EmitZeroExtend32To64(ir::Inst* inst) {
     if (CanUseZeroStoreRegister(ir::Value{inst})) {
         return;
     }
+    if (fused_pin_zext32.contains(inst)) {
+        return;
+    }
     auto source = inst->GetArg<ir::Value>(0);
     if (context.IsWidthChainCoalesced(inst->Id())) {
         ASSERT_MSG(ReproveWidthChainBridge(inst),

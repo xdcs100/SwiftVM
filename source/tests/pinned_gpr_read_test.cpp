@@ -19,6 +19,7 @@ using namespace swift::runtime::ir;
 
 enum class PinnedReadShape {
     SelfAnd,
+    SelfWrite,
     SignExtend,
     StoreMemory,
     Subtract,
@@ -39,7 +40,14 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
     IntrusivePtr<Block> block{new Block(0, Location{0x8940})};
     auto value = block->GetHostGPR(HostRegIndex(22), Imm{0u})
                          .SetType(type);
-    if (shape == PinnedReadShape::SelfAnd) {
+    if (shape == PinnedReadShape::SelfWrite) {
+        auto result = block->ZeroExtend32To64(value).SetType(ValueType::U64);
+        block->SetHostGPR(result, HostRegIndex(22), Imm{0u});
+        auto address = block->BitCast(result).SetType(ValueType::U64);
+        auto loaded = block->LoadMemory(Operand{address, Imm{8u}})
+                              .SetType(ValueType::U8);
+        block->StoreUniform(Uniform{64, ValueType::U8}, loaded);
+    } else if (shape == PinnedReadShape::SelfAnd) {
         auto result = block->And(value, Operand{value}).SetType(ValueType::U32);
         block->SaveFlags(result, Flags::Negate | Flags::Zero | Flags::Parity);
     } else if (shape == PinnedReadShape::SignExtend) {
@@ -119,6 +127,14 @@ TEST_CASE("one pinned GPR consumer reuses its fixed W view") {
     const auto lines = EmitPinnedRead(PinnedReadShape::SelfAnd, false);
     REQUIRE(Count(lines, "ubfx ", "x22") == 0);
     REQUIRE(Count(lines, "ands w", "w22, w22") == 1);
+}
+
+TEST_CASE("a pinned low-32 self-write clears its high half in one instruction") {
+    const auto lines = EmitPinnedRead(PinnedReadShape::SelfWrite, false);
+    REQUIRE(Count(lines, "ubfx ", "x22") == 0);
+    REQUIRE(Count(lines, "mov w22, w22", "") == 1);
+    REQUIRE(Count(lines, "mov w", "w22") == 1);
+    REQUIRE(Count(lines, "ldrb ", "[x22") == 1);
 }
 
 TEST_CASE("a later pinned GPR snapshot use keeps the read move") {

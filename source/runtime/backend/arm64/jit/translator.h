@@ -158,6 +158,18 @@ private:
     [[nodiscard]] bool ReproveLow32Copy(ir::Inst* inst) const;
     [[nodiscard]] bool ReproveCachedConstAddress(ir::Inst* inst) const;
 
+    struct PinnedGPRSelfWrite {
+        ir::Inst* read{};
+        ir::Inst* extend{};
+        std::vector<ir::Inst*> aliases{};
+        u16 target{};
+    };
+    void PreparePinnedGPRSelfWrites(ir::Block* block);
+    [[nodiscard]] std::optional<PinnedGPRSelfWrite>
+    MatchPinnedGPRSelfWrite(ir::Inst* inst) const;
+    [[nodiscard]] std::optional<XRegister>
+    ResolvePinnedGPRValue(ir::Value value) const;
+
     enum class BoundarySubsequence : size_t {
         Prologue,
         TerminalMain,
@@ -559,6 +571,8 @@ private:
     // Narrow mapped reads whose single audited consumer can use the pinned W
     // register directly (for example CL masking and U32 XOR).
     std::map<ir::Inst*, u16> fused_pin_gpr_reads{};
+    std::map<ir::Inst*, u16> pinned_gpr_values{};
+    std::map<ir::Inst*, PinnedGPRSelfWrite> pinned_gpr_self_writes{};
     std::map<ir::Inst*, ScalarFPRPublication> scalar_load_fpr_fusions{};
     std::map<ir::Inst*, ScalarFPRPublication> scalar_value_fpr_fusions{};
     std::optional<DeadEdgeIntegerBranchPlan> dead_edge_integer_branch{};

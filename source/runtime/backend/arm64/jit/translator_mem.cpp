@@ -1156,6 +1156,9 @@ void JitTranslator::EmitGetHostGPR(ir::Inst* inst) {
                    "GetHostGPR coalescing proof diverged at IR {}", inst->Id());
         return;
     }
+    if (fused_pin_gpr_reads.contains(inst)) {
+        return;
+    }
     auto offset = inst->GetArg<ir::Imm>(1).Get();
     auto reg_index = inst->GetArg<ir::Imm>(0).Get();
     const u32 value_size = ir::GetValueSizeByte(inst->ReturnType());
@@ -1280,6 +1283,18 @@ void JitTranslator::EmitGetHostFPR(ir::Inst* inst) {
 }
 
 void JitTranslator::EmitSetHostGPR(ir::Inst* inst) {
+    if (auto self_write = pinned_gpr_self_writes.find(inst);
+        self_write != pinned_gpr_self_writes.end()) {
+        const auto reproved = MatchPinnedGPRSelfWrite(inst);
+        ASSERT_MSG(reproved && reproved->read == self_write->second.read &&
+                           reproved->extend == self_write->second.extend &&
+                           reproved->aliases == self_write->second.aliases &&
+                           reproved->target == self_write->second.target,
+                   "pinned GPR self-write proof diverged at IR {}", inst->Id());
+        auto host_reg = XRegister(self_write->second.target);
+        __ Mov(host_reg.W(), host_reg.W());
+        return;
+    }
     const auto published = inst->GetArg<ir::Value>(0);
     if (auto update = MatchPreIndexMemoryUpdate(published.Def());
         update && update->publication == inst) {

@@ -242,9 +242,14 @@ MemOperand JitTranslator::EmitMemOperand(ir::Operand& ir_op,
                 }
             }
             if (use_memory_base) {
-                return BiasMem(context.R(addr_value), atomic);
+                auto pinned = ResolvePinnedGPRValue(addr_value);
+                return BiasMem(pinned ? Register{*pinned}
+                                      : context.R(addr_value),
+                               atomic);
             }
-            return MemOperand{context.R(addr_value)};
+            auto pinned = ResolvePinnedGPRValue(addr_value);
+            return MemOperand{pinned ? Register{*pinned}
+                                     : context.R(addr_value)};
         }
     } else {
         Register left_reg;
@@ -255,7 +260,9 @@ MemOperand JitTranslator::EmitMemOperand(ir::Operand& ir_op,
             __ Mov(tmp, ir_op.GetLeft().imm.Get());
             left_reg = tmp;
         } else {
-            left_reg = context.R(ir_op.GetLeft().value, true);
+            auto left = ir_op.GetLeft().value;
+            auto pinned = ResolvePinnedGPRValue(left);
+            left_reg = pinned ? Register{*pinned} : context.R(left, true);
         }
         auto right = ir_op.GetRight();
         if (right.IsImm()) {
@@ -317,7 +324,9 @@ MemOperand JitTranslator::EmitMemOperand(ir::Operand& ir_op,
                 }
             }
         } else {
-            auto right_reg = context.R(right.value, true);
+            auto pinned = ResolvePinnedGPRValue(right.value);
+            auto right_reg = pinned ? Register{*pinned}
+                                    : context.R(right.value, true);
             if (ir_op.GetOp() == ir::OperandOp::Plus) {
                 if (use_memory_base) {
                     if (structured_guest_ea && window_uxtw) {
