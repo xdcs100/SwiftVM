@@ -987,6 +987,20 @@ peepholes.
   focused identity and flags cases pass 64 assertions. A direct frontend rewrite to a shared zero
   constant was rejected because it perturbed constant CSE and register allocation, growing the
   static screen by 56 instructions. This stage ran no long benchmark, stress test or full suite.
+- `cd31ca8` keeps signed scalar integer conversions in the fixed XMM home after a proven full-vector
+  zero and stores resident 32-bit or 64-bit scalars with `STR S` or `STR D`. A conversion whose only
+  additional consumer is `StoreMemory` also bypasses its GPR result. Calls, local control flow and
+  same-home overwrites reject the direct path. `SCVTF S/D` preserves upper lanes on the tested host,
+  so the preceding vector zero remains required. The bounded Orb screen completes in 3.545 seconds
+  with identical 2,755-PC / 3,621-version sets, 99.995707% retained-host coverage, all top-30 PCs,
+  no growing PC and exact PPM SHA
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. The comparable total falls
+  `3,848,132 -> 3,815,145` (`-32,987`, `-0.857221%`). The largest reductions are `0x401e2a` at
+  15,240, `0x4023c0` at 9,216, `0x402e30` at 3,072 and `0x412930` at 2,304. Nine local focused
+  cases pass 87 assertions; the Orb conversion filter passes 58 assertions across four cases. The
+  `0x47f570` POP chain was also rechecked and already uses post-index loads for every stack advance;
+  its remaining state stores are not redundant RSP updates. This stage ran no long benchmark,
+  stress test or full suite.
 
 ## Orb loop
 
