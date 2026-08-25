@@ -50,6 +50,34 @@ bool IsHelperBoundary(OpCode op) {
            op == OpCode::CallDynamic || op == OpCode::X87Op;
 }
 
+std::optional<Flags> ConditionFlags(Cond cond) {
+    switch (cond) {
+        case Cond::EQ:
+        case Cond::NE:
+            return Flags::Zero;
+        case Cond::MI:
+        case Cond::PL:
+            return Flags::Negate;
+        case Cond::VS:
+        case Cond::VC:
+            return Flags::Overflow;
+        case Cond::CS:
+        case Cond::CC:
+            return Flags::Carry;
+        case Cond::HI:
+        case Cond::LS:
+            return Flags::Carry | Flags::Zero;
+        case Cond::GE:
+        case Cond::LT:
+            return Flags::Negate | Flags::Overflow;
+        case Cond::GT:
+        case Cond::LE:
+            return Flags::Negate | Flags::Overflow | Flags::Zero;
+        default:
+            return std::nullopt;
+    }
+}
+
 Flags TransferFlagsLiveness(Block* block, Flags needed) {
     for (auto it = block->GetInstList().rbegin();
          it != block->GetInstList().rend(); ++it) {
@@ -85,7 +113,8 @@ Flags TransferFlagsLiveness(Block* block, Flags needed) {
             case OpCode::CondSelect:
             case OpCode::CondSet:
             case OpCode::LocalCondSet:
-                needed |= Flags::NZCV;
+                needed |= ConditionFlags(inst.GetArg<Cond>(0))
+                                  .value_or(Flags::NZCV);
                 break;
             case OpCode::LocalParitySet:
             case OpCode::FCmpCondSet:
@@ -176,34 +205,6 @@ LiveMap ComputeFunctionLiveIn(HIRFunction* function) {
         }
     }
     return live_in;
-}
-
-std::optional<Flags> ConditionFlags(Cond cond) {
-    switch (cond) {
-        case Cond::EQ:
-        case Cond::NE:
-            return Flags::Zero;
-        case Cond::MI:
-        case Cond::PL:
-            return Flags::Negate;
-        case Cond::VS:
-        case Cond::VC:
-            return Flags::Overflow;
-        case Cond::CS:
-        case Cond::CC:
-            return Flags::Carry;
-        case Cond::HI:
-        case Cond::LS:
-            return Flags::Carry | Flags::Zero;
-        case Cond::GE:
-        case Cond::LT:
-            return Flags::Negate | Flags::Overflow;
-        case Cond::GT:
-        case Cond::LE:
-            return Flags::Negate | Flags::Overflow | Flags::Zero;
-        default:
-            return std::nullopt;
-    }
 }
 
 bool IsBranchOnlyProducer(OpCode op) {
@@ -809,8 +810,8 @@ void FlagsEliminationPass::Run(Block* block, HIRFunction* hir_function,
             case OpCode::CondSelect:
             case OpCode::CondSet:
             case OpCode::LocalCondSet:
-                // Host conditional select / set reads NZCV directly.
-                needed |= Flags::NZCV;
+                needed |= ConditionFlags(inst.GetArg<Cond>(0))
+                                  .value_or(Flags::NZCV);
                 break;
             case OpCode::FCmpCondSet:
                 // Reads the named VecFCmp relation, not the guest flags word.

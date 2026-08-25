@@ -3710,9 +3710,40 @@ TEST_CASE("Flag elimination removes only overwritten in-block carry writes") {
     REQUIRE(contains(invert_read, invert));
     REQUIRE(contains(invert_read, last));
 
-    // (7) Gate A remains block-wide: any Adc/Sbb leaves every instruction
+    // (7) A condition keeps only the NZCV bits it actually reads.
+    Block zero_condition{9, Location{0x3900}};
+    lhs = zero_condition.LoadImm(Imm{17u});
+    rhs = zero_condition.LoadImm(Imm{18u});
+    auto result = zero_condition.Sub(lhs, Operand{rhs});
+    first = zero_condition.AppendInst(OpCode::SaveFlags, result, Flags::All);
+    invert = zero_condition.AppendInst(OpCode::InvertCarry);
+    zero_condition.LocalCondSet(Cond::EQ);
+    last = append_carry_save(zero_condition, lhs, rhs);
+
+    FlagsEliminationPass::Run(&zero_condition, nullptr, FeatureSet{});
+
+    REQUIRE(contains(zero_condition, first));
+    REQUIRE_FALSE(contains(zero_condition, invert));
+    REQUIRE(contains(zero_condition, last));
+
+    Block carry_condition{10, Location{0x3a00}};
+    lhs = carry_condition.LoadImm(Imm{19u});
+    rhs = carry_condition.LoadImm(Imm{20u});
+    result = carry_condition.Sub(lhs, Operand{rhs});
+    first = carry_condition.AppendInst(OpCode::SaveFlags, result, Flags::All);
+    invert = carry_condition.AppendInst(OpCode::InvertCarry);
+    carry_condition.LocalCondSet(Cond::CS);
+    last = append_carry_save(carry_condition, lhs, rhs);
+
+    FlagsEliminationPass::Run(&carry_condition, nullptr, FeatureSet{});
+
+    REQUIRE(contains(carry_condition, first));
+    REQUIRE(contains(carry_condition, invert));
+    REQUIRE(contains(carry_condition, last));
+
+    // (8) Gate A remains block-wide: any Adc/Sbb leaves every instruction
     // untouched, including otherwise-covered C writers.
-    Block gate_a{9, Location{0x3900}};
+    Block gate_a{11, Location{0x3b00}};
     lhs = gate_a.LoadImm(Imm{13u});
     rhs = gate_a.LoadImm(Imm{14u});
     first = append_carry_save(gate_a, lhs, rhs);
