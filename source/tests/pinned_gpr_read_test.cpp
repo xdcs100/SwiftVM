@@ -18,6 +18,7 @@ using namespace swift::runtime::backend;
 using namespace swift::runtime::ir;
 
 enum class PinnedReadShape {
+    Or,
     SelfAnd,
     SelfWrite,
     SignExtend,
@@ -40,7 +41,12 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
     IntrusivePtr<Block> block{new Block(0, Location{0x8940})};
     auto value = block->GetHostGPR(HostRegIndex(22), Imm{0u})
                          .SetType(type);
-    if (shape == PinnedReadShape::SelfWrite) {
+    if (shape == PinnedReadShape::Or) {
+        auto right = block->GetHostGPR(HostRegIndex(29), Imm{0u})
+                             .SetType(type);
+        auto result = block->Or(value, Operand{right}).SetType(type);
+        block->SaveFlags(result, Flags::Negate | Flags::Zero | Flags::Parity);
+    } else if (shape == PinnedReadShape::SelfWrite) {
         auto result = block->ZeroExtend32To64(value).SetType(ValueType::U64);
         block->SetHostGPR(result, HostRegIndex(22), Imm{0u});
         auto address = block->BitCast(result).SetType(ValueType::U64);
@@ -127,6 +133,17 @@ TEST_CASE("one pinned GPR consumer reuses its fixed W view") {
     const auto lines = EmitPinnedRead(PinnedReadShape::SelfAnd, false);
     REQUIRE(Count(lines, "ubfx ", "x22") == 0);
     REQUIRE(Count(lines, "ands w", "w22, w22") == 1);
+}
+
+TEST_CASE("pinned GPR OR reads direct W views only at exact U32 width") {
+    const auto wide = EmitPinnedRead(PinnedReadShape::Or, false);
+    REQUIRE(Count(wide, "ubfx ", "x22") == 0);
+    REQUIRE(Count(wide, "ubfx ", "x29") == 0);
+    REQUIRE(Count(wide, "orr w", "w22, w29") == 1);
+
+    const auto narrow = EmitPinnedRead(
+            PinnedReadShape::Or, false, ValueType::U16);
+    REQUIRE(Count(narrow, "orr w", "w22, w29") == 0);
 }
 
 TEST_CASE("a pinned low-32 self-write clears its high half in one instruction") {

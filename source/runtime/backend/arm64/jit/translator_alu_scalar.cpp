@@ -470,6 +470,15 @@ void JitTranslator::EmitOr(ir::Inst* inst) {
     }
     auto left = inst->GetArg<ir::Value>(0);
     auto right = inst->GetArg<ir::Operand>(1);
+    auto pinned_w = [&](ir::Value value) -> std::optional<WRegister> {
+        if (value.Def()) {
+            if (auto it = fused_pin_gpr_reads.find(value.Def());
+                it != fused_pin_gpr_reads.end()) {
+                return WRegister(it->second);
+            }
+        }
+        return std::nullopt;
+    };
     auto pseudo_flags = GetPseudoFlags(inst);
     if (!pseudo_flags.Null() && inst->GetUses() == 0 && right.IsImm() &&
         right.GetLeft().imm.Get() == 0) {
@@ -480,17 +489,24 @@ void JitTranslator::EmitOr(ir::Inst* inst) {
         SaveLogicalResultFlags(value, left.Type(), pseudo_flags);
         return;
     }
-    auto right_operand = context.GetFeatures().int_imm_fold && right.IsImm() &&
-                                 Assembler::IsImmLogical(
-                                         right.GetLeft().imm.Get(),
-                                         inst->ReturnType() == ir::ValueType::U64 ||
-                                                         inst->ReturnType() == ir::ValueType::S64
-                                                 ? 64
-                                                 : 32)
-            ? Operand{static_cast<s64>(right.GetLeft().imm.Get())}
-            : EmitOperand(right);
+    auto right_pinned = right.GetLeft().IsValue()
+            ? pinned_w(right.GetLeft().value)
+            : std::nullopt;
+    auto right_operand = right_pinned
+            ? Operand{*right_pinned}
+            : (context.GetFeatures().int_imm_fold && right.IsImm() &&
+                       Assembler::IsImmLogical(
+                               right.GetLeft().imm.Get(),
+                               inst->ReturnType() == ir::ValueType::U64 ||
+                                               inst->ReturnType() == ir::ValueType::S64
+                                       ? 64
+                                       : 32)
+                       ? Operand{static_cast<s64>(right.GetLeft().imm.Get())}
+                       : EmitOperand(right));
     auto result = context.R(ir::Value{inst});
-    auto left_register = context.R(left, true);
+    auto left_pinned = pinned_w(left);
+    Register left_register = left_pinned ? Register{*left_pinned}
+                                         : context.R(left, true);
 
     if (!pseudo_flags.Null() && !pseudo_flags.branch_only) {
         BeginFlagsTokenProducer(pseudo_flags);
