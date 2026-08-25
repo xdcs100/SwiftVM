@@ -58,10 +58,7 @@ void JitTranslator::BeginFlagsTokenProducer(const PseudoFlags& pseudo) {
         return;
     }
     if (FlagsRegsEnabled()) {
-        // The next CaptureFlagsToken replaces last_result. Do not pack the
-        // previous token into x26 — the new ALU overwrites NZCV.
-        flags_token_valid = false;
-        flags_token_af = false;
+        InvalidateFlagsToken();
         return;
     }
     MergeNZCV();
@@ -78,52 +75,99 @@ Register JitTranslator::FlagsResultRegister(
     return context.R(ir::Value{inst});
 }
 
+bool JitTranslator::CanRetainFlagsTokenResult(
+        ir::Inst* producer, const Register& result) {
+    if (!producer || ir::GetValueSizeByte(producer->ReturnType()) != sizeof(u64)) {
+        return false;
+    }
+    if (!backend::IsFixedGPRHome(result.GetCode())) {
+        return false;
+    }
+    const ir::Value value{producer};
+
+    bool after_producer = false;
+    bool published = false;
+    for (auto& inst : cur_block->GetInstList()) {
+        if (&inst == producer) {
+            after_producer = true;
+            continue;
+        }
+        if (!after_producer) {
+            continue;
+        }
+        if (inst.GetOp() == ir::OpCode::SetHostGPR &&
+            inst.GetArg<ir::Imm>(1).Get() == result.GetCode()) {
+            if (!published && inst.GetArg<ir::Imm>(2).Get() == 0 &&
+                context.IsHostWriteCoalesced(inst.Id()) &&
+                inst.GetArg<ir::Value>(0).Def() == producer) {
+                published = true;
+                continue;
+            }
+            return false;
+        }
+        if ((backend::FixedGPRClobbers(inst, context.GetFeatures()) &
+             (1u << result.GetCode())) != 0) {
+            return false;
+        }
+        if (inst.HasValue() && !inst.IsBitCastOperation()) {
+            const ir::Value other{&inst};
+            if (context.SharesGPR(value, other)) {
+                return false;
+            }
+        }
+    }
+    return published;
+}
+
+XRegister JitTranslator::FlagsTokenResult() const {
+    return XRegister{flags_token_result_code};
+}
+
+void JitTranslator::MaterializeFlagsTokenResult() {
+    if (!flags_token_valid ||
+        flags_token_result_code == atomic_scratch.GetCode()) {
+        return;
+    }
+    __ Mov(atomic_scratch, FlagsTokenResult());
+    if (!flags_token_keep) {
+        flags_token_result_code = atomic_scratch.GetCode();
+    }
+}
+
+void JitTranslator::InvalidateFlagsToken() {
+    flags_token_valid = false;
+    flags_token_result_code = atomic_scratch.GetCode();
+}
+
 void JitTranslator::CaptureFlagsToken(const Register& result,
                                       ir::ValueType type,
-                                      bool capture_af,
-                                      const Register* af_left,
-                                      const Operand* af_right) {
+                                      ir::Inst* producer) {
     if (!FlagsRegsEnabled()) {
         return;
     }
     const bool wide = ir::GetValueSizeByte(type) > 4;
-    if (result.GetCode() != atomic_scratch.GetCode()) {
+    if (result.GetCode() != atomic_scratch.GetCode() &&
+        !CanRetainFlagsTokenResult(producer, result)) {
         if (wide) {
             __ Mov(atomic_scratch, result.X());
         } else {
             __ Mov(atomic_scratch.W(), result.W());
         }
+        flags_token_result_code = atomic_scratch.GetCode();
+    } else {
+        flags_token_result_code = result.GetCode();
     }
     flags_token_valid = true;
-    flags_token_af = false;
-    if (!capture_af || !af_left || !af_right) {
-        return;
-    }
-    auto tmp = context.GetTmpX();
-    __ Eor(tmp, af_left->X(), result.X());
-    if (af_right->IsImmediate()) {
-        if ((af_right->GetImmediate() >> 4) & 1) {
-            __ Eor(tmp, tmp, 1u << 4);
-        }
-    } else {
-        auto reg = af_right->GetRegister().X();
-        auto shift = af_right->IsShiftedRegister() ? af_right->GetShift() : LSL;
-        auto amount =
-                af_right->IsShiftedRegister() ? af_right->GetShiftAmount() : 0;
-        __ Eor(tmp, tmp, Operand{reg, shift, amount});
-    }
-    __ Ubfx(tmp, tmp, 4, 1);
-    __ Bfi(atomic_scratch, tmp, 63, 1);
-    flags_token_af = true;
 }
 
 void JitTranslator::FinishFlagsTokenProducer(const Register& result,
                                              ir::ValueType type,
-                                             const PseudoFlags& pseudo) {
+                                             const PseudoFlags& pseudo,
+                                             ir::Inst* producer) {
     if (!FlagsRegsEnabled() || pseudo.branch_only || flags_token_valid) {
         return;
     }
-    CaptureFlagsToken(result, type);
+    CaptureFlagsToken(result, type, producer);
 }
 
 void JitTranslator::EmitSplitFlagsPublish() {
@@ -237,15 +281,9 @@ void JitTranslator::PublishFlagsToken() {
     if (!flags_token_valid) {
         return;
     }
-    __ Bfi(flags, atomic_scratch, HostFlagsBit::ParityByte, 8);
-    if (flags_token_af) {
-        const auto scratch = context.GetSharedTmpX();
-        __ Ubfx(scratch, atomic_scratch, 63, 1);
-        __ Bfi(flags, scratch, HostFlagsBit::AuxiliaryCarry, 1);
-    }
+    __ Bfi(flags, FlagsTokenResult(), HostFlagsBit::ParityByte, 8);
     if (!flags_token_keep) {
-        flags_token_valid = false;
-        flags_token_af = false;
+        InvalidateFlagsToken();
     }
 }
 
@@ -440,6 +478,9 @@ void JitTranslator::ClearFlags(ir::Flags guest) {
     if (True(guest & ir::Flags::Parity)) {
         const u32 begin = context.CurrentBufferSize();
         // Clear Parity: an odd-parity byte makes TestParityFlag read PF = 0.
+        if (FlagsRegsEnabled() && flags_token_valid) {
+            MaterializeFlagsTokenResult();
+        }
         const auto scratch = context.GetSharedTmpX();
         __ Mov(scratch, 1);
         if (FlagsRegsEnabled() && flags_token_valid) {
@@ -451,7 +492,6 @@ void JitTranslator::ClearFlags(ir::Flags guest) {
     if (True(guest & ir::Flags::AuxiliaryCarry)) {
         const u32 begin = context.CurrentBufferSize();
         // AF is a single bit (carry into bit 4).
-        flags_token_af = false;
         __ Bfc(flags,
                HostFlagsBit::AuxiliaryCarry,
                clear_cv_af
@@ -588,7 +628,7 @@ void JitTranslator::SaveAuxiliaryCarry(Register &left, const Operand &right, Reg
 
 void JitTranslator::GetParityFlag(const Register& result) {
     if (FlagsRegsEnabled() && flags_token_valid) {
-        __ Ubfx(result.W(), atomic_scratch, HostFlagsBit::ParityByte, 8);
+        __ Ubfx(result.W(), FlagsTokenResult(), HostFlagsBit::ParityByte, 8);
     } else {
         __ Ubfx(result.W(), flags, HostFlagsBit::ParityByte, 8);
     }
@@ -609,11 +649,7 @@ void JitTranslator::TestParityFlag(const Register& result) {
 void JitTranslator::TestAuxiliaryCarry(const Register& result) {
     const u32 begin = context.CurrentBufferSize();
     // AF is stored as a single bit (the carry into bit 4) at AuxiliaryCarry.
-    if (FlagsRegsEnabled() && flags_token_valid && flags_token_af) {
-        __ Ubfx(result, atomic_scratch, 63, 1);
-    } else {
-        __ Ubfx(result, flags, HostFlagsBit::AuxiliaryCarry, 1);
-    }
+    __ Ubfx(result, flags, HostFlagsBit::AuxiliaryCarry, 1);
     RecordPFAFDensity(PFAFDensityKind::AFRead, begin);
 }
 
@@ -823,8 +859,7 @@ void JitTranslator::EmitPublishFCmpFlags(ir::Inst* inst) {
         // Keep those four bits lazy in host NZCV. A consumer-proven VecFCmp
         // writes ordered directly to x26 and clears AF with its CSET; the
         // generic result path folds both updates into one bitfield insert.
-        flags_token_valid = false;
-        flags_token_af = false;
+        InvalidateFlagsToken();
         if (!CanUseCompactFCmpCarrier(packed.Def())) {
             auto ordered = context.R(packed);
             const u32 begin = context.CurrentBufferSize();

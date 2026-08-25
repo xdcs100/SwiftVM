@@ -88,7 +88,7 @@ void JitTranslator::EmitAdd(ir::Inst* inst) {
                 True(pseudo_flags.set & ir::Flags::AuxiliaryCarry)) {
                 SaveAuxiliaryCarry(af_left, right_operand, result);
             }
-            FinishFlagsTokenProducer(result, inst->ReturnType(), pseudo_flags);
+            FinishFlagsTokenProducer(result, inst->ReturnType(), pseudo_flags, inst);
             return;
         }
         if (needs_nzcv) {
@@ -112,7 +112,7 @@ void JitTranslator::EmitAdd(ir::Inst* inst) {
             True(pseudo_flags.set & ir::Flags::AuxiliaryCarry)) {
             SaveAuxiliaryCarry(left_register, right_operand, result);
         }
-        FinishFlagsTokenProducer(result, inst->ReturnType(), pseudo_flags);
+        FinishFlagsTokenProducer(result, inst->ReturnType(), pseudo_flags, inst);
     } else {
         __ Add(result, left_register, right_operand);
     }
@@ -201,7 +201,7 @@ void JitTranslator::EmitSub(ir::Inst* inst) {
                 True(pseudo_flags.set & ir::Flags::AuxiliaryCarry)) {
                 SaveAuxiliaryCarry(af_left, right_operand, result);
             }
-            FinishFlagsTokenProducer(result, inst->ReturnType(), pseudo_flags);
+            FinishFlagsTokenProducer(result, inst->ReturnType(), pseudo_flags, inst);
             return;
         }
         if (needs_nzcv) {
@@ -224,7 +224,7 @@ void JitTranslator::EmitSub(ir::Inst* inst) {
             True(pseudo_flags.set & ir::Flags::AuxiliaryCarry)) {
             SaveAuxiliaryCarry(left_register, right_operand, result);
         }
-        FinishFlagsTokenProducer(result, inst->ReturnType(), pseudo_flags);
+        FinishFlagsTokenProducer(result, inst->ReturnType(), pseudo_flags, inst);
     } else {
         __ Sub(result, left_register, right_operand);
     }
@@ -288,7 +288,7 @@ void JitTranslator::EmitNeg(ir::Inst* inst) {
     if (save_af) {
         SaveAuxiliaryCarry(zero, Operand{af_source}, result);
     }
-    FinishFlagsTokenProducer(result, inst->ReturnType(), pseudo_flags);
+    FinishFlagsTokenProducer(result, inst->ReturnType(), pseudo_flags, inst);
 }
 
 void JitTranslator::EmitAdc(ir::Inst* inst) {
@@ -327,7 +327,7 @@ void JitTranslator::EmitAdc(ir::Inst* inst) {
             True(pseudo_flags.set & ir::Flags::AuxiliaryCarry)) {
             SaveAuxiliaryCarry(left_register, right_operand, result);
         }
-        FinishFlagsTokenProducer(result, inst->ReturnType(), pseudo_flags);
+        FinishFlagsTokenProducer(result, inst->ReturnType(), pseudo_flags, inst);
     } else {
         __ Adc(result, left_register, right_operand);
     }
@@ -368,7 +368,7 @@ void JitTranslator::EmitSbb(ir::Inst* inst) {
             True(pseudo_flags.set & ir::Flags::AuxiliaryCarry)) {
             SaveAuxiliaryCarry(left_register, right_operand, result);
         }
-        FinishFlagsTokenProducer(result, inst->ReturnType(), pseudo_flags);
+        FinishFlagsTokenProducer(result, inst->ReturnType(), pseudo_flags, inst);
     } else {
         __ Sbc(result, left_register, right_operand);
     }
@@ -425,7 +425,7 @@ void JitTranslator::EmitAnd(ir::Inst* inst) {
             True(pseudo_flags.set & ir::Flags::Parity)) {
             SaveParity(result);
         }
-        FinishFlagsTokenProducer(result, inst->ReturnType(), pseudo_flags);
+        FinishFlagsTokenProducer(result, inst->ReturnType(), pseudo_flags, inst);
     } else {
         __ And(result, left_register, right_operand);
     }
@@ -458,7 +458,7 @@ void JitTranslator::EmitAndNot(ir::Inst* inst) {
             True(pseudo_flags.set & ir::Flags::Parity)) {
             SaveParity(result);
         }
-        FinishFlagsTokenProducer(result, inst->ReturnType(), pseudo_flags);
+        FinishFlagsTokenProducer(result, inst->ReturnType(), pseudo_flags, inst);
     } else {
         __ Bic(result, left_register, right_operand);
     }

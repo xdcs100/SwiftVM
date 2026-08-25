@@ -1125,8 +1125,7 @@ void JitTranslator::EmitBlockTerminalAndColdPaths(
     EmitBackedgeExitStub();
     EmitDirectCycleExitStubs();
     flags_token_keep = false;
-    flags_token_valid = false;
-    flags_token_af = false;
+    InvalidateFlagsToken();
     EmitBackedgeColdPaths();
     if (density) {
         RecordBoundaryRange(BoundarySubsequence::ColdTail, boundary_cold_before,
@@ -1235,8 +1234,7 @@ void JitTranslator::Translate(ir::Block* block) {
     }
     // Each block is a dual-entry identity. Do not inherit a compile-time
     // token/dirty from a sibling that is not a runtime predecessor.
-    flags_token_valid = false;
-    flags_token_af = false;
+    InvalidateFlagsToken();
     flags_token_keep = false;
     nzcv_dirty = false;
     nzcv_requested = {};
@@ -1333,8 +1331,7 @@ void JitTranslator::Translate(ir::HIRFunction* function) {
         emitted_blocks.push_back(block);
     }
     translating_function = true;
-    flags_token_valid = false;
-    flags_token_af = false;
+    InvalidateFlagsToken();
     flags_token_keep = false;
     for (size_t i = 0; i < emitted_blocks.size(); ++i) {
         // Undecoded successor left behind by lazy region compilation (and by

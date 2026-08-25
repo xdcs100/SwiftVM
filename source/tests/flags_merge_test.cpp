@@ -15,7 +15,9 @@ namespace {
 
 template <typename Build>
 std::map<std::string, swift::u32> EmitBlock(
-        Build&& build, std::vector<std::string>* emitted = nullptr) {
+        Build&& build,
+        std::vector<std::string>* emitted = nullptr,
+        bool full_pin = false) {
     using namespace swift::runtime;
     using namespace swift::runtime::backend;
     using namespace swift::runtime::ir;
@@ -30,6 +32,9 @@ std::map<std::string, swift::u32> EmitBlock(
     };
     AddressSpace address_space{config};
     ModuleConfig module_config{};
+    if (full_pin) {
+        module_config.feature_overrides.Set(FeatureId::ra_fixed_class, true);
+    }
     auto module = address_space.MapModule(
             LocationDescriptor{0x87a0}, LocationDescriptor{0x87c0}, module_config);
 
@@ -39,8 +44,16 @@ std::map<std::string, swift::u32> EmitBlock(
     block->ReIdInstr();
 
     auto features = ResolveFeatureSet(module_config);
+    auto gprs = address_space.GetTrampolines().GetGPRRegs();
+    if (full_pin) {
+        for (swift::u32 code = 0; code < 32; ++code) {
+            if (kX86FixedGPRHomes & (1u << code)) {
+                gprs.Mark(code);
+            }
+        }
+    }
     RegAlloc alloc{block->MaxInstrId(),
-                   address_space.GetTrampolines().GetGPRRegs(),
+                   gprs,
                    address_space.GetTrampolines().GetFPRRegs(), features};
     RegisterAllocPass::Run(block.get(), &alloc, false, features);
 
@@ -159,6 +172,36 @@ TEST_CASE("flags-only arithmetic writes the result token directly") {
 
     REQUIRE_FALSE(Contains(observed, "subs x12"));
     REQUIRE(Contains(observed, "mov x12"));
+
+    std::vector<std::string> pinned;
+    EmitBlock([](Block& block) {
+        auto left = block.GetHostGPR(HostRegIndex(21), Imm{0u})
+                            .SetType(ValueType::U64);
+        auto right = block.GetHostGPR(HostRegIndex(20), Imm{0u})
+                             .SetType(ValueType::U64);
+        auto result = block.Sub(left, Operand{right}).SetType(ValueType::U64);
+        block.SaveFlags(result, Flags::All);
+        block.SetHostGPR(result, HostRegIndex(21), Imm{0u});
+    }, &pinned, true);
+
+    REQUIRE(Contains(pinned, "subs x21"));
+    REQUIRE(Contains(pinned, "bfxil x26, x21"));
+    REQUIRE_FALSE(Contains(pinned, "mov x12, x21"));
+
+    std::vector<std::string> overwritten;
+    EmitBlock([](Block& block) {
+        auto left = block.GetHostGPR(HostRegIndex(21), Imm{0u})
+                            .SetType(ValueType::U64);
+        auto right = block.GetHostGPR(HostRegIndex(20), Imm{0u})
+                             .SetType(ValueType::U64);
+        auto result = block.Sub(left, Operand{right}).SetType(ValueType::U64);
+        block.SaveFlags(result, Flags::All);
+        block.SetHostGPR(result, HostRegIndex(21), Imm{0u});
+        auto replacement = block.Add(right, Operand{1}).SetType(ValueType::U64);
+        block.SetHostGPR(replacement, HostRegIndex(21), Imm{0u});
+    }, &overwritten, true);
+
+    REQUIRE(Contains(overwritten, "mov x12, x21"));
 }
 
 TEST_CASE("full NZCV publication omits the redundant source mask") {

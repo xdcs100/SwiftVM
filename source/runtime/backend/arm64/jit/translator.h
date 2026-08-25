@@ -505,18 +505,19 @@ private:
 
     [[nodiscard]] Register FlagsResultRegister(
             ir::Inst* inst, const PseudoFlags& pseudo);
-    // FLAGS_REGS token: last_result lives in x12, AF in x12[63], NZCV in
-    // PSTATE. Observe points call EmitSplitFlagsPublish(); AdvancePC and
-    // same-unit backedges leave the token lazy.
     void BeginFlagsTokenProducer(const PseudoFlags& pseudo);
     void CaptureFlagsToken(const Register& result,
                            ir::ValueType type,
-                           bool capture_af = false,
-                           const Register* af_left = nullptr,
-                           const Operand* af_right = nullptr);
+                           ir::Inst* producer);
     void FinishFlagsTokenProducer(const Register& result,
                                   ir::ValueType type,
-                                  const PseudoFlags& pseudo);
+                                  const PseudoFlags& pseudo,
+                                  ir::Inst* producer);
+    [[nodiscard]] bool CanRetainFlagsTokenResult(
+            ir::Inst* producer, const Register& result);
+    [[nodiscard]] XRegister FlagsTokenResult() const;
+    void MaterializeFlagsTokenResult();
+    void InvalidateFlagsToken();
     void EmitSplitFlagsPublish();
     void ParkFlagsHot();
     void UnparkFlagsHot();
@@ -545,7 +546,7 @@ private:
     bool save_in_nzcv{true};
     bool nzcv_dirty{false};
     bool flags_token_valid{false};
-    bool flags_token_af{false};
+    u32 flags_token_result_code{};
     // Terminals may emit several successors. Keep the compile-time token
     // live so every arm packs; mid-block Merge still consumes it.
     bool flags_token_keep{false};

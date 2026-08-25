@@ -12,6 +12,7 @@ void JitTranslator::ParkFlagsHot() {
     if (!FlagsRegsEnabled()) {
         return;
     }
+    MaterializeFlagsTokenResult();
     __ Mrs(ip1, NZCV);
     __ Orr(ip1, ip1, 1u << kFlagsNzcvParkValidBit);
     __ Str(ip1, MemOperand(state, state_offset_flags_nzcv_park));

@@ -159,8 +159,7 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
                             : DirectLinkFlagsBypass{};
             nzcv_dirty = false;
             nzcv_requested = {};
-            flags_token_valid = false;
-            flags_token_af = false;
+            InvalidateFlagsToken();
             Label else_label;
             if (auto local = LocalConditionFor(term.cond)) {
                 __ B(&else_label,
@@ -195,8 +194,7 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
             }
             nzcv_dirty = false;
             nzcv_requested = {};
-            flags_token_valid = false;
-            flags_token_af = false;
+            InvalidateFlagsToken();
             Label else_label;
             auto host_cond = MapCond(term.cond);
             __ B(&else_label, static_cast<Condition>(static_cast<u8>(host_cond) ^ 1));

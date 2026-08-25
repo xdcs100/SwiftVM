@@ -212,9 +212,13 @@ void JitTranslator::EmitRegionEdge(ir::Location target,
     if (fallthrough && IsSelfEdge(target) && loop_hoist_body_entry) {
         fallthrough = false;
     }
-    if (commit_flags && !FlagsRegsEnabled()) {
-        MergeNZCV(FlagsRegsAuditMergeCause::TerminalInternal,
-                  FlagsRegsAuditEdgeKind::RegionInternal);
+    if (commit_flags) {
+        if (FlagsRegsEnabled()) {
+            MaterializeFlagsTokenResult();
+        } else {
+            MergeNZCV(FlagsRegsAuditMergeCause::TerminalInternal,
+                      FlagsRegsAuditEdgeKind::RegionInternal);
+        }
     }
     if (record_edge_counters) {
         context.RecordExecCounter(exec_offset_exit_direct);
@@ -859,6 +863,7 @@ bool JitTranslator::EmitBackedgeFlagsTerminal(const ir::Terminal& terminal) {
         EmitRegionEdge(plan.self_target, false, true, false);
         return true;
     }
+    MaterializeFlagsTokenResult();
     context.RecordExecCounter(exec_offset_exit_direct);
     if (IsRegionInternalEdge(plan.self_target)) {
         context.RecordExecCounter(exec_offset_region_edges);
