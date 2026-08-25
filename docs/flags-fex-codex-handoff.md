@@ -1101,9 +1101,10 @@ peepholes.
   25 dynamic spill operations round to zero percent. Local and Orb static-pin, pinned-GPR and
   page-fault gates each pass 181 assertions, and the Mac short oracle completes in 3.225 seconds.
   Adding R13/x8 for a 15-register map improved all three Orb shapes but repeatedly hung the Mac
-  short run at the same 517-PC boundary with an empty output after both six and eight seconds, so
-  it was fully reverted. This stage makes no wall-time claim and ran no long benchmark, stress test
-  or full suite.
+  short run at the same 517-PC boundary with an empty output after both six and eight seconds.
+  Substituting R15/x8 reproduced the identical Mac boundary and timeout, confirming a register-
+  pressure ceiling rather than an R13-specific mapping issue. Both candidates were fully reverted.
+  This stage makes no wall-time claim and ran no long benchmark, stress test or full suite.
 
 ## Orb loop
 
