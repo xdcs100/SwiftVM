@@ -73,10 +73,22 @@ bool JitTranslator::ReproveScalarFPRPublication(
 bool JitTranslator::ReproveScalarLoadFPRFusion(
         ir::Inst* load, const ScalarFPRPublication& fusion) const {
     if (!load || load->GetOp() != ir::OpCode::LoadMemory ||
-        load->ReturnType() != ir::ValueType::U64 ||
-        !ReproveScalarFPRPublication(fusion) ||
-        fusion.low_store->GetArg<ir::Value>(0).Def() != load ||
-        load->GetUses(false) != 1 || load->Id() >= fusion.low_store->Id()) {
+        !ReproveScalarFPRPublication(fusion) || load->GetUses(false) != 1 ||
+        load->Id() >= fusion.low_store->Id()) {
+        return false;
+    }
+    if (fusion.load_extension) {
+        if (load->ReturnType() != ir::ValueType::U32 ||
+            fusion.load_extension->GetOp() != ir::OpCode::ZeroExtend64 ||
+            fusion.load_extension->GetArg<ir::Value>(0).Def() != load ||
+            fusion.load_extension->GetUses(false) != 1 ||
+            fusion.low_store->GetArg<ir::Value>(0).Def() != fusion.load_extension ||
+            load->Id() >= fusion.load_extension->Id() ||
+            fusion.load_extension->Id() >= fusion.low_store->Id()) {
+            return false;
+        }
+    } else if (load->ReturnType() != ir::ValueType::U64 ||
+               fusion.low_store->GetArg<ir::Value>(0).Def() != load) {
         return false;
     }
 
@@ -84,7 +96,7 @@ bool JitTranslator::ReproveScalarLoadFPRFusion(
     for (auto& scan : list) {
         if (scan.Id() <= load->Id() || scan.Id() > fusion.high_store->Id() ||
             &scan == fusion.low_store || &scan == fusion.high_store ||
-            &scan == fusion.zero) {
+            &scan == fusion.zero || &scan == fusion.load_extension) {
             continue;
         }
         if (IsFusionBarrier(scan.GetOp()) ||
@@ -161,11 +173,17 @@ void JitTranslator::PrepareScalarFPRPublications(ir::Block* block) {
             continue;
         }
         auto* load = low->GetArg<ir::Value>(0).Def();
+        ir::Inst* load_extension = nullptr;
+        if (load && load->GetOp() == ir::OpCode::ZeroExtend64) {
+            load_extension = load;
+            load = load->GetArg<ir::Value>(0).Def();
+        }
         auto* zero = high->GetArg<ir::Value>(0).Def();
         ScalarFPRPublication fusion{
                 .low_store = low,
                 .high_store = high,
                 .zero = zero,
+                .load_extension = load_extension,
                 .target = static_cast<u16>(target),
         };
         if (!ReproveScalarLoadFPRFusion(load, fusion)) {
@@ -179,6 +197,9 @@ void JitTranslator::PrepareScalarFPRPublications(ir::Block* block) {
         }
         scalar_load_fpr_fusions.emplace(load, fusion);
         ++scalar_zero_uses[zero];
+        if (load_extension) {
+            disable_instructions.set(load_extension->Id());
+        }
         disable_instructions.set(low->Id());
         disable_instructions.set(high->Id());
     }

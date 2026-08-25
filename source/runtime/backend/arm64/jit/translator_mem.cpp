@@ -1595,8 +1595,12 @@ void JitTranslator::EmitLoadMemory(ir::Inst* inst) {
     if (scalar_fpr != scalar_load_fpr_fusions.end()) {
         ASSERT_MSG(ReproveScalarLoadFPRFusion(inst, scalar_fpr->second),
                    "scalar FPR load fusion proof diverged at IR {}", inst->Id());
-        __ Ldr(VRegister::GetQRegFromCode(scalar_fpr->second.target).D(),
-               vixl_operand);
+        const auto target = VRegister::GetQRegFromCode(scalar_fpr->second.target);
+        if (scalar_fpr->second.load_extension) {
+            __ Ldr(target.S(), vixl_operand);
+        } else {
+            __ Ldr(target.D(), vixl_operand);
+        }
         return;
     }
     switch (type) {

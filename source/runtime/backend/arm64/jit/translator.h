@@ -137,6 +137,7 @@ private:
         ir::Inst* low_store{};
         ir::Inst* high_store{};
         ir::Inst* zero{};
+        ir::Inst* load_extension{};
         u16 target{};
     };
     void PrepareScalarFPRPublications(ir::Block* block);
