@@ -1177,6 +1177,21 @@ peepholes.
   production hits; the exact IR audit exposed the missing `ZeroExtend64` bridge. Reusing x27 as a
   spill scratch caused a c-ray static-path SIGSEGV and was fully reverted. This stage ran no long
   benchmark, stress test or full suite.
+- `a134c32` keeps a Linux scalar spill definition in the already reserved x18 when the immediately
+  adjacent IR instruction directly consumes it. Memory, atomic, helper, x87/SSE4.2 and internal
+  control-flow instructions are barriers; other pending writes still commit normally, x18 remains
+  unavailable to emitter/VIXL scratch, and block exits retain the existing flush. This removes the
+  exact `STR x18, spill; LDR x18, spill` pair without introducing a new register ABI. Against the
+  `7cfc990` c-ray screen, the static common set falls `215,079 -> 215,044`; six PCs shrink and none
+  grow, while `0x402e70` falls `853 -> 829`. Applying retained formal entries only to the bounded
+  22.719356%-covered subset gives `9,560,469,880 -> 9,480,531,174` (`-79,938,706`, `-0.836138%`);
+  this is not claimed as a full formal c-ray delta. The deterministic c-ray oracle remains SHA
+  `89ccd2e15dba67378197d05524a6223795f8b8ab2d11f4d40deaef4af9f35c6e`. Smallpt remains exact at
+  2,802 PCs / 3,435 versions, zero spills, the same PPM and `399,441` host instructions. CoreMark
+  keeps 2,846 PCs / 3,379 versions and `crcfinal=0x382f` while moving `5,868,557,589 ->
+  5,868,557,584`. Local and Orb spill focuses pass four cases with 24,282 / 26,859 assertions; the
+  Orb scalar focus passes 22 cases / 1,023 assertions. This stage ran no long benchmark, stress test
+  or full suite.
 
 ## Orb loop
 
