@@ -944,6 +944,18 @@ peepholes.
   at 12,288, `0x4026a0` at 10,212, `0x40248e` at 9,516 and `0x402497` at 8,916. Three focused
   scalar-load, shared-zero and fault tests pass 21 assertions locally. This stage ran no long
   benchmark, stress test or full suite.
+- `4ea3a66` writes unused arithmetic results directly into the resident flags token register. Flags-
+  only `Add`, `Sub`, `Neg`, `Adc`, `Sbb`, `And` and `AndNot` producers target `x12` or `w12`; observed
+  results and branch-only flags keep their normal allocation. The bounded Orb screen completes in
+  about three seconds with identical 2,755-PC / 3,621-version sets, 99.995707% retained-host
+  coverage, all top-20 PCs, no growing PC and exact PPM SHA
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. The comparable total
+  falls `3,994,447 -> 3,910,564` (`-83,883`, `-2.099990%`). Short-run host and move-class dynamic
+  counts both fall by 14,620. The largest reductions are `0x41ef65` and `0x459300` at 6,144,
+  `0x47f4d0` at 5,527, `0x433700` at 4,713 and `0x47f52a` at 4,711. The focused shape test passes
+  six assertions and two flags-off regression groups pass 257. A fixed-seed 256-iteration flags
+  differential retains the same 95 known differences and mismatch hash in baseline and candidate.
+  This stage ran no long benchmark, stress test or full suite.
 
 ## Orb loop
 
