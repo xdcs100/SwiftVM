@@ -1,6 +1,6 @@
 # Codex handoff: Align SVM flags with FEX
 
-Date: 2026-08-24
+Date: 2026-08-25
 Repo: `/Users/swift/CLionProjects/SwiftVM` (macOS). Linux identity runs on Orb: `ubuntu@orb`, tree `/home/swift/svm-phasec/SwiftVM`, build `/home/swift/svm-phasec/build`.
 Author on git: `swift_gan`. **Do not push** until asked. English commits, no task IDs, no AI trailer.
 
@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`46197f6`** `perf: coalesce contiguous flag clears`
+- Code tip: **`4b0eb1d`** `perf: carry FP comparisons across MOVSD`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -69,6 +69,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 | `5b94050` | Restore NZCV directly from the packed flags register; `MSR NZCV` ignores every non-NZCV bit |
 | `183bf78` | Skip published-region NZCV restores when the existing target proof covers all incoming flags before any observer or fault |
 | `46197f6` | Clear the contiguous AF/unused/C/V span with one bitfield clear |
+| `4b0eb1d` | Keep compact COMIS relations in host NZCV across audited MOVSD instructions and consume them directly at the following Jcc |
 
 Hot files:
 
@@ -872,6 +873,16 @@ peepholes.
   boundary block requires one real publication instruction, costing 3,048 retained-weight
   instructions versus the unsafe candidate. Local and Orb FPR/XMM/scalar validation both pass
   1,887 assertions across 24 tests. This stage ran no long benchmark, stress test or full suite.
+- Compact COMIS relations now remain local across an audited MOVSD while the backend verifies every
+  intervening IR operation with the shared host-NZCV preservation proof. This removes flag
+  materialization and reload around the hot `COMISD; MOVSD; Jcc` shape without adding a recovery
+  path or configuration switch. The bounded Orb `smallpt_wh_x64 4 8 6` weighted screen covers
+  99.995707% of the retained host weight and all top-20 PCs. The comparable total falls
+  `4,285,406 -> 4,245,470` (`-39,936`, `-0.931907%`): `0x402e21` saves five instructions and
+  `0x402ddb` / `0x402dfe` save four each. The exact PPM SHA is
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`; seven focused flags,
+  COMIS and fault tests pass 3,581 assertions. This stage ran no long benchmark, stress test or
+  full suite.
 
 ## Orb loop
 
