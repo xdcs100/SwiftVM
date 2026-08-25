@@ -271,9 +271,11 @@ void CoalesceGuestFPRWrites(
             auto left = ResolveBitCastSource(producer->GetArg<Value>(0));
             if (scalar_insert) {
                 if (!left.Defined() || left.Id() >= use_end.size() ||
-                    !reg_alloc->IsHostReadCoalesced(left.Id()) ||
                     !mapped_to(left, target) ||
-                    use_end[left.Id()] != producer->Id()) {
+                    use_end[left.Id()] != producer->Id() ||
+                    (!reg_alloc->IsHostReadCoalesced(left.Id()) &&
+                     (!left.Def() ||
+                      !IsScalarFPRBinaryProducer(left.Def()->GetOp())))) {
                     continue;
                 }
             } else if (mapped_to(left, target)) {

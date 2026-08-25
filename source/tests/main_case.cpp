@@ -6126,8 +6126,11 @@ TEST_CASE("scalar FPR fixed-home tie requires an exact safe publication window")
         auto left = block->GetHostFPR(HostRegIndex(target), Imm{0u}).SetType(ValueType::V128);
         auto right = block->LoadUniform(Uniform{16, ValueType::V128}).SetType(ValueType::V128);
         auto first = block->VecFMulScalar64(left, right).SetType(ValueType::V128);
+        auto* first_publish = block->AppendInst(
+                OpCode::SetHostFPR, first, HostRegIndex(target), Imm{0u});
         auto second = block->VecFAddScalar64(first, right).SetType(ValueType::V128);
-        block->AppendInst(OpCode::SetHostFPR, second, HostRegIndex(target), Imm{0u});
+        auto* second_publish = block->AppendInst(
+                OpCode::SetHostFPR, second, HostRegIndex(target), Imm{0u});
         block->SetTerminal(terminal::ReturnToDispatch{});
         block->ReIdInstr();
 
@@ -6136,9 +6139,11 @@ TEST_CASE("scalar FPR fixed-home tie requires an exact safe publication window")
         auto on = allocate(block.get(), true);
         REQUIRE(on->ValueFPR(first).id == target);
         REQUIRE(on->ValueFPR(second).id == target);
+        REQUIRE(on->IsHostWriteCoalesced(first_publish->Id()));
+        REQUIRE(on->IsHostWriteCoalesced(second_publish->Id()));
         auto on_code = emit(block.get(), *on, 0x12400, true);
         INFO("OFF:\n" << off_code.text << "ON:\n" << on_code.text);
-        REQUIRE(on_code.bytes + 2 * vixl::aarch64::kInstructionSize == off_code.bytes);
+        REQUIRE(on_code.bytes + 3 * vixl::aarch64::kInstructionSize == off_code.bytes);
     }
 
     SECTION("a third-party fixed-home write rejects the scalar tie") {

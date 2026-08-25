@@ -729,13 +729,8 @@ bool JitTranslator::ReproveCoalescedHostFPRWrite(ir::Inst* inst) const {
     if (IsHostScalarFPRBinaryProducer(producer->GetOp())) {
         auto left = ResolveHostCoalesceBitCast(producer->GetArg<ir::Value>(0));
         if (sse_scalar_insert) {
-            if (!left.Defined() || !left.Def() ||
-                left.Def()->GetOp() != ir::OpCode::GetHostFPR ||
-                !context.IsHostReadCoalesced(left.Id()) ||
-                left.Def()->GetArg<ir::Imm>(0).Get() != target ||
-                left.Def()->GetArg<ir::Imm>(1).Get() != 0 ||
-                context.V(left).GetCode() != target ||
-                last_use(left.Def()) != producer->Id()) {
+            if (!left.Defined() || context.V(left).GetCode() != target ||
+                !ReproveScalarFPRTie(producer)) {
                 return false;
             }
         } else if (left.Defined() && context.SharesFPR(left, produced)) {
