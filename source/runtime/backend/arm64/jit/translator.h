@@ -503,6 +503,8 @@ private:
 
     void FlushFlags();
 
+    [[nodiscard]] Register FlagsResultRegister(
+            ir::Inst* inst, const PseudoFlags& pseudo);
     // FLAGS_REGS token: last_result lives in x12, AF in x12[63], NZCV in
     // PSTATE. Observe points call EmitSplitFlagsPublish(); AdvancePC and
     // same-unit backedges leave the token lazy.

@@ -1,8 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <map>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "aarch64/disasm-aarch64.h"
 #include "runtime/backend/address_space.h"
@@ -12,7 +14,8 @@
 namespace {
 
 template <typename Build>
-std::map<std::string, swift::u32> EmitBlock(Build&& build) {
+std::map<std::string, swift::u32> EmitBlock(
+        Build&& build, std::vector<std::string>* emitted = nullptr) {
     using namespace swift::runtime;
     using namespace swift::runtime::backend;
     using namespace swift::runtime::ir;
@@ -63,6 +66,9 @@ std::map<std::string, swift::u32> EmitBlock(Build&& build) {
             continue;
         }
         text.remove_prefix(begin);
+        if (emitted) {
+            emitted->emplace_back(text);
+        }
         const auto end = text.find_first_of(" \t");
         ++mnemonics[std::string{text.substr(0, end)}];
     }
@@ -109,6 +115,50 @@ void RequireBitfieldMerge(std::map<std::string, swift::u32>& mnemonics) {
     REQUIRE(mnemonics["orr"] == 0);
 }
 
+bool Contains(const std::vector<std::string>& instructions,
+              std::string_view text) {
+    return std::ranges::any_of(instructions, [&](const auto& instruction) {
+        return instruction.find(text) != std::string::npos;
+    });
+}
+
+}
+
+TEST_CASE("flags-only arithmetic writes the result token directly") {
+    using namespace swift::runtime::ir;
+
+    std::vector<std::string> flags_only;
+    EmitBlock([](Block& block) {
+        auto left = block.LoadUniform<TypedValue<ValueType::U64>>(
+                Uniform{0, ValueType::U64});
+        auto right = block.LoadUniform<TypedValue<ValueType::U64>>(
+                Uniform{8, ValueType::U64});
+        auto add = block.Add(left, Operand{right}).SetType(ValueType::U64);
+        block.SaveFlags(add, Flags::All);
+        auto sub = block.Sub(left, Operand{right}).SetType(ValueType::U64);
+        block.SaveFlags(sub, Flags::All);
+        auto logical = block.And(left, Operand{right}).SetType(ValueType::U64);
+        block.SaveFlags(logical, Flags::Negate | Flags::Zero | Flags::Parity);
+    }, &flags_only);
+
+    REQUIRE(Contains(flags_only, "adds x12"));
+    REQUIRE(Contains(flags_only, "subs x12"));
+    REQUIRE(Contains(flags_only, "ands x12"));
+    REQUIRE_FALSE(Contains(flags_only, "mov x12"));
+
+    std::vector<std::string> observed;
+    EmitBlock([](Block& block) {
+        auto left = block.LoadUniform<TypedValue<ValueType::U64>>(
+                Uniform{0, ValueType::U64});
+        auto right = block.LoadUniform<TypedValue<ValueType::U64>>(
+                Uniform{8, ValueType::U64});
+        auto result = block.Sub(left, Operand{right}).SetType(ValueType::U64);
+        block.SaveFlags(result, Flags::All);
+        block.StoreUniform(Uniform{16, ValueType::U64}, result);
+    }, &observed);
+
+    REQUIRE_FALSE(Contains(observed, "subs x12"));
+    REQUIRE(Contains(observed, "mov x12"));
 }
 
 TEST_CASE("full NZCV publication omits the redundant source mask") {

@@ -67,6 +67,17 @@ void JitTranslator::BeginFlagsTokenProducer(const PseudoFlags& pseudo) {
     MergeNZCV();
 }
 
+Register JitTranslator::FlagsResultRegister(
+        ir::Inst* inst, const PseudoFlags& pseudo) {
+    if (FlagsRegsEnabled() && !pseudo.Null() && !pseudo.branch_only &&
+        inst->GetUses() == 0) {
+        return ir::GetValueSizeByte(inst->ReturnType()) > sizeof(u32)
+                ? atomic_scratch
+                : atomic_scratch.W();
+    }
+    return context.R(ir::Value{inst});
+}
+
 void JitTranslator::CaptureFlagsToken(const Register& result,
                                       ir::ValueType type,
                                       bool capture_af,

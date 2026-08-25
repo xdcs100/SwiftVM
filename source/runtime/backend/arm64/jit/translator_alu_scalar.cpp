@@ -31,11 +31,10 @@ void JitTranslator::EmitAdd(ir::Inst* inst) {
     auto right_operand = induction_immediate
             ? Operand{static_cast<s64>(*induction_immediate)}
             : (right_pinned ? Operand{*right_pinned} : EmitOperand(right));
-    auto result = context.R(ir::Value{inst});
+    auto pseudo_flags = GetPseudoFlags(inst);
+    auto result = FlagsResultRegister(inst, pseudo_flags);
     auto left_pinned = pinned_w(left);
     Register left_register = left_pinned ? Register{*left_pinned} : context.R(left, true);
-
-    auto pseudo_flags = GetPseudoFlags(inst);
 
     if (!pseudo_flags.Null()) {
         const bool needs_nzcv = True(pseudo_flags.set & ir::Flags::NZCV);
@@ -138,11 +137,10 @@ void JitTranslator::EmitSub(ir::Inst* inst) {
             ? pinned_w(right.GetLeft().value)
             : std::nullopt;
     auto right_operand = right_pinned ? Operand{*right_pinned} : EmitOperand(right);
-    auto result = context.R(ir::Value{inst});
+    auto pseudo_flags = GetPseudoFlags(inst);
+    auto result = FlagsResultRegister(inst, pseudo_flags);
     auto left_pinned = pinned_w(left);
     Register left_register = left_pinned ? Register{*left_pinned} : context.R(left, true);
-
-    auto pseudo_flags = GetPseudoFlags(inst);
 
     if (!pseudo_flags.Null()) {
         const bool needs_nzcv = True(pseudo_flags.set & ir::Flags::NZCV);
@@ -236,9 +234,9 @@ void JitTranslator::EmitNeg(ir::Inst* inst) {
     ASSERT(context.GetFeatures().int_imm_fold);
     const auto source = inst->GetArg<ir::Value>(0);
     auto source_reg = context.R(source, true);
-    auto result = context.R(ir::Value{inst});
-    Register zero = result.Is64Bits() ? Register{xzr} : Register{wzr};
     auto pseudo_flags = GetPseudoFlags(inst);
+    auto result = FlagsResultRegister(inst, pseudo_flags);
+    Register zero = result.Is64Bits() ? Register{xzr} : Register{wzr};
 
     Register af_source = source_reg;
     const bool save_af = !pseudo_flags.branch_only &&
@@ -297,10 +295,9 @@ void JitTranslator::EmitAdc(ir::Inst* inst) {
     auto left = inst->GetArg<ir::Value>(0);
     auto right = inst->GetArg<ir::Operand>(1);
     auto right_operand = EmitOperand(right);
-    auto result = context.R(ir::Value{inst});
-    auto left_register = context.R(left, true);
-
     auto pseudo_flags = GetPseudoFlags(inst);
+    auto result = FlagsResultRegister(inst, pseudo_flags);
+    auto left_register = context.R(left, true);
 
     // Bring the guest carry flag into host C.
     if (!(save_in_nzcv && nzcv_dirty)) {
@@ -340,10 +337,9 @@ void JitTranslator::EmitSbb(ir::Inst* inst) {
     auto left = inst->GetArg<ir::Value>(0);
     auto right = inst->GetArg<ir::Operand>(1);
     auto right_operand = EmitOperand(right);
-    auto result = context.R(ir::Value{inst});
-    auto left_register = context.R(left, true);
-
     auto pseudo_flags = GetPseudoFlags(inst);
+    auto result = FlagsResultRegister(inst, pseudo_flags);
+    auto left_register = context.R(left, true);
 
     // The carry is stored with host (ARM) semantics, so SBC matches the guest borrow.
     if (!(save_in_nzcv && nzcv_dirty)) {
@@ -403,14 +399,13 @@ void JitTranslator::EmitAnd(ir::Inst* inst) {
                                                inst->ReturnType() == ir::ValueType::U64 ||
                                                        inst->ReturnType() == ir::ValueType::S64
                                                        ? 64
-                                                       : 32)
+                                                        : 32)
                        ? Operand{static_cast<s64>(right.GetLeft().imm.Get())}
                        : EmitOperand(right));
-    auto result = context.R(ir::Value{inst});
+    auto pseudo_flags = GetPseudoFlags(inst);
+    auto result = FlagsResultRegister(inst, pseudo_flags);
     auto left_pinned = pinned_w(left);
     Register left_register = left_pinned ? Register{*left_pinned} : context.R(left, true);
-
-    auto pseudo_flags = GetPseudoFlags(inst);
 
     if (!pseudo_flags.Null()) {
         if (!pseudo_flags.branch_only) {
@@ -442,10 +437,9 @@ void JitTranslator::EmitAndNot(ir::Inst* inst) {
     auto left = inst->GetArg<ir::Value>(0);
     auto right = inst->GetArg<ir::Operand>(1);
     auto right_operand = EmitOperand(right);
-    auto result = context.R(ir::Value{inst});
-    auto left_register = context.R(left, true);
-
     auto pseudo_flags = GetPseudoFlags(inst);
+    auto result = FlagsResultRegister(inst, pseudo_flags);
+    auto left_register = context.R(left, true);
 
     if (!pseudo_flags.Null()) {
         if (!pseudo_flags.branch_only) {
