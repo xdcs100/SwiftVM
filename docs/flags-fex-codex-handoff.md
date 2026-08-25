@@ -1158,8 +1158,11 @@ peepholes.
   `89ccd2e15dba67378197d05524a6223795f8b8ab2d11f4d40deaef4af9f35c6e`. The pinned-GPR focus
   passes 24 assertions, including a narrow-width exclusion. A first broad Or prototype admitted
   8/16-bit raw W reads, changed CoreMark to 2,847 PCs / 3,380 versions and 688,212,631 entries, and
-  was fully reverted before this exact-width implementation. This stage ran no long benchmark,
-  stress test or full suite.
+  was fully reverted before this exact-width implementation. A later narrow-load direct-pin
+  publication prototype failed the 12-second CoreMark gate and was fully reverted; keeping the
+  load in an ordinary temporary and coalescing only its widening copy reproduced the exact
+  `5,868,557,589` incumbent shape, so that zero-effect mechanism was also removed. This stage ran
+  no long benchmark, stress test or full suite.
 
 ## Orb loop
 
