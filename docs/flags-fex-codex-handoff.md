@@ -885,6 +885,18 @@ peepholes.
   `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`; seven focused flags,
   COMIS and fault tests pass 3,585 assertions. This stage ran no long benchmark, stress test or
   full suite.
+- `178138e` detects FEAT_FRINTTS on macOS and Linux and lowers scalar float-to-integer conversion
+  with the same sized-round plus `FCVTZS` mechanism as FEX. Truncating forms use `FRINT32Z` or
+  `FRINT64Z`; MXCSR-rounded forms use the corresponding `X` instruction against the installed
+  guest FPCR. Scalar register and memory sources remain in the FPR class instead of crossing
+  through a GPR first. On Orb, each of the three hot smallpt conversions falls from 68 emitted
+  bytes to eight. The bounded `smallpt_wh_x64 4 8 6` screen covers 99.995707% of retained host
+  weight and all top-20 PCs; the comparable total falls `4,218,607 -> 4,181,743` (`-36,864`,
+  `-0.873843%`) with exact PPM SHA
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. A 256-case conversion-only
+  SSE edge sweep passes. The 7,699-assertion AVX/Rosetta run reports zero conversion mismatches;
+  its two existing aggregate failures contain only `VUCOMISS` flag differences. This stage ran no
+  long benchmark, stress test or full suite.
 
 ## Orb loop
 
