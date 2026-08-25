@@ -105,7 +105,7 @@ void JitTranslator::EmitSelect(ir::Inst* inst) {
             LoadNZCVFromFlags();
             emit_direct();
         }
-        MergeNZCV();
+        PublishFlagsToken();
         return;
     }
     auto local = LocalConditionFor(cond);
