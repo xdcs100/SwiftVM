@@ -1149,6 +1149,17 @@ peepholes.
   oracle remains SHA `89ccd2e15dba67378197d05524a6223795f8b8ab2d11f4d40deaef4af9f35c6e`.
   Focused pinned-GPR, integer-width and composite-memory tests pass 60 assertions. This stage ran no
   long benchmark, stress test or full suite.
+- `a184ded` lets exact U32 `Or` consumers read fixed W views directly, matching the existing
+  And/Xor path without extending its permissive 8/16-bit rule. CoreMark keeps 2,846 PCs / 3,379
+  versions and `crcfinal=0x382f`; weighted host work falls `5,885,762,053 -> 5,868,557,589`
+  (`-17,204,464`, `-0.292306%`). The `cmp_idx` hotspot at `0x402218` shrinks from 54 to 50 host
+  instructions and from 30 to 26 moves. The bounded smallpt gate remains exact and moves
+  `399,449 -> 399,443` (`-6`, `-0.001502%`); the deterministic c-ray oracle remains SHA
+  `89ccd2e15dba67378197d05524a6223795f8b8ab2d11f4d40deaef4af9f35c6e`. The pinned-GPR focus
+  passes 24 assertions, including a narrow-width exclusion. A first broad Or prototype admitted
+  8/16-bit raw W reads, changed CoreMark to 2,847 PCs / 3,380 versions and 688,212,631 entries, and
+  was fully reverted before this exact-width implementation. This stage ran no long benchmark,
+  stress test or full suite.
 
 ## Orb loop
 
