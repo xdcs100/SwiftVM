@@ -1193,10 +1193,32 @@ void JitTranslator::EmitVecFCmpMask(ir::Inst* inst) {
 
 void JitTranslator::EmitVecFCvtIntToFloat(ir::Inst* inst) {
     auto source = context.X(inst->GetArg<ir::Value>(0));
-    auto result = context.X(ir::Value{inst});
-    auto fp = context.GetTmpV();
     const u32 src_bits = inst->GetArg<ir::Imm>(1).Get();
     const u32 dst_bits = inst->GetArg<ir::Imm>(2).Get();
+    if (const auto* plan = resident_scalar_fpr_analysis.FindConversion(inst)) {
+        auto fp = VRegister::GetQRegFromCode(plan->target);
+        if (dst_bits == 32) {
+            if (src_bits == 32)
+                __ Scvtf(fp.S(), source.W());
+            else
+                __ Scvtf(fp.S(), source);
+            if (plan->export_result) {
+                __ Fmov(context.W(ir::Value{inst}), fp.S());
+            }
+        } else {
+            if (src_bits == 32)
+                __ Scvtf(fp.D(), source.W());
+            else
+                __ Scvtf(fp.D(), source);
+            if (plan->export_result) {
+                __ Fmov(context.X(ir::Value{inst}), fp.D());
+            }
+        }
+        return;
+    }
+
+    auto result = context.X(ir::Value{inst});
+    auto fp = context.GetTmpV();
     if (dst_bits == 32) {
         if (src_bits == 32)
             __ Scvtf(fp.S(), source.W());

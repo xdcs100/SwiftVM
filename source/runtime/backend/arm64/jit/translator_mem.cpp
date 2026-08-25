@@ -1654,6 +1654,15 @@ void JitTranslator::EmitStoreMemory(ir::Inst* inst) {
                            !q_access,
                            structured_guest_ea,
                            inst);
+    if (const auto target = resident_scalar_fpr_analysis.FindMemoryStore(inst)) {
+        auto source = VRegister::GetQRegFromCode(*target);
+        if (ir::GetValueSizeByte(type) == sizeof(u32)) {
+            __ Str(source.S(), vixl_operand);
+        } else {
+            __ Str(source.D(), vixl_operand);
+        }
+        return;
+    }
     const bool zero_gpr = CanUseZeroStoreRegister(value);
     const auto store_w = [&]() -> WRegister {
         if (zero_gpr) {

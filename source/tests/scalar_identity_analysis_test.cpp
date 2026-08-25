@@ -36,8 +36,8 @@ std::vector<std::string> EmitSelfXor() {
             .enable_jit = true,
             .has_local_operation = false,
             .backend_isa = kArm64,
-            .arm64_features = Arm64Features::AXFlag,
             .global_opts = Optimizations::All,
+            .arm64_features = Arm64Features::AXFlag,
     };
     AddressSpace address_space{config};
     auto module = address_space.GetDefaultModule();

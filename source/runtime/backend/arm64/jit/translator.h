@@ -11,6 +11,7 @@
 #include <vector>
 #include "base/common_funcs.h"
 #include "jit_context.h"
+#include "resident_scalar_fpr_analysis.h"
 #include "scalar_fpr_liveness.h"
 #include "scalar_identity_analysis.h"
 #include "runtime/backend/code_cache.h"
@@ -544,6 +545,7 @@ private:
     std::map<ir::Inst*, u16> fused_pin_gpr_reads{};
     std::map<ir::Inst*, ScalarFPRPublication> scalar_load_fpr_fusions{};
     std::map<ir::Inst*, ScalarFPRPublication> scalar_value_fpr_fusions{};
+    ResidentScalarFPRAnalysis resident_scalar_fpr_analysis{};
     ScalarFPRLiveness scalar_fpr_liveness{};
     ScalarIdentityAnalysis scalar_identity_analysis{};
     ir::Flags flags_set{};

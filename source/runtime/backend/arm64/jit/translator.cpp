@@ -752,6 +752,12 @@ JitTranslator::PrepareBlockState(ir::Block* block) {
     disable_instructions.resize(
             std::max<size_t>(disable_instructions.size(), block->MaxInstrId()));
     PrepareBooleanSelects(block);
+    resident_scalar_fpr_analysis.Analyze(block);
+    for (auto& inst : block->GetInstList()) {
+        if (resident_scalar_fpr_analysis.IsDiscarded(&inst)) {
+            disable_instructions.set(inst.Id());
+        }
+    }
     scalar_fpr_liveness.Analyze(block);
     scalar_identity_analysis.Analyze(block);
     PrepareScalarFPRPublications(block);

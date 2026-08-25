@@ -12,6 +12,7 @@ add_executable(swift_test
         register_alloc_copy_test.cpp
         register_alloc_fpr_test.cpp
         scalar_identity_analysis_test.cpp
+        scalar_conversion_fpr_fusion_test.cpp
         scalar_load_fpr_fusion_test.cpp
         stack_writeback_test.cpp
         main_case.cpp
