@@ -14,6 +14,7 @@ add_executable(swift_test
         scalar_identity_analysis_test.cpp
         scalar_conversion_fpr_fusion_test.cpp
         scalar_load_fpr_fusion_test.cpp
+        scalar_memory_ea_test.cpp
         stack_writeback_test.cpp
         main_case.cpp
         ../translator/linux/guest_memory.cpp

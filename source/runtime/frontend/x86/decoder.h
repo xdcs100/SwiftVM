@@ -582,6 +582,7 @@ private:
     // Fold a memory/register address operand to a single address value
     // (TSO forms only encode [base], see Src()).
     ir::Value FlatAddress(_DInst& insn, _Operand& op);
+    ir::Operand ScalarMemoryAddress(_DInst& insn, _Operand& op, ir::ValueType access_type);
 
     // Default-off structured effective addresses for ordinary (non-TSO,
     // non-atomic, non-helper) V128 memory nodes. The IR Operand can represent

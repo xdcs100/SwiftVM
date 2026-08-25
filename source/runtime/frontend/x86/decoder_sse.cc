@@ -494,6 +494,18 @@ ir::Value X64Decoder::FlatAddress(_DInst& insn, _Operand& op) {
             .SetType(is_64bit ? ir::ValueType::U64 : ir::ValueType::U32);
 }
 
+ir::Operand X64Decoder::ScalarMemoryAddress(_DInst& insn, _Operand& op, ir::ValueType access_type) {
+    swift::runtime::PerfLoweringPartScope2 perf{
+            swift::runtime::PerfLoweringPart2::Address};
+    auto address = GetAddress(insn, op);
+    if (PreserveMemoryEA(address, access_type)) {
+        return address.ToIROperand();
+    }
+    auto flat = __ GetOperand(address.ToIROperand())
+                        .SetType(is_64bit ? ir::ValueType::U64 : ir::ValueType::U32);
+    return ir::Operand{flat};
+}
+
 bool X64Decoder::CanStructureAddress(const _DInst& insn, const _Operand& op) const {
     if (!StructuredAddressModeEnabled()) {
         return false;
@@ -548,7 +560,8 @@ ir::Value X64Decoder::LoadSrcLo(_DInst& insn, _Operand& op) {
     if (op.type == O_REG) {
         return XmmLo(static_cast<_RegisterType>(op.index));
     }
-    return __ LoadMemory(ir::Operand{FlatAddress(insn, op)}).SetType(ir::ValueType::U64);
+    return __ LoadMemory(ScalarMemoryAddress(insn, op, ir::ValueType::U64))
+            .SetType(ir::ValueType::U64);
 }
 
 ir::Value X64Decoder::LoadSrcScalarVec(_DInst& insn, _Operand& op, u32 lane_bits) {
@@ -556,8 +569,8 @@ ir::Value X64Decoder::LoadSrcScalarVec(_DInst& insn, _Operand& op, u32 lane_bits
     if (op.type == O_REG) {
         return XmmScalarV(static_cast<_RegisterType>(op.index), lane_bits);
     }
-    return __ LoadMemory(ir::Operand{FlatAddress(insn, op)})
-            .SetType(lane_bits == 32 ? ir::ValueType::V32 : ir::ValueType::V64);
+    const auto type = lane_bits == 32 ? ir::ValueType::V32 : ir::ValueType::V64;
+    return __ LoadMemory(ScalarMemoryAddress(insn, op, type)).SetType(type);
 }
 
 ir::Value X64Decoder::LoadSrcHi(_DInst& insn, _Operand& op) {
@@ -851,13 +864,14 @@ void X64Decoder::DecodeMovsd(_DInst& insn) {
             XmmLo(dst, XmmLo(static_cast<_RegisterType>(op1.index)));
         } else {
             // xmm, m64: low qword loaded, high qword zeroed.
-            auto v = __ LoadMemory(ir::Operand{FlatAddress(insn, op1)}).SetType(ir::ValueType::U64);
+            auto v = __ LoadMemory(ScalarMemoryAddress(insn, op1, ir::ValueType::U64))
+                             .SetType(ir::ValueType::U64);
             XmmLo(dst, v);
             XmmHi(dst, __ LoadImm(ir::Imm(u64(0))));
         }
     } else {
         // m64 = src low qword.
-        __ StoreMemory(ir::Operand{FlatAddress(insn, op0)},
+        __ StoreMemory(ScalarMemoryAddress(insn, op0, ir::ValueType::U64),
                        XmmLo(static_cast<_RegisterType>(op1.index)));
     }
 }
@@ -875,7 +889,8 @@ void X64Decoder::DecodeMovss(_DInst& insn) {
             XmmLo(dst, merged);
         } else {
             // xmm, m32: low dword loaded, upper 96 bits zeroed.
-            auto v = __ LoadMemory(ir::Operand{FlatAddress(insn, op1)}).SetType(ir::ValueType::U32);
+            auto v = __ LoadMemory(ScalarMemoryAddress(insn, op1, ir::ValueType::U32))
+                             .SetType(ir::ValueType::U32);
             XmmLo(dst, __ ZeroExtend64(v));
             XmmHi(dst, __ LoadImm(ir::Imm(u64(0))));
         }
@@ -891,7 +906,8 @@ void X64Decoder::DecodeMovHalf(_DInst& insn, bool high) {
     auto& op1 = insn.ops[1];
     if (op0.type == O_REG && IsV(static_cast<_RegisterType>(op0.index))) {
         // Load: xmm half, m64 (other half preserved).
-        auto v = __ LoadMemory(ir::Operand{FlatAddress(insn, op1)}).SetType(ir::ValueType::U64);
+        auto v = __ LoadMemory(ScalarMemoryAddress(insn, op1, ir::ValueType::U64))
+                         .SetType(ir::ValueType::U64);
         if (high) {
             XmmHi(static_cast<_RegisterType>(op0.index), v);
         } else {
@@ -901,7 +917,7 @@ void X64Decoder::DecodeMovHalf(_DInst& insn, bool high) {
         // Store: m64 = xmm half.
         auto half = high ? XmmHi(static_cast<_RegisterType>(op1.index))
                          : XmmLo(static_cast<_RegisterType>(op1.index));
-        __ StoreMemory(ir::Operand{FlatAddress(insn, op0)}, half);
+        __ StoreMemory(ScalarMemoryAddress(insn, op0, ir::ValueType::U64), half);
     }
 }
 
