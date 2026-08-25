@@ -152,68 +152,76 @@ TEST_CASE("narrow register self tests skip the redundant AND") {
     }
 }
 
-TEST_CASE("compact FP compare stays local across MOVSD memory loads") {
-    std::array<swift::u8, 24> code{
-            0x66, 0x0f, 0x2f, 0xc1,
-            0xf2, 0x0f, 0x10, 0x15, 0x04, 0x00, 0x00, 0x00,
-            0x77, 0x01, 0xf4, 0xf4,
-    };
-    DirectMemory memory;
-    const auto address = reinterpret_cast<swift::VAddr>(code.data());
-    IntrusivePtr<Block> block{new Block(0, Location{address})};
-    swift::runtime::ir::Assembler assembler{block.get()};
-    FeatureSet features{};
-    features.flags_fcmp_fuse = true;
-    features.flags_fcmp_compact = true;
-    swift::x86::X64Decoder decoder{
-            address, &memory, &assembler, true,
-            swift::x86::Arm64Features::AXFlag, false, false, features};
-    decoder.Decode();
+TEST_CASE("compact FP compare stays local across audited moves") {
+    for (const auto& code : {
+                 std::array<swift::u8, 24>{
+                         0x66, 0x0f, 0x2f, 0xc1,
+                         0xf2, 0x0f, 0x10, 0x15, 0x04, 0x00, 0x00, 0x00,
+                         0x77, 0x01, 0xf4, 0xf4,
+                 },
+                 std::array<swift::u8, 24>{
+                         0x66, 0x0f, 0x2f, 0xc1,
+                         0x66, 0x0f, 0x28, 0xd0,
+                         0x76, 0x01, 0xf4, 0xf4,
+                 },
+         }) {
+        DirectMemory memory;
+        const auto address = reinterpret_cast<swift::VAddr>(code.data());
+        IntrusivePtr<Block> block{new Block(0, Location{address})};
+        swift::runtime::ir::Assembler assembler{block.get()};
+        FeatureSet features{};
+        features.flags_fcmp_fuse = true;
+        features.flags_fcmp_compact = true;
+        swift::x86::X64Decoder decoder{
+                address, &memory, &assembler, true,
+                swift::x86::Arm64Features::AXFlag, false, false, features};
+        decoder.Decode();
 
-    REQUIRE(std::count_if(block->GetInstList().begin(), block->GetInstList().end(),
-                          [](const Inst& inst) {
-                              return inst.GetOp() == OpCode::FCmpCondSet;
-                          }) == 1);
-    REQUIRE(std::none_of(block->GetInstList().begin(), block->GetInstList().end(),
-                         [](const Inst& inst) {
-                             return inst.GetOp() == OpCode::CondSet;
-                         }));
+        REQUIRE(std::count_if(block->GetInstList().begin(), block->GetInstList().end(),
+                              [](const Inst& inst) {
+                                  return inst.GetOp() == OpCode::FCmpCondSet;
+                              }) == 1);
+        REQUIRE(std::none_of(block->GetInstList().begin(), block->GetInstList().end(),
+                             [](const Inst& inst) {
+                                 return inst.GetOp() == OpCode::CondSet;
+                             }));
 
-    block->ReIdInstr();
-    Config config{
-            .loc_start = 0,
-            .loc_end = 1ull << 48,
-            .enable_jit = true,
-            .has_local_operation = false,
-            .backend_isa = kArm64,
-            .arm64_features = Arm64Features::AXFlag,
-            .global_opts = Optimizations::All,
-    };
-    AddressSpace address_space{config};
-    auto module = address_space.GetDefaultModule();
-    RegAlloc alloc{block->MaxInstrId(),
-                   address_space.GetTrampolines().GetGPRRegs(),
-                   address_space.GetTrampolines().GetFPRRegs(), features};
-    RegisterAllocPass::Run(block.get(), &alloc, false, features);
-    arm64::JitContext context{module, alloc};
-    arm64::JitTranslator translator{context};
-    translator.Translate(block.get());
-    context.Finish();
+        block->ReIdInstr();
+        Config config{
+                .loc_start = 0,
+                .loc_end = 1ull << 48,
+                .enable_jit = true,
+                .has_local_operation = false,
+                .backend_isa = kArm64,
+                .arm64_features = Arm64Features::AXFlag,
+                .global_opts = Optimizations::All,
+        };
+        AddressSpace address_space{config};
+        auto module = address_space.GetDefaultModule();
+        RegAlloc alloc{block->MaxInstrId(),
+                       address_space.GetTrampolines().GetGPRRegs(),
+                       address_space.GetTrampolines().GetFPRRegs(), features};
+        RegisterAllocPass::Run(block.get(), &alloc, false, features);
+        arm64::JitContext context{module, alloc};
+        arm64::JitTranslator translator{context};
+        translator.Translate(block.get());
+        context.Finish();
 
-    vixl::aarch64::Decoder host_decoder;
-    vixl::aarch64::Disassembler disassembler;
-    host_decoder.AppendVisitor(&disassembler);
-    std::vector<std::string> instructions;
-    auto& masm = context.GetMasm();
-    auto* first = masm.GetBuffer()->GetStartAddress<
-            const vixl::aarch64::Instruction*>();
-    auto* last = masm.GetBuffer()->GetEndAddress<
-            const vixl::aarch64::Instruction*>();
-    for (auto* instruction = first; instruction < last;
-         instruction = instruction->GetNextInstruction()) {
-        host_decoder.Decode(instruction);
-        instructions.emplace_back(disassembler.GetOutput());
+        vixl::aarch64::Decoder host_decoder;
+        vixl::aarch64::Disassembler disassembler;
+        host_decoder.AppendVisitor(&disassembler);
+        std::vector<std::string> instructions;
+        auto& masm = context.GetMasm();
+        auto* first = masm.GetBuffer()->GetStartAddress<
+                const vixl::aarch64::Instruction*>();
+        auto* last = masm.GetBuffer()->GetEndAddress<
+                const vixl::aarch64::Instruction*>();
+        for (auto* instruction = first; instruction < last;
+             instruction = instruction->GetNextInstruction()) {
+            host_decoder.Decode(instruction);
+            instructions.emplace_back(disassembler.GetOutput());
+        }
+        REQUIRE(Count(instructions, "cset") == 1);
+        REQUIRE((Contains(instructions, "b.hi") || Contains(instructions, "b.ls")));
     }
-    REQUIRE(Count(instructions, "cset") == 1);
-    REQUIRE((Contains(instructions, "b.hi") || Contains(instructions, "b.ls")));
 }

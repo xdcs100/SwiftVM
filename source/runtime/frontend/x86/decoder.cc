@@ -1227,7 +1227,23 @@ void X64Decoder::PublishFCmpFlags(ir::Value packed) {
 }
 
 void X64Decoder::ExtendLocalFCmp(const _DInst& insn) {
-    if (insn.opcode != I_MOVSD || local_fcmp_next_pc_ != insn_pc ||
+    switch (insn.opcode) {
+        case I_MOVDQA:
+        case I_MOVDQU:
+        case I_MOVAPS:
+        case I_MOVUPS:
+        case I_MOVAPD:
+        case I_MOVUPD:
+        case I_MOVNTDQ:
+        case I_MOVNTPS:
+        case I_MOVNTPD:
+        case I_LDDQU:
+        case I_MOVSD:
+            break;
+        default:
+            return;
+    }
+    if (local_fcmp_next_pc_ != insn_pc ||
         META_GET_FC(insn.meta) != FC_NONE ||
         insn.testedFlagsMask != 0 || insn.modifiedFlagsMask != 0 ||
         insn.undefinedFlagsMask != 0) {
