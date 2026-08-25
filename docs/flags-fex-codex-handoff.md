@@ -966,6 +966,16 @@ peepholes.
   The comparable total falls `3,910,564 -> 3,894,028` (`-16,536`, `-0.422855%`). Six focused flags
   codegen cases pass; the broad flags filter retains the same two pre-existing 8-bit shift failures
   in baseline and candidate. This stage ran no long benchmark, stress test or full suite.
+- `8723387` removes scalar SSE destination seeding when backward SSA analysis proves the upper lane
+  dead. Right operands and scalar compares consume only lane zero; left operands and scalar-unary
+  merge inputs propagate liveness recursively. Full stores, publications, unknown consumers and
+  unaccounted pseudo uses retain the copy. The bounded Orb screen completes in 2.782 seconds with
+  identical 2,755-PC / 3,621-version sets, 99.995707% retained-host coverage, all top-20 PCs, no
+  growing PC and exact PPM SHA
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. The comparable total falls
+  `3,894,028 -> 3,870,936` (`-23,092`, `-0.593011%`); `0x40248e` loses eight instructions per entry
+  and `0x402497` loses seven. Eleven focused liveness, resident-FPR, tie and AFP cases pass 282
+  assertions. This stage ran no long benchmark, stress test or full suite.
 
 ## Orb loop
 
