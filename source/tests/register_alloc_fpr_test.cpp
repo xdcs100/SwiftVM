@@ -4,6 +4,7 @@
 
 #include "runtime/backend/address_space.h"
 #include "runtime/backend/arm64/jit/jit_context.h"
+#include "runtime/backend/arm64/jit/scalar_fpr_liveness.h"
 #include "runtime/backend/arm64/jit/translator.h"
 #include "runtime/ir/opts/register_alloc_pass.h"
 
@@ -84,6 +85,26 @@ swift::u32 EmitSize(Block* block, RegAlloc& alloc) {
     return context.CurrentBufferSize();
 }
 
+bool ScalarProductUpperDead(bool propagate_upper) {
+    IntrusivePtr<Block> block{new Block(0, Location{0x8790})};
+    auto left = block->LoadUniform(Uniform{0, ValueType::V128})
+                        .SetType(ValueType::V128);
+    auto right = block->LoadUniform(Uniform{16, ValueType::V128})
+                         .SetType(ValueType::V128);
+    auto other = block->LoadUniform(Uniform{32, ValueType::V128})
+                         .SetType(ValueType::V128);
+    auto product = block->VecFMulScalar64(left, right).SetType(ValueType::V128);
+    auto result = propagate_upper
+            ? block->VecFAddScalar64(product, other).SetType(ValueType::V128)
+            : block->VecFAddScalar64(other, product).SetType(ValueType::V128);
+    block->StoreUniform(Uniform{48, ValueType::V128}, result);
+    block->ReIdInstr();
+
+    backend::arm64::ScalarFPRLiveness liveness;
+    liveness.Analyze(block.get());
+    return liveness.UpperDead(product.Def());
+}
+
 }  // namespace
 
 TEST_CASE("legacy scalar FPR results publish directly to a resident home") {
@@ -94,6 +115,11 @@ TEST_CASE("legacy scalar FPR results publish directly to a resident home") {
         REQUIRE(alloc->ValueFPR(item.result).id == kResidentTarget);
         REQUIRE(alloc->IsHostWriteCoalesced(item.publish->Id()));
     }
+}
+
+TEST_CASE("scalar right-only chains discard unobserved upper lanes") {
+    REQUIRE(ScalarProductUpperDead(false));
+    REQUIRE_FALSE(ScalarProductUpperDead(true));
 }
 
 TEST_CASE("legacy scalar FPR publication preserves a fixed left source") {

@@ -437,7 +437,7 @@ void JitTranslator::EmitVecFScalarBinaryTied(ir::Inst* inst, u32 lane_bits) {
             ASSERT_MSG(ReproveScalarFPRTie(inst),
                        "scalar FPR fixed-home tie proof diverged at IR {}", inst->Id());
         }
-    } else {
+    } else if (!scalar_fpr_liveness.UpperDead(inst)) {
         // A still-live dst-in cannot be tied by RA. Seed the new destination
         // once, then let NEP update lane 0 in place; this is still one copy
         // instead of the legacy post-op full-copy plus lane insert.
