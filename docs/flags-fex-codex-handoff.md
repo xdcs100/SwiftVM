@@ -715,7 +715,7 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 | Remaining absolute `GetOperand` materialization | 21.75M left-immediate instances are true two-part constants; ADRP/literal alternatives do not preserve the current relocation and mapping contract |
 | Saved-flags compound `CondSet` | two-instruction HI/LS and GE/LT forms were implemented and validated, but execute 0 times in formal smallpt/CoreMark and the c-ray audit sample; GT/LE still need three inputs, so the zero-gain prototype was removed |
 | General narrow `TEST` direct-`And` flags | 496-PC bounded A/B had 29 shrinking and 31 growing PCs, only 13 net static instructions and `-623` retained-formal-weighted instructions; fully reverted |
-| Global inverted-carry ABI default | bounded smallpt aborted on the scalar-FPR fixed-home proof before producing an oracle; a safe version requires explicit edge polarity rather than changing the decoder default, fully reverted |
+| Global inverted-carry ABI default | Re-tested after the scalar-FPR proof fix. The oracle stays exact, but bounded smallpt changes 2,802/3,435 units/versions to 3,207/3,493 and grows the strict common subset `370,990 -> 394,889` (`+6.441953%`). Hot `TEST`/logical producers make Direct carry dominant in execution even though the emitted producer census favors subtraction. Fully reverted; any remaining carry work needs explicit edge polarity. |
 | IR-rewriting integer `Sub` branch-only carry normalization | the non-carry-only form still changed the bounded unit/version set from 2,755/3,621 to 2,785/3,056; strict coverage was 99.648660% with two growing PCs, below the 99.9% gate despite `-0.908475%` on the comparable subset, fully reverted. `86aaac4` is a separate backend-only EQ/NE proof and does not revive this rewrite. |
 
 ## Next ready (pick one, measure, revert on 124/134)
@@ -732,11 +732,11 @@ NZCV edges whose target proves a complete overwrite. Remaining partial requested
 that observe incoming flags still need a broader contract; do not reopen them with more mask
 peepholes.
 
-1. **Canonical carry formal gate** — the largest StoreUniform subpool is closed on FlagM and the
-   short oracle is exact. Dead inversion elimination has a 100%-coverage same-shape short A/B, but
-   the complete pre-canonical-to-current comparison still has only 37.091% strict coverage. The next
-   promoted-stage run must remeasure unit formation and guest-normalized host density; do not quote
-   either raw short `host_dynamic` change as the FEX gap improvement.
+1. **Cross-edge carry polarity** — `28f459a` closes dead-edge `CMP/Jcc` carry publication, including
+   `JB/JAE/JA/JBE`. Remaining inversions preserve architecturally live CF across an edge or serve a
+   later observer. The global inverted ABI is a measured regression because hot logical producers
+   are Direct. Continue only with an explicit edge/version polarity contract that canonicalizes
+   mixed joins; do not change the decoder-wide default or add a runtime polarity store on FlagM.
 2. **Pinned GPR residuals** — keep the 14-register level 2 map as the performance default. Recount actual emitted bytes,
    not GetHost/SetHost IR. The largest remaining SetHost moves in the retained log implement real
    guest copies such as `mov rbp,rdi` and `mov rbx,rdx`; deleting them requires architectural
@@ -1105,6 +1105,22 @@ peepholes.
   Substituting R15/x8 reproduced the identical Mac boundary and timeout, confirming a register-
   pressure ceiling rather than an R13-specific mapping issue. Both candidates were fully reverted.
   This stage makes no wall-time claim and ran no long benchmark, stress test or full suite.
+- `28f459a` extends the dead-edge integer branch proof from EQ/NE to `JB/JAE/JA/JBE`. The frontend
+  retains the same two-successor flags-dead certificate; ARM64 independently re-proves the exact
+  `Sub`, normalization and sole terminal-condition graph, maps canonical CS/CC back to raw
+  subtraction polarity, and recognizes the canonical HI/LS compound graph. It then emits one raw
+  `SUBS + B.cond` path without publishing PF/AF, CFINV or a condition boolean. The exact bounded
+  smallpt A/B retains 2,802 PCs / 3,435 versions, zero spills and PPM SHA
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`; weighted host work falls
+  `405,255 -> 402,318` (`-2,937`, `-0.724729%`) with no growing PC. The bounded CoreMark shape also
+  retains all 2,846 PCs / 3,379 versions and falls `6,198,767,526 -> 5,987,684,381`
+  (`-211,083,145`, `-3.405244%`); the standard 20,000-iteration run keeps `crcfinal=0x382f`, while
+  its score is intentionally not quoted because it now finishes below CoreMark's ten-second
+  validity floor. c-ray's bounded image remains exact at SHA
+  `89ccd2e15dba67378197d05524a6223795f8b8ab2d11f4d40deaef4af9f35c6e`; its startup PC overlap
+  was only 99.437285%, so no c-ray density delta is claimed. Five local focused cases pass 278
+  assertions, the Orb integer case passes 66, and the fixed-seed local differential remains 90/90
+  existing mismatches. This stage ran no long benchmark, stress test or full suite.
 
 ## Orb loop
 
