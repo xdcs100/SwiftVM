@@ -733,10 +733,12 @@ that observe incoming flags still need a broader contract; do not reopen them wi
 peepholes.
 
 1. **Cross-edge carry polarity** — `28f459a` closes dead-edge `CMP/Jcc` carry publication, including
-   `JB/JAE/JA/JBE`. Remaining inversions preserve architecturally live CF across an edge or serve a
-   later observer. The global inverted ABI is a measured regression because hot logical producers
-   are Direct. Continue only with an explicit edge/version polarity contract that canonicalizes
-   mixed joins; do not change the decoder-wide default or add a runtime polarity store on FlagM.
+   `JB/JAE/JA/JBE`, and `5bdf30e` closes condition readers that do not consume C before a later
+   in-block C overwrite. Remaining inversions preserve architecturally live CF across an edge or
+   serve a real carry observer. The global inverted ABI is a measured regression because hot
+   logical producers are Direct. Continue only with an explicit edge/version polarity contract
+   that canonicalizes mixed joins; do not change the decoder-wide default or add a runtime
+   polarity store on FlagM.
 2. **Pinned GPR residuals** — keep the 14-register level 2 map as the performance default. Recount actual emitted bytes,
    not GetHost/SetHost IR. The largest remaining SetHost moves in the retained log implement real
    guest copies such as `mov rbp,rdi` and `mov rbx,rdx`; deleting them requires architectural
@@ -1121,6 +1123,19 @@ peepholes.
   was only 99.437285%, so no c-ray density delta is claimed. Five local focused cases pass 278
   assertions, the Orb integer case passes 66, and the fixed-seed local differential remains 90/90
   existing mismatches. This stage ran no long benchmark, stress test or full suite.
+- `5bdf30e` makes flag liveness condition-specific: EQ/NE consume Z, CS/CC consume C, HI/LS consume
+  C/Z, and signed relations consume only their actual N/V/Z subset. This applies consistently to
+  block-local elimination and the HIR fixed point. A canonicalizing CFINV is now deleted when the
+  intervening condition does not read C and a later in-block C writer covers every path; real carry
+  conditions retain it. The exact bounded smallpt A/B keeps 2,802 PCs / 3,435 versions, the same PPM
+  and zero spills; weighted host work falls `402,466 -> 399,467` (`-2,999`, `-0.745156%`). One cold
+  PC grows by three instructions while all top-30 PCs are non-growing. CoreMark keeps all 2,846 PCs /
+  3,379 versions and `crcfinal=0x382f`; its weighted change is effectively neutral at
+  `5,987,684,409 -> 5,987,682,134` (`-2,275`, `-0.000038%`). The deterministic c-ray `128x96`,
+  four-sample oracle remains SHA
+  `89ccd2e15dba67378197d05524a6223795f8b8ab2d11f4d40deaef4af9f35c6e`. Five focused local cases
+  pass 182 assertions, the fixed-seed local differential remains 90/90 existing mismatches and the
+  Mac short oracle is exact. This stage ran no long benchmark, stress test or full suite.
 
 ## Orb loop
 
