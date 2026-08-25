@@ -30,6 +30,7 @@ bool IsPinnedCoalesceProducer(OpCode op) {
         case OpCode::LoadImm:
         case OpCode::LoadMemory:
         case OpCode::LoadUniform:
+        case OpCode::GetHostFPR:
         case OpCode::Zero:
         case OpCode::Add:
         case OpCode::Sub:

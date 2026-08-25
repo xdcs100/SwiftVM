@@ -271,56 +271,6 @@ static bool SSEAFPNanEnabled(Arm64Features features) {
     return false;
 }
 
-// WORKAROUND (runtime bug, ir/instr.h Inst::GetArg<Operand>): the x86
-// frontend legitimately emits single-sided ir::Operand args (e.g.
-// ir::Operand{left} for a RIP-relative lea / absolute address); the empty
-// right side is stored as a Void arg (ir/args.cpp DataClass::ToArgClass),
-// but Inst::GetArg<ir::Operand>() blindly calls ToDataClass() on it and
-// PANICs with "Invalid arg type!". Until the runtime handles Void right
-// sides, rewrite single-sided operands after decoding:
-//   - left is a Value  -> right = Imm(0) (single-sided ops are always
-//     OperandOp::Plus, so left + 0 == left; the arm64 backend's
-//     EmitOperand handles this form);
-//   - left is an Imm and the instruction is GetOperand -> rewrite the
-//     whole instruction to LoadImm(imm) (GetOperand(#imm) == #imm);
-//   - left is an Imm otherwise (absolute memory address) -> materialize
-//     the immediate with a LoadImm in front of the instruction and use
-//     that value as the left side with right = Imm(0).
-static void FixupSingleSidedOperands(ir::Block* block) {
-    bool inserted = false;
-    for (auto& inst : block->GetInstList()) {
-        for (int i = 0; i + 2 < ir::Inst::max_args; ++i) {
-            if (!inst.ArgAt(i).IsOperand() || !inst.ArgAt(i + 2).IsVoid()) {
-                continue;
-            }
-            auto& left_arg = inst.ArgAt(i + 1);
-            if (left_arg.IsValue()) {
-                inst.SetArg(i + 2, ir::Imm(u64(0)));
-            } else if (left_arg.IsImm()) {
-                auto imm = left_arg.Get<ir::Imm>();
-                if (inst.GetOp() == ir::OpCode::GetOperand) {
-                    inst.SetInst(ir::OpCode::LoadImm, imm);
-                    // LoadImm takes a single arg; drop the two leftover
-                    // slots of the old operand encoding.
-                    inst.DestroyArg(1);
-                    inst.DestroyArg(2);
-                } else {
-                    auto* li = new ir::Inst(ir::OpCode::LoadImm);
-                    li->SetArgs(imm);
-                    li->SetReturn(ir::ValueType::U64);
-                    block->InsertBefore(li, &inst);
-                    inst.SetArg(i + 1, ir::Value{li});
-                    inst.SetArg(i + 2, ir::Imm(u64(0)));
-                    inserted = true;
-                }
-            }
-        }
-    }
-    if (inserted) {
-        block->ReIdInstr();
-    }
-}
-
 // WORKAROUND (runtime contract gap): the arm64 backend allows at most one
 // pending SaveFlags / ClearFlags per flush window (flush points are
 // AdvancePC and block end; see backend/arm64/jit/translator.cpp
@@ -934,18 +884,6 @@ struct X86Instance::Impl final {
                     decoder.Decode();
                     perf_decode_detail.Stop();
                     PerfScope2 perf_ir_finalize{GetPerfStats2().ir_finalize};
-                    // Root causes fixed in runtime (2026-07-22), workarounds
-                    // retired:
-                    //  - GetArg<Operand> tolerates a Void right side and the
-                    //    backend materializes Imm left sides, so
-                    //    FixupConsecutiveFlagOps / FixupFlagFlushBeforeConsumer
-                    //    are no longer needed. FixupSingleSidedOperands is
-                    //    kept as a harmless normalization pass.
-                    //  - MergeNZCV uses replace semantics, so
-                    //    FixupFlagFlushBeforeConsumer is retired.
-                    //  - RegisterAllocPass accounts for terminal value uses,
-                    //    so MaterializeTerminalCondUse is retired.
-                    FixupSingleSidedOperands(x.get());
                     PinUnusedCallLambdas(x.get());
                     perf_ir_finalize.Stop();
                     if (runtime::GetSvmConfig().dump_ir) {

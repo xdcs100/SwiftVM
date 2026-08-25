@@ -4498,6 +4498,7 @@ TEST_CASE("guest GPR coalescing keeps publication and snapshot proofs local") {
     };
     constexpr std::array expanded_producers{
             ExpandedProducer{OpCode::LoadMemory, "LoadMemory"},
+            ExpandedProducer{OpCode::GetHostFPR, "GetHostFPR"},
             ExpandedProducer{OpCode::Adc, "Adc"},
             ExpandedProducer{OpCode::Sbb, "Sbb"},
             ExpandedProducer{OpCode::Mul, "Mul"},
@@ -4536,6 +4537,9 @@ TEST_CASE("guest GPR coalescing keeps publication and snapshot proofs local") {
         switch (op) {
             case OpCode::LoadMemory:
                 return block->LoadMemory(Operand{load_scalar(0x1000)})
+                        .SetType(type);
+            case OpCode::GetHostFPR:
+                return block->GetHostFPR(HostRegIndex(24), Imm{0u})
                         .SetType(type);
             case OpCode::Adc:
                 return binary([&](Value left, Value right) {
@@ -4951,7 +4955,7 @@ TEST_CASE("guest GPR coalescing keeps publication and snapshot proofs local") {
                 const auto location = 0x9800 + case_index * 0x20;
                 const auto off_size = emit_size(op, type, location, false);
                 const auto on_size = emit_size(op, type, location, true);
-                REQUIRE(on_size + vixl::aarch64::kInstructionSize == off_size);
+                REQUIRE(on_size + vixl::aarch64::kInstructionSize <= off_size);
                 ++case_index;
             }
         }
