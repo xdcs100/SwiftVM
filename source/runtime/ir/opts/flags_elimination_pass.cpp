@@ -212,6 +212,44 @@ bool IsBranchOnlyProducer(OpCode op) {
            op == OpCode::Xor || op == OpCode::AndNot;
 }
 
+bool IsPolarityStoreShape(const Inst* inst) {
+    if (inst->GetOp() != OpCode::StoreUniform) {
+        return false;
+    }
+    const auto uniform = inst->GetArg<Uniform>(0);
+    const auto value = inst->GetArg<Value>(1);
+    return uniform.GetType() == ValueType::U8 && value.Def() &&
+           value.Def()->GetOp() == OpCode::LoadImm &&
+           value.Def()->GetArg<Imm>(0).Get() <= 1;
+}
+
+bool PreservesRawFCmp(OpCode op) {
+    switch (op) {
+        case OpCode::LoadUniform:
+        case OpCode::StoreUniform:
+        case OpCode::GetHostGPR:
+        case OpCode::GetHostFPR:
+        case OpCode::SetHostGPR:
+        case OpCode::SetHostFPR:
+        case OpCode::LoadImm:
+        case OpCode::AdvancePC:
+        case OpCode::BitCast:
+        case OpCode::GetOperand:
+        case OpCode::Zero:
+        case OpCode::ZeroExtend32:
+        case OpCode::ZeroExtend32To64:
+        case OpCode::VecFAdd:
+        case OpCode::VecFSub:
+        case OpCode::VecFMul:
+        case OpCode::Add:
+        case OpCode::Sub:
+        case OpCode::BranchOnlyEdges:
+            return true;
+        default:
+            return false;
+    }
+}
+
 struct BranchOnlyStats {
     u32 candidates{};
     u32 accepted{};
@@ -228,6 +266,66 @@ HIRBlock* FindSuccessor(HIRBlock* block, const Location& location) {
         }
     }
     return nullptr;
+}
+
+bool TryFCmpBranchOnly(Block* block,
+                       HIRFunction* function,
+                       Inst* condition,
+                       Inst* edge_marker,
+                       const std::vector<Inst*>& insts,
+                       size_t producer_begin,
+                       size_t producer_advance,
+                       size_t cond_index,
+                       BranchOnlyStats& stats) {
+    auto* fcmp = condition->GetArg<Value>(0).Def();
+    size_t fcmp_index = producer_begin;
+    while (fcmp_index < producer_advance && insts[fcmp_index] != fcmp) {
+        ++fcmp_index;
+    }
+    if (!fcmp || fcmp->GetOp() != OpCode::VecFCmp ||
+        fcmp_index == producer_advance) {
+        stats.reject_shape++;
+        return false;
+    }
+
+    std::vector<Inst*> victims;
+    bool published = false;
+    for (size_t i = fcmp_index + 1; i < cond_index; ++i) {
+        auto* inst = insts[i];
+        if (inst->GetOp() == OpCode::PublishFCmpFlags &&
+            inst->GetArg<Value>(0).Def() == fcmp) {
+            published = true;
+            victims.push_back(inst);
+            continue;
+        }
+        if (inst->GetOp() == OpCode::InvertCarry ||
+            IsPolarityStoreShape(inst)) {
+            victims.push_back(inst);
+            continue;
+        }
+        if (!PreservesRawFCmp(inst->GetOp())) {
+            stats.reject_shape++;
+            return false;
+        }
+    }
+    if (!published) {
+        stats.reject_shape++;
+        return false;
+    }
+    if (edge_marker) {
+        victims.push_back(edge_marker);
+    }
+    for (auto* victim : victims) {
+        if (function) {
+            function->EraseInst(block, victim);
+        } else {
+            block->GetInstList().erase(
+                    block->GetInstList().iterator_to(*victim));
+            delete victim;
+        }
+    }
+    stats.accepted++;
+    return true;
 }
 
 bool TryBranchOnly(Block* block,
@@ -252,7 +350,8 @@ bool TryBranchOnly(Block* block,
     Inst* condition = if_term->cond.Def();
     if (!condition || condition->GetUses() != 1 ||
         (condition->GetOp() != OpCode::LocalCondSet &&
-         condition->GetOp() != OpCode::LocalParitySet)) {
+         condition->GetOp() != OpCode::LocalParitySet &&
+         condition->GetOp() != OpCode::FCmpCondSet)) {
         stats.reject_shape++;
         return false;
     }
@@ -327,6 +426,12 @@ bool TryBranchOnly(Block* block,
         --producer_begin;
     }
 
+    if (condition->GetOp() == OpCode::FCmpCondSet) {
+        return TryFCmpBranchOnly(
+                block, function, condition, edge_marker, insts,
+                producer_begin, producer_advance, cond_index, stats);
+    }
+
     std::vector<Inst*> flag_writes;
     std::vector<Inst*> polarity_stores;
     Inst* primary = nullptr;
@@ -345,11 +450,7 @@ bool TryBranchOnly(Block* block,
                 flag_writes.push_back(inst);
                 break;
             case OpCode::StoreUniform: {
-                const auto uniform = inst->GetArg<Uniform>(0);
-                const auto value = inst->GetArg<Value>(1);
-                if (uniform.GetType() == ValueType::U8 && value.Def() &&
-                    value.Def()->GetOp() == OpCode::LoadImm &&
-                    value.Def()->GetArg<Imm>(0).Get() <= 1) {
+                if (IsPolarityStoreShape(inst)) {
                     polarity_stores.push_back(inst);
                 }
                 break;

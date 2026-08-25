@@ -368,6 +368,7 @@ private:
     bool FoldCcFromCarryTest(ir::Inst* test_flags);
     [[nodiscard]] static bool IsCompactFCmp(ir::Value value);
     [[nodiscard]] bool CanUseCompactFCmpCarrier(ir::Inst* fcmp) const;
+    [[nodiscard]] ir::Inst* RawFCmpCondition(ir::Inst* fcmp) const;
 
     // Merge pending guest flags kept in host NZCV into the flags register.
     // B0 tags the existing sequence only; the tags never affect emission.

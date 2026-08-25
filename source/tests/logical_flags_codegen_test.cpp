@@ -11,6 +11,7 @@
 #include "runtime/backend/address_space.h"
 #include "runtime/backend/arm64/jit/translator.h"
 #include "runtime/frontend/x86/decoder.h"
+#include "runtime/ir/opts/flags_elimination_pass.h"
 #include "runtime/ir/opts/register_alloc_pass.h"
 
 namespace {
@@ -104,6 +105,24 @@ std::size_t Count(const std::vector<std::string>& instructions,
     });
 }
 
+std::vector<std::string> Disassemble(arm64::JitContext& context) {
+    vixl::aarch64::Decoder decoder;
+    vixl::aarch64::Disassembler disassembler;
+    decoder.AppendVisitor(&disassembler);
+    std::vector<std::string> instructions;
+    auto& masm = context.GetMasm();
+    auto* first = masm.GetBuffer()->GetStartAddress<
+            const vixl::aarch64::Instruction*>();
+    auto* last = masm.GetBuffer()->GetEndAddress<
+            const vixl::aarch64::Instruction*>();
+    for (auto* instruction = first; instruction < last;
+         instruction = instruction->GetNextInstruction()) {
+        decoder.Decode(instruction);
+        instructions.emplace_back(disassembler.GetOutput());
+    }
+    return instructions;
+}
+
 }  // namespace
 
 TEST_CASE("dead narrow logical identities publish NZ in one instruction") {
@@ -172,9 +191,12 @@ TEST_CASE("compact FP compare stays local across audited moves") {
         FeatureSet features{};
         features.flags_fcmp_fuse = true;
         features.flags_fcmp_compact = true;
+        const auto arm64_features =
+                swift::x86::Arm64Features::AXFlag |
+                swift::x86::Arm64Features::FlagM;
         swift::x86::X64Decoder decoder{
                 address, &memory, &assembler, true,
-                swift::x86::Arm64Features::AXFlag, false, false, features};
+                arm64_features, false, false, features};
         decoder.Decode();
 
         REQUIRE(std::count_if(block->GetInstList().begin(), block->GetInstList().end(),
@@ -194,7 +216,7 @@ TEST_CASE("compact FP compare stays local across audited moves") {
                 .has_local_operation = false,
                 .backend_isa = kArm64,
                 .global_opts = Optimizations::All,
-                .arm64_features = Arm64Features::AXFlag,
+                .arm64_features = arm64_features,
         };
         AddressSpace address_space{config};
         auto module = address_space.GetDefaultModule();
@@ -207,21 +229,91 @@ TEST_CASE("compact FP compare stays local across audited moves") {
         translator.Translate(block.get());
         context.Finish();
 
-        vixl::aarch64::Decoder host_decoder;
-        vixl::aarch64::Disassembler disassembler;
-        host_decoder.AppendVisitor(&disassembler);
-        std::vector<std::string> instructions;
-        auto& masm = context.GetMasm();
-        auto* first = masm.GetBuffer()->GetStartAddress<
-                const vixl::aarch64::Instruction*>();
-        auto* last = masm.GetBuffer()->GetEndAddress<
-                const vixl::aarch64::Instruction*>();
-        for (auto* instruction = first; instruction < last;
-             instruction = instruction->GetNextInstruction()) {
-            host_decoder.Decode(instruction);
-            instructions.emplace_back(disassembler.GetOutput());
-        }
+        const auto instructions = Disassemble(context);
         REQUIRE(Count(instructions, "cset") == 1);
+        REQUIRE(Count(instructions, "axflag") == 1);
+        REQUIRE(Count(instructions, "cfinv") == 1);
         REQUIRE((Contains(instructions, "b.hi") || Contains(instructions, "b.ls")));
+    }
+}
+
+TEST_CASE("dead-edge FP compares branch on raw host flags") {
+    struct Case {
+        swift::u8 opcode;
+        std::string_view condition;
+        std::string_view inverse;
+    };
+    for (const auto& test : {
+                 Case{0x72, "b.lt", "b.ge"},
+                 Case{0x73, "b.ge", "b.lt"},
+                 Case{0x77, "b.gt", "b.le"},
+                 Case{0x76, "b.le", "b.gt"},
+                 Case{0x7a, "b.vs", "b.vc"},
+                 Case{0x7b, "b.vc", "b.vs"},
+         }) {
+        const std::array<swift::u8, 16> code{
+                0x66, 0x0f, 0x2f, 0xc1,
+                test.opcode, 0x04,
+                0x39, 0xc0,
+                0xf4, 0x90,
+                0x39, 0xc9,
+                0xf4,
+        };
+        DirectMemory memory;
+        const auto address = reinterpret_cast<swift::VAddr>(code.data());
+        IntrusivePtr<Block> block{new Block(0, Location{address})};
+        Assembler assembler{block.get()};
+        FeatureSet features{};
+        const auto arm64_features = Arm64Features::AXFlag | Arm64Features::FlagM;
+        swift::x86::X64Decoder decoder{
+                address, &memory, &assembler, true, arm64_features, false, false,
+                features};
+        decoder.Decode();
+
+        auto count_op = [&](OpCode op) {
+            std::size_t count{};
+            for (const auto& inst : block->GetInstList()) {
+                count += inst.GetOp() == op;
+            }
+            return count;
+        };
+        CAPTURE(test.opcode);
+        REQUIRE(count_op(OpCode::BranchOnlyEdges) == 1);
+        REQUIRE(count_op(OpCode::PublishFCmpFlags) == 1);
+        REQUIRE(count_op(OpCode::InvertCarry) == 1);
+
+        FlagsEliminationPass::Run(block.get(), nullptr, features);
+        REQUIRE(count_op(OpCode::BranchOnlyEdges) == 0);
+        REQUIRE(count_op(OpCode::PublishFCmpFlags) == 0);
+        REQUIRE(count_op(OpCode::InvertCarry) == 0);
+        REQUIRE(count_op(OpCode::FCmpCondSet) == 1);
+
+        block->ReIdInstr();
+        Config config{
+                .loc_start = 0,
+                .loc_end = 1ull << 48,
+                .enable_jit = true,
+                .has_local_operation = false,
+                .backend_isa = kArm64,
+                .global_opts = Optimizations::All,
+                .arm64_features = arm64_features,
+        };
+        AddressSpace address_space{config};
+        RegAlloc alloc{block->MaxInstrId(),
+                       address_space.GetTrampolines().GetGPRRegs(),
+                       address_space.GetTrampolines().GetFPRRegs(), features};
+        RegisterAllocPass::Run(block.get(), &alloc, false, features);
+        arm64::JitContext context{address_space.GetDefaultModule(), alloc};
+        arm64::JitTranslator translator{context};
+        translator.Translate(block.get());
+        context.Finish();
+
+        const auto instructions = Disassemble(context);
+        REQUIRE(Count(instructions, "fcmp") == 1);
+        REQUIRE(Count(instructions, "cset") == 0);
+        REQUIRE(Count(instructions, "axflag") == 0);
+        REQUIRE(Count(instructions, "cfinv") == 0);
+        REQUIRE((Contains(instructions, test.condition) ||
+                 Contains(instructions, test.inverse)));
     }
 }

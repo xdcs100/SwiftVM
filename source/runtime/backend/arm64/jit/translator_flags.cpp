@@ -962,6 +962,40 @@ bool JitTranslator::CanUseCompactFCmpCarrier(ir::Inst* fcmp) const {
     return consumers != 0 && consumers == fcmp->GetUses();
 }
 
+ir::Inst* JitTranslator::RawFCmpCondition(ir::Inst* fcmp) const {
+    if (!fcmp || fcmp->GetOp() != ir::OpCode::VecFCmp || !cur_block) {
+        return nullptr;
+    }
+
+    ir::Inst* condition = nullptr;
+    for (auto& user : cur_block->GetInstList()) {
+        bool consumes = false;
+        for (auto value : user.GetValues()) {
+            consumes |= value.Def() == fcmp;
+        }
+        if (!consumes) {
+            continue;
+        }
+        if (condition || user.GetOp() != ir::OpCode::FCmpCondSet) {
+            return nullptr;
+        }
+        condition = &user;
+    }
+    if (!condition || fcmp->GetUses() != 1) {
+        return nullptr;
+    }
+
+    auto& list = cur_block->GetInstList();
+    auto scan = std::next(list.iterator_to(*fcmp));
+    for (; scan != list.end() && &*scan != condition; ++scan) {
+        if (!PreservesHostNZCV(scan->GetOp()) ||
+            MayFaultOrObserve(scan->GetOp())) {
+            return nullptr;
+        }
+    }
+    return scan != list.end() ? condition : nullptr;
+}
+
 void JitTranslator::FlushFlags() {
     if (flags_clear != ir::Flags::None) {
         ClearFlags(flags_clear);

@@ -834,6 +834,14 @@ void JitTranslator::EmitFCmpCondSet(ir::Inst* inst) {
     ASSERT(fcmp.Def() && fcmp.Def()->GetOp() == ir::OpCode::VecFCmp);
     ASSERT(inst->ReturnType() != ir::ValueType::VOID);
 
+    if (RawFCmpCondition(fcmp.Def()) == inst) {
+        if (RecordLocalCondition(inst, cond)) {
+            return;
+        }
+        __ Cset(context.R(ir::Value{inst}), MapCond(cond));
+        return;
+    }
+
     if (IsCompactFCmp(fcmp)) {
         // PublishFCmpFlags has already applied AXFLAG.  Re-express W38's raw
         // FCMP conditions over that x86-shaped NZCV so terminal B.cond/CSEL

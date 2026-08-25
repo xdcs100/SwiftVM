@@ -1082,6 +1082,9 @@ void JitTranslator::EmitVecFCmp(ir::Inst* inst) {
     }
 
     if (compact) {
+        if (RawFCmpCondition(inst)) {
+            return;
+        }
         // Preserve the one relation AXFLAG discards.  VC is ordered, which is
         // also the raw parity byte representation: 1 has odd parity (PF=0),
         // while unordered produces 0 (PF=1).
@@ -1092,6 +1095,10 @@ void JitTranslator::EmitVecFCmp(ir::Inst* inst) {
         } else {
             __ Cset(context.X(ir::Value{inst}), vc);
         }
+        return;
+    }
+
+    if (RawFCmpCondition(inst)) {
         return;
     }
 
