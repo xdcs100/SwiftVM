@@ -1163,6 +1163,20 @@ peepholes.
   load in an ordinary temporary and coalescing only its widening copy reproduced the exact
   `5,868,557,589` incumbent shape, so that zero-effect mechanism was also removed. This stage ran
   no long benchmark, stress test or full suite.
+- `7cfc990` fuses the production x86 `MOVSS` publication graph
+  `LoadMemory(U32) -> ZeroExtend64 -> SetHostFPR(low) + zero-high` into one fault-exact ARM64
+  `LDR S`. The proof requires unique load/extension uses, adjacent low/high stores, an exact U32
+  extension, no intervening memory or target-home observer, and the existing resident-value
+  lifetime exclusion. The bounded c-ray static common set falls `215,587 -> 214,915` (`-672`,
+  `-0.311707%`): 78 PCs shrink, none grow, and `0x402e70` falls `947 -> 853`. Its deterministic
+  `128x96`, four-sample output remains SHA
+  `89ccd2e15dba67378197d05524a6223795f8b8ab2d11f4d40deaef4af9f35c6e`. The short smallpt gate
+  keeps 2,802 PCs / 3,435 versions, zero spills and the exact PPM while moving
+  `399,443 -> 399,441`. Local and Orb scalar-focused gates each pass 21 cases / 1,019 assertions,
+  including the real `MOVSS` page-fault path. A first unwrapped U32-load prototype had zero
+  production hits; the exact IR audit exposed the missing `ZeroExtend64` bridge. Reusing x27 as a
+  spill scratch caused a c-ray static-path SIGSEGV and was fully reverted. This stage ran no long
+  benchmark, stress test or full suite.
 
 ## Orb loop
 
