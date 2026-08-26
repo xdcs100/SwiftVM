@@ -173,6 +173,16 @@ private:
     void PrepareDeadPinnedGPRWrites(ir::Block* block);
     [[nodiscard]] bool IsDeadPinnedGPRWrite(ir::Inst* inst) const;
     void PreparePinnedGPRCopies(ir::Block* block);
+    struct NarrowExtractExtension {
+        ir::Inst* extract{};
+        ir::Value source{};
+        u8 width{};
+
+        bool operator==(const NarrowExtractExtension&) const = default;
+    };
+    [[nodiscard]] std::optional<NarrowExtractExtension>
+    MatchNarrowExtractExtension(ir::Inst* wrapper) const;
+    void PrepareNarrowExtractExtensions(ir::Block* block);
     void PrepareNarrowFlagsInputs(ir::Block* block);
     [[nodiscard]] std::optional<ir::Value>
     MatchNarrowFlagsInput(ir::Inst* extract);
@@ -611,6 +621,8 @@ private:
     std::map<ir::Inst*, ir::Value> narrow_flags_inputs{};
     std::map<ir::Inst*, u16> pinned_gpr_values{};
     std::map<ir::Inst*, PinnedGPRCopy> pinned_gpr_copies{};
+    std::map<ir::Inst*, NarrowExtractExtension> narrow_extract_extensions{};
+    std::map<ir::Inst*, ir::Inst*> fused_narrow_extracts{};
     std::unordered_set<ir::Inst*> dead_pinned_gpr_writes{};
     std::map<ir::Inst*, ScalarFPRPublication> scalar_load_fpr_fusions{};
     std::map<ir::Inst*, ScalarFPRPublication> scalar_value_fpr_fusions{};

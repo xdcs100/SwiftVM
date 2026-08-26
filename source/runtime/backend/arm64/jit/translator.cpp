@@ -766,6 +766,7 @@ JitTranslator::PrepareBlockState(ir::Block* block) {
     }
     scalar_fpr_liveness.Analyze(block);
     scalar_identity_analysis.Analyze(block);
+    PrepareNarrowExtractExtensions(block);
     PrepareScalarFPRPublications(block);
     backedge_flags_plan = dead_edge_integer_branch
             ? nullptr

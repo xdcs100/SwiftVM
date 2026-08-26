@@ -400,6 +400,16 @@ bool JitTranslator::ReproveLow32Copy(ir::Inst* inst) const {
 }
 
 void JitTranslator::EmitBitExtract(ir::Inst* inst) {
+    if (auto fused = fused_narrow_extracts.find(inst);
+        fused != fused_narrow_extracts.end()) {
+        const auto plan = narrow_extract_extensions.find(fused->second);
+        const auto reproved = MatchNarrowExtractExtension(fused->second);
+        ASSERT_MSG(plan != narrow_extract_extensions.end() && reproved &&
+                           *reproved == plan->second &&
+                           reproved->extract == inst,
+                   "narrow extract extension proof diverged at IR {}", inst->Id());
+        return;
+    }
     if (fused_pin_gpr_reads.contains(inst)) {
         return;
     }
@@ -516,6 +526,20 @@ void JitTranslator::EmitZeroExtend32(ir::Inst* inst) {
         return;
     }
     if (fused_pin_zext32.contains(inst)) {
+        return;
+    }
+    if (auto fused = narrow_extract_extensions.find(inst);
+        fused != narrow_extract_extensions.end()) {
+        const auto reproved = MatchNarrowExtractExtension(inst);
+        ASSERT_MSG(reproved && *reproved == fused->second,
+                   "narrow extract extension proof diverged at IR {}", inst->Id());
+        auto result = context.W(ir::Value{inst});
+        auto source = context.W(fused->second.source);
+        if (fused->second.width == sizeof(u8)) {
+            __ Uxtb(result, source);
+        } else {
+            __ Uxth(result, source);
+        }
         return;
     }
     auto value = inst->GetArg<ir::Value>(0);
