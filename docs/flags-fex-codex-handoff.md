@@ -712,6 +712,8 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 | Sole TestZero/TestNotZero identity/general Select fusion | strict local `4 8 6` saves only 79 (`-0.013547%`); exact PPM and no growth, but the extra planner state is not justified and was fully reverted |
 | Zero-register `SetHostGPR` publication | smallpt / c-ray equal-entry only `-1` / `-22`; existing GPR coalescing already absorbs it, fully reverted |
 | Transparent `BitCast` zero-store graph | formal smallpt and c-ray are byte-identical at every equal-entry PC; the proof reaches no remaining materialization and was fully reverted |
+| Pinned GPR immediate-offset memory address | smallpt is byte-identical and c-ray's partial retained-entry subset saves only `0.012823%`; the extension was fully reverted |
+| Dead overwritten `SetHostGPR` publication | the common smallpt subset shrinks, but unit/version formation diverges, 1,675 dynamic spills appear, and c-ray `64x48/s1` times out at eight seconds; the IR-lifetime prototype and its test were fully removed |
 | Remaining absolute `GetOperand` materialization | 21.75M left-immediate instances are true two-part constants; ADRP/literal alternatives do not preserve the current relocation and mapping contract |
 | Saved-flags compound `CondSet` | two-instruction HI/LS and GE/LT forms were implemented and validated, but execute 0 times in formal smallpt/CoreMark and the c-ray audit sample; GT/LE still need three inputs, so the zero-gain prototype was removed |
 | General narrow `TEST` direct-`And` flags | 496-PC bounded A/B had 29 shrinking and 31 growing PCs, only 13 net static instructions and `-623` retained-formal-weighted instructions; fully reverted |
@@ -1246,6 +1248,23 @@ peepholes.
   covered c-ray shape but made even `16x12/s1` time out; it was fully removed after confirming the
   committed baseline completes in one second. This stage ran no long benchmark, stress test or
   full suite.
+- `42abcdb` fuses an ordinary logical producer's adjacent `ClearFlags(CVAF)` and
+  `SaveFlags(NZ|PF)` publication. It publishes the parity token before borrowing scratch, then
+  replaces the separate four-bit clear plus two-bit NZ merge with one six-bit extract/insert. The
+  proof rejects region-internal, backedge, dead-edge and branch-only flag plans, so their existing
+  lazy cross-edge contracts remain untouched. Smallpt keeps all 2,802 PCs / 3,435 versions, zero
+  spills and the exact PPM while moving `396,873 -> 394,264` (`-2,609`, `-0.657389%`); every
+  changed equal-entry PC shrinks. CoreMark keeps all 2,846 PCs / 3,379 versions and
+  `crcfinal=0x382f` while moving `5,849,153,108 -> 5,775,449,473` (`-73,703,635`,
+  `-1.260074%`); its equal-entry weighted comparison is `5,910,113,189 -> 5,836,409,554`
+  (`-1.247077%`). The bounded c-ray static common set moves `214,621 -> 212,641` across
+  99.888300% host coverage, and the explicitly partial 22.719351%-covered retained-entry subset
+  moves `9,334,183,694 -> 9,282,105,342` (`-52,078,352`, `-0.557932%`). The deterministic c-ray
+  oracle remains SHA `89ccd2e15dba67378197d05524a6223795f8b8ab2d11f4d40deaef4af9f35c6e`.
+  The new focused case passes three assertions on Mac and Orb. The broader flags/page-fault focus
+  retains its two incumbent failures: the stale default-OFF assertion and the immediate-shift case
+  reproduced with the new matcher disabled. This stage ran no long benchmark, stress test or full
+  suite.
 
 ## Orb loop
 
