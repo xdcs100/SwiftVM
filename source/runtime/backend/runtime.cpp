@@ -18,6 +18,7 @@
 #include "runtime/backend/arm64/jit/translator.h"
 #include "runtime/backend/arm64/fpcr_mode.h"
 #include "runtime/backend/context.h"
+#include "runtime/backend/guarded_return_stack.h"
 #include "runtime/backend/interp/interpreter.h"
 #include "runtime/backend/runtime.h"
 #include "runtime/backend/signal_handler.h"
@@ -166,19 +167,11 @@ struct Runtime::Impl final {
         // definitionally invalid; the interpreter checks this before every
         // memory access and raises PageFatal instead of crashing the host.
         state->guest_addr_limit = static_cast<u64>(address_space->GetConfig().loc_end);
-        // Return Stack Buffer: allocate the RSB backing store and point
-        // state->rsb_pointer at the top of the stack (the stack grows
-        // downward: push pre-decrements, pop post-increments).  The buffer
-        // has rsb_stack_size + 2 entries; the initial pointer sits at entry
-        // [rsb_stack_size] so 64 pushes reach entry [0] before the two
-        // guard slots absorb a modest overflow.
         if (True(address_space->GetConfig().global_opts & Optimizations::ReturnStackBuffer)) {
-            state->rsb_pointer = &rsb_buffer.rsb_frames[backend::rsb_stack_size];
-            // JIT overflow/underflow guards: push skips at the bottom (full),
-            // pop falls back to the dispatcher at the top (empty). See
-            // JitContext::EmitRSBPush / EmitRSBPop.
-            state->rsb_bottom = &rsb_buffer.rsb_frames[0];
-            state->rsb_top = &rsb_buffer.rsb_frames[backend::rsb_stack_size];
+            return_stack.emplace();
+            state->rsb_pointer = return_stack->Empty();
+            state->rsb_bottom = return_stack->Bottom();
+            state->rsb_top = return_stack->Empty();
         }
         jit_entry = address_space->GetTrampolines().GetRuntimeEntry();
         // Claim this thread for host-side SMC fault recovery (see OwnerSlot).
@@ -320,6 +313,9 @@ struct Runtime::Impl final {
             return false;  // fault PC not in any JIT code buffer
         }
         const auto fault_addr = reinterpret_cast<std::uintptr_t>(info->si_addr);
+        if (self->return_stack && self->return_stack->Recover(uctx, fault_addr)) {
+            return true;
+        }
         if (backend::SignalHandler::IsGuestAddressMapped(fault_addr)) {
             // The faulting page IS mapped for the guest: this is a protection
             // violation (SMC write-protect, Phase 4) or a host bug, not a
@@ -612,10 +608,7 @@ struct Runtime::Impl final {
     Instance* instance{};
     std::vector<u8> state_buffer{};
     backend::State* state{};
-    // RSB backing store: rsb_stack_size + 2 entries of 16 bytes each.
-    // state->rsb_pointer points into this buffer; the trampoline saves/
-    // restores it across host exits.
-    backend::RSBBuffer rsb_buffer{};
+    std::optional<backend::GuardedReturnStack> return_stack{};
     backend::AddressSpace* address_space{};
     // mutable: JIT dispatch fills this per-Runtime table even from const Run
     // paths; State publishes its stable Data() base to generated code.

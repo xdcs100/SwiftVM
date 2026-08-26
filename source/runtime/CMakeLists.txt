@@ -103,6 +103,8 @@ add_library(swift_runtime STATIC
         backend/asm_interp.cpp
         backend/asm_interp.h
         backend/context.h
+        backend/guarded_return_stack.cpp
+        backend/guarded_return_stack.h
         backend/address_space.cpp
         backend/address_space.h
         backend/runtime.cpp
