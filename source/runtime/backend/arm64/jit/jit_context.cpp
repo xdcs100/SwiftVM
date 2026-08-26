@@ -766,21 +766,20 @@ void JitContext::ReturnToDispatcher(const Register& location) {
 void JitContext::ForwardIndirectL1(const Register& location) {
     const auto index = GetTmpX();
     const auto entry = GetTmpX();
-    Label signal;
 
     if (!indirect_l1_prof_enabled) {
         // The request and stable L1 base occupy one aligned pair. The shared
         // trampoline acquire-checks the request before returning Signal.
         __ Ldp(index, entry, MemOperand(state));
-        __ Tbnz(index, 63, &signal);
+        __ Tst(index, kBackedgeSignalRequest);
     } else {
         __ Ldr(entry, MemOperand(state, state_offset_indirect_l1_code_cache));
     }
 
     __ Bfi(entry, location, 4, L1_CODE_CACHE_BITS);
     __ Ldp(index, entry, MemOperand(entry));
-    __ Cmp(index, location);
     if (indirect_l1_prof_enabled) {
+        __ Cmp(index, location);
         Label miss;
         // The profiling Runtime keeps invalid values at zero so this arm can
         // distinguish SMC fallback from a real hit.
@@ -794,16 +793,9 @@ void JitContext::ForwardIndirectL1(const Register& location) {
         return;
     }
 
-    // On a key mismatch, x30 is the unchanged trampoline continuation and is
-    // equivalent to Ret. On an SMC-invalidated key hit, entry is the safe L2
-    // continuation installed by TranslateTable::Zero. No stale/zero pointer
-    // can reach Br. With the two-instruction signal poll the production hot
-    // path is exactly seven instructions and still rents only two temporaries.
+    __ Ccmp(index, location, NoFlag, eq);
     __ Csel(entry, entry, x30, eq);
     __ Br(entry);
-    __ Bind(&signal);
-    // The trampoline verifies the release-published request before returning.
-    __ Ret();
 }
 
 // --- Return Stack Buffer (RSB) -------------------------------------------
