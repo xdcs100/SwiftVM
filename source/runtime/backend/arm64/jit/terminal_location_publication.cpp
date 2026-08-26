@@ -63,7 +63,7 @@ void TerminalLocationPublication::Prepare(std::span<ir::Block* const> blocks,
     }
 
     for (const auto& candidate : candidates) {
-        if (counts[candidate.reg] < 3) {
+        if (counts[candidate.reg] < 2) {
             continue;
         }
         deferred.insert(candidate.inst);

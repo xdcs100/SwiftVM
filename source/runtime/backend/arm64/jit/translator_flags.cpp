@@ -1189,6 +1189,10 @@ bool CarryStillInPstate(ir::Block* block, ir::Inst* test) {
 }
 }  // namespace
 
+bool JitTranslator::CarryCanStayInPstate(ir::Inst* test) const {
+    return CarryStillInPstate(cur_block, test);
+}
+
 ir::Inst* SoleUserInBlock(ir::Block* block, ir::Inst* def) {
     if (!block || !def || def->GetUses() != 1) {
         return nullptr;

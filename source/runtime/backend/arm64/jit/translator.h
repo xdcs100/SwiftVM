@@ -214,6 +214,15 @@ private:
     MatchNarrowFlagsInput(ir::Inst* extract);
     [[nodiscard]] ir::Value ResolveNarrowFlagsInput(ir::Value value,
                                                     ir::Inst* consumer);
+    struct NarrowCarryFusion {
+        ir::Inst* carry_test{};
+        ir::Inst* carry_add{};
+        ir::Value value{};
+        std::vector<ir::Inst*> dead_inputs{};
+    };
+    [[nodiscard]] std::optional<NarrowCarryFusion>
+    MatchNarrowCarryFusion(ir::Inst* inst);
+    void PrepareNarrowCarryFusions(ir::Block* block);
     [[nodiscard]] std::optional<PinnedGPRCopy>
     MatchPinnedGPRCopy(ir::Inst* inst) const;
     [[nodiscard]] std::optional<XRegister>
@@ -444,6 +453,7 @@ private:
     bool RecordLocalCondition(ir::Inst *inst, ir::Cond cond);
     [[nodiscard]] std::optional<Condition> LocalConditionFor(ir::Value value) const;
     [[nodiscard]] bool LaterNeedsHostPstate(ir::Inst* from) const;
+    [[nodiscard]] bool CarryCanStayInPstate(ir::Inst* test) const;
     bool FoldCcFromCarryTest(ir::Inst* test_flags);
     [[nodiscard]] static bool IsCompactFCmp(ir::Value value);
     [[nodiscard]] bool CanUseCompactFCmpCarrier(ir::Inst* fcmp) const;
@@ -657,6 +667,7 @@ private:
     std::map<ir::Inst*, u16> fused_pin_gpr_reads{};
     std::map<ir::Inst*, u16> pinned_memory_values{};
     std::map<ir::Inst*, ir::Value> narrow_flags_inputs{};
+    std::map<ir::Inst*, NarrowCarryFusion> narrow_carry_fusions{};
     std::map<ir::Inst*, u16> pinned_gpr_values{};
     std::map<std::pair<ir::Inst*, const ir::Inst*>, u16> pinned_gpr_use_homes{};
     std::map<ir::Inst*, PinnedGPRCopy> pinned_gpr_copies{};

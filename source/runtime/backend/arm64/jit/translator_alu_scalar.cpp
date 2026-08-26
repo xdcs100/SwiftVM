@@ -13,6 +13,19 @@ namespace swift::runtime::backend::arm64 {
 #define __ masm.
 
 void JitTranslator::EmitAdd(ir::Inst* inst) {
+    if (auto fusion = narrow_carry_fusions.find(inst);
+        fusion != narrow_carry_fusions.end()) {
+        const auto reproved = MatchNarrowCarryFusion(inst);
+        ASSERT_MSG(reproved && reproved->carry_test == fusion->second.carry_test &&
+                           reproved->carry_add == fusion->second.carry_add &&
+                           reproved->value.Def() == fusion->second.value.Def(),
+                   "narrow carry fusion proof diverged at IR {}", inst->Id());
+        ASSERT(save_in_nzcv && nzcv_dirty);
+        const auto result = context.R(ir::Value{inst});
+        const auto value = context.R(fusion->second.value, true);
+        __ Adc(result.W(), value.W(), Operand{wzr});
+        return;
+    }
     if (auto update = pinned_load_update_instructions.find(inst);
         update != pinned_load_update_instructions.end() &&
         inst == update->second.update) {
