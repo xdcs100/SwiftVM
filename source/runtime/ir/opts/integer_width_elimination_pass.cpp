@@ -57,7 +57,9 @@ Value IdentitySource(Inst* inst) {
     if (GetValueSizeByte(source.Type()) == sizeof(u32)) {
         return source;
     }
-    if (!source.Def() || source.Def()->GetOp() != OpCode::ZeroExtend32To64) {
+    if (!source.Def() ||
+        (source.Def()->GetOp() != OpCode::ZeroExtend32To64 &&
+         source.Def()->GetOp() != OpCode::SignExtend)) {
         return {};
     }
     auto narrow = source.Def()->GetArg<Value>(0);

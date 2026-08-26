@@ -28,6 +28,15 @@ TEST_CASE("integer identity extracts cancel local width round trips") {
     const auto converted =
             block.VecFCvtIntToFloat(conversion_extract, Imm{32u}, Imm{64u}).SetType(ValueType::U64);
     block.StoreUniform(Uniform{64, ValueType::U64}, converted);
+    const auto sign_source = block.LoadUniform(Uniform{72, ValueType::U32});
+    const auto sign_extended = block.SignExtend(sign_source).SetType(ValueType::U64);
+    const auto sign_extract_left =
+            block.BitExtract(sign_extended, Imm{0u}, Imm{32u}).SetType(ValueType::U32);
+    const auto sign_extract_right =
+            block.BitExtract(sign_extended, Imm{0u}, Imm{32u}).SetType(ValueType::U32);
+    const auto sign_result =
+            block.And(sign_extract_left, Operand{sign_extract_right}).SetType(ValueType::U32);
+    block.StoreUniform(Uniform{80, ValueType::U32}, sign_result);
 
     IntegerWidthEliminationPass::Run(&block);
 
@@ -38,16 +47,24 @@ TEST_CASE("integer identity extracts cancel local width round trips") {
     REQUIRE(signed_extract.Def()->GetUses(false) == 0);
     REQUIRE(converted.Def()->GetArg<Value>(0).Def() == conversion_source.Def());
     REQUIRE(conversion_extract.Def()->GetUses(false) == 0);
+    REQUIRE(sign_result.Def()->GetArg<Value>(0).Def() == sign_source.Def());
+    REQUIRE(sign_result.Def()->GetArg<Operand>(1).GetLeft().value.Def() ==
+            sign_source.Def());
+    REQUIRE(sign_extract_left.Def()->GetUses(false) == 0);
+    REQUIRE(sign_extract_right.Def()->GetUses(false) == 0);
 
     DeadCodeEliminationPass::Run(&block);
     u32 extracts = 0;
     u32 extensions = 0;
+    u32 sign_extensions = 0;
     for (auto& inst : block.GetInstList()) {
         extracts += inst.GetOp() == OpCode::BitExtract;
         extensions += inst.GetOp() == OpCode::ZeroExtend32To64;
+        sign_extensions += inst.GetOp() == OpCode::SignExtend;
     }
     REQUIRE(extracts == 0);
     REQUIRE(extensions == 0);
+    REQUIRE(sign_extensions == 0);
 }
 
 TEST_CASE("integer width elimination rejects non-identity extracts") {
