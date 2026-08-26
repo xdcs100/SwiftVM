@@ -1293,16 +1293,18 @@ void JitTranslator::EmitSetHostGPR(ir::Inst* inst) {
                    "dead pinned GPR write proof diverged at IR {}", inst->Id());
         return;
     }
-    if (auto self_write = pinned_gpr_self_writes.find(inst);
-        self_write != pinned_gpr_self_writes.end()) {
-        const auto reproved = MatchPinnedGPRSelfWrite(inst);
-        ASSERT_MSG(reproved && reproved->read == self_write->second.read &&
-                           reproved->extend == self_write->second.extend &&
-                           reproved->aliases == self_write->second.aliases &&
-                           reproved->target == self_write->second.target,
-                   "pinned GPR self-write proof diverged at IR {}", inst->Id());
-        auto host_reg = XRegister(self_write->second.target);
-        __ Mov(host_reg.W(), host_reg.W());
+    if (auto copy = pinned_gpr_copies.find(inst);
+        copy != pinned_gpr_copies.end()) {
+        const auto reproved = MatchPinnedGPRCopy(inst);
+        ASSERT_MSG(reproved && reproved->read == copy->second.read &&
+                           reproved->extend == copy->second.extend &&
+                           reproved->aliases == copy->second.aliases &&
+                           reproved->source == copy->second.source &&
+                           reproved->target == copy->second.target,
+                   "pinned GPR copy proof diverged at IR {}", inst->Id());
+        auto source = XRegister(copy->second.source);
+        auto target = XRegister(copy->second.target);
+        __ Mov(target.W(), source.W());
         return;
     }
     const auto published = inst->GetArg<ir::Value>(0);

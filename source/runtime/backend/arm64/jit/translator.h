@@ -159,17 +159,18 @@ private:
     [[nodiscard]] bool ReproveLow32Copy(ir::Inst* inst) const;
     [[nodiscard]] bool ReproveCachedConstAddress(ir::Inst* inst) const;
 
-    struct PinnedGPRSelfWrite {
+    struct PinnedGPRCopy {
         ir::Inst* read{};
         ir::Inst* extend{};
         std::vector<ir::Inst*> aliases{};
+        u16 source{};
         u16 target{};
     };
     void PrepareDeadPinnedGPRWrites(ir::Block* block);
     [[nodiscard]] bool IsDeadPinnedGPRWrite(ir::Inst* inst) const;
-    void PreparePinnedGPRSelfWrites(ir::Block* block);
-    [[nodiscard]] std::optional<PinnedGPRSelfWrite>
-    MatchPinnedGPRSelfWrite(ir::Inst* inst) const;
+    void PreparePinnedGPRCopies(ir::Block* block);
+    [[nodiscard]] std::optional<PinnedGPRCopy>
+    MatchPinnedGPRCopy(ir::Inst* inst) const;
     [[nodiscard]] std::optional<XRegister>
     ResolvePinnedGPRValue(ir::Value value) const;
     [[nodiscard]] std::optional<u16>
@@ -571,14 +572,12 @@ private:
     std::map<ir::Inst *, Condition> local_conditions{};
     std::unordered_set<ir::Inst*> normalized_bool_selects{};
     std::unordered_map<ir::Inst*, ir::Cond> direct_cond_selects{};
-    // ZeroExtend32To64 values whose sole consumer is a W55 full pinned write.
-    // Their producer emits nothing; EmitSetHostGPR reads the original W value.
     std::unordered_set<ir::Inst*> fused_pin_zext32{};
     // Narrow mapped reads whose single audited consumer can use the pinned W
     // register directly (for example CL masking and U32 XOR).
     std::map<ir::Inst*, u16> fused_pin_gpr_reads{};
     std::map<ir::Inst*, u16> pinned_gpr_values{};
-    std::map<ir::Inst*, PinnedGPRSelfWrite> pinned_gpr_self_writes{};
+    std::map<ir::Inst*, PinnedGPRCopy> pinned_gpr_copies{};
     std::unordered_set<ir::Inst*> dead_pinned_gpr_writes{};
     std::map<ir::Inst*, ScalarFPRPublication> scalar_load_fpr_fusions{};
     std::map<ir::Inst*, ScalarFPRPublication> scalar_value_fpr_fusions{};

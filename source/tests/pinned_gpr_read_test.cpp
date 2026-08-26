@@ -21,6 +21,7 @@ enum class PinnedReadShape {
     Or,
     SelfAnd,
     SelfWrite,
+    Copy,
     OverwrittenWrite,
     OverwrittenWriteFault,
     MemoryAddress,
@@ -44,7 +45,9 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
     IntrusivePtr<Block> block{new Block(0, Location{0x8940})};
     const bool overwritten_write = shape == PinnedReadShape::OverwrittenWrite ||
                                    shape == PinnedReadShape::OverwrittenWriteFault;
-    const auto source_index = overwritten_write ? 1u : 22u;
+    const auto source_index = overwritten_write
+            ? 1u
+            : (shape == PinnedReadShape::Copy ? 20u : 22u);
     auto value = block->GetHostGPR(HostRegIndex(source_index), Imm{0u})
                          .SetType(type);
     if (shape == PinnedReadShape::Or) {
@@ -52,7 +55,8 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
                              .SetType(type);
         auto result = block->Or(value, Operand{right}).SetType(type);
         block->SaveFlags(result, Flags::Negate | Flags::Zero | Flags::Parity);
-    } else if (shape == PinnedReadShape::SelfWrite) {
+    } else if (shape == PinnedReadShape::SelfWrite ||
+               shape == PinnedReadShape::Copy) {
         auto result = block->ZeroExtend32To64(value).SetType(ValueType::U64);
         block->SetHostGPR(result, HostRegIndex(22), Imm{0u});
         auto address = block->BitCast(result).SetType(ValueType::U64);
@@ -182,6 +186,14 @@ TEST_CASE("a pinned low-32 self-write clears its high half in one instruction") 
     REQUIRE(Count(lines, "ubfx ", "x22") == 0);
     REQUIRE(Count(lines, "mov w22, w22", "") == 1);
     REQUIRE(Count(lines, "mov w", "w22") == 1);
+    REQUIRE(Count(lines, "ldrb ", "[x22") == 1);
+}
+
+TEST_CASE("a pinned low-32 copy publishes directly between fixed homes") {
+    const auto lines = EmitPinnedRead(PinnedReadShape::Copy, false);
+    REQUIRE(Count(lines, "ubfx ", "x20") == 0);
+    REQUIRE(Count(lines, "mov w22, w20", "") == 1);
+    REQUIRE(Count(lines, "mov w", "w20") == 1);
     REQUIRE(Count(lines, "ldrb ", "[x22") == 1);
 }
 

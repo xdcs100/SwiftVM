@@ -20,10 +20,23 @@ bool IsMemoryAddressUse(ir::Inst& inst, ir::Inst* definition) {
            (right.IsValue() && right.value.Def() == definition);
 }
 
+bool IsHelperClobber(ir::OpCode op) {
+    switch (op) {
+        case ir::OpCode::CallLambda:
+        case ir::OpCode::CallLocation:
+        case ir::OpCode::CallDynamic:
+        case ir::OpCode::X87Op:
+        case ir::OpCode::Sse42Str:
+            return true;
+        default:
+            return false;
+    }
+}
+
 }  // namespace
 
-std::optional<JitTranslator::PinnedGPRSelfWrite>
-JitTranslator::MatchPinnedGPRSelfWrite(ir::Inst* inst) const {
+std::optional<JitTranslator::PinnedGPRCopy>
+JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
     if (!inst || inst->GetOp() != ir::OpCode::SetHostGPR ||
         inst->GetArg<ir::Imm>(2).Get() != 0 ||
         context.IsHostWriteCoalesced(inst->Id())) {
@@ -41,10 +54,13 @@ JitTranslator::MatchPinnedGPRSelfWrite(ir::Inst* inst) const {
 
     auto source = extend->GetArg<ir::Value>(0);
     auto* read = source.Def();
+    const u32 source_index = read && read->GetOp() == ir::OpCode::GetHostGPR
+            ? read->GetArg<ir::Imm>(0).Get()
+            : UINT32_MAX;
     if (!read || read->GetOp() != ir::OpCode::GetHostGPR ||
         read->GetUses() != 1 ||
         ir::GetValueSizeByte(source.Type()) != sizeof(u32) ||
-        read->GetArg<ir::Imm>(0).Get() != target ||
+        !IsPinnedGPR(source_index) ||
         read->GetArg<ir::Imm>(1).Get() != 0 ||
         context.IsHostReadCoalesced(read->Id())) {
         return std::nullopt;
@@ -97,19 +113,22 @@ JitTranslator::MatchPinnedGPRSelfWrite(ir::Inst* inst) const {
         if (read->Id() < scan.Id() && scan.Id() < inst->Id() &&
             (MayFaultOrObserve(scan.GetOp()) ||
              (scan.GetOp() == ir::OpCode::SetHostGPR &&
-              scan.GetArg<ir::Imm>(1).Get() == target))) {
+              (scan.GetArg<ir::Imm>(1).Get() == target ||
+               scan.GetArg<ir::Imm>(1).Get() == source_index)))) {
             return std::nullopt;
         }
         if (inst->Id() < scan.Id() && scan.Id() < last_use &&
-            (scan.GetOp() == ir::OpCode::SetHostGPR &&
-             scan.GetArg<ir::Imm>(1).Get() == target)) {
+            ((scan.GetOp() == ir::OpCode::SetHostGPR &&
+              scan.GetArg<ir::Imm>(1).Get() == target) ||
+             (target <= 9 && IsHelperClobber(scan.GetOp())))) {
             return std::nullopt;
         }
     }
-    return PinnedGPRSelfWrite{
+    return PinnedGPRCopy{
             .read = read,
             .extend = extend,
             .aliases = std::move(aliases),
+            .source = static_cast<u16>(source_index),
             .target = static_cast<u16>(target),
     };
 }
@@ -126,22 +145,22 @@ JitTranslator::ResolvePinnedGPRValue(ir::Value value) const {
     return XRegister(pinned->second);
 }
 
-void JitTranslator::PreparePinnedGPRSelfWrites(ir::Block* block) {
+void JitTranslator::PreparePinnedGPRCopies(ir::Block* block) {
     fused_pin_zext32.clear();
     fused_pin_gpr_reads.clear();
     pinned_gpr_values.clear();
-    pinned_gpr_self_writes.clear();
+    pinned_gpr_copies.clear();
     for (auto& inst : block->GetInstList()) {
-        auto plan = MatchPinnedGPRSelfWrite(&inst);
+        auto plan = MatchPinnedGPRCopy(&inst);
         if (!plan) {
             continue;
         }
-        fused_pin_gpr_reads.emplace(plan->read, plan->target);
+        fused_pin_gpr_reads.emplace(plan->read, plan->source);
         fused_pin_zext32.insert(plan->extend);
         for (auto* alias : plan->aliases) {
             pinned_gpr_values.emplace(alias, plan->target);
         }
-        pinned_gpr_self_writes.emplace(&inst, *plan);
+        pinned_gpr_copies.emplace(&inst, *plan);
     }
 }
 
