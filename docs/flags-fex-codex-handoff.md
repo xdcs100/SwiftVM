@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`ea82571`** `perf: reuse indexed RMW effective addresses`
+- Code tip: **`b734438`** `perf: prove flags dead through direct calls`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -19,6 +19,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 
 | Commit | What |
 |---|---|
+| `b734438` | Follow one static direct call in the dead-successor flags proof when the callee overwrites every incoming flag before control flow, and track the inspected callee prefix for SMC |
 | `ea82571` | Reuse one displacement-adjusted indexed effective address across the load and store halves of a plain integer memory RMW |
 | `f8cc6ed` | Keep an exact narrow load's branch-only zero-test alias on the pinned publication home and remove the intervening W move |
 | `e959074` | Compose low-extract input forwarding with dead narrow immediate branches so the specialized compare reads the original source |
@@ -1490,6 +1491,26 @@ peepholes.
   effective-address focuses pass 29 assertions across two cases. A broad all-RMW prototype was
   rejected after it reshaped hot function allocation and introduced growing PCs; it was fully
   removed before delivery, and no diagnostic or feature switch remains.
+- `b734438` extends the bounded successor-prefix proof through one static direct call. The caller
+  prefix and callee entry may contain only audited flag-transparent instructions before a complete
+  overwrite; reads of incoming flags, partial writers, indirect or nested calls, other control
+  flow and unknown instructions reject the proof. Logical TEST/AND/OR/XOR metadata now counts its
+  architectural CF/OF clears as writes, and CET ENDBR is treated as the existing semantic Nop.
+  Every accepted callee prefix is stored as a guest-code dependency and registered with SMC under
+  the owning caller translation. A callee-entry write therefore invalidates the caller as well;
+  disk JIT cache mode conservatively rejects this proof until that dependency is serialized.
+  CoreMark's mirrored `cmp byte [ptr],0; jne call` loops stop publishing full flags and collapse
+  the associated hot versions. Exact 20k raw host work moves
+  `4,014,625,879 -> 3,735,236,874` (`-279,389,005`, `-6.959279%`), units/versions move
+  `2,846/3,378 -> 2,820/2,915`, and CRC remains `0x382f`. The 2k screen moves
+  `401,615,362 -> 373,668,357` (`-27,947,005`, `-6.958649%`). Because unit formation changes,
+  neither comparison is presented as a strict common-PC join. Smallpt keeps the canonical PPM
+  while moving raw host work `374,896 -> 361,960` (`-12,936`, `-3.450557%`) and
+  units/versions `2,802/3,435 -> 2,792/3,052`. Mac and Orb dead-edge focuses pass 174 assertions
+  across three cases; direct-call dependency and non-stress SMC focuses also pass on both hosts.
+  FLAGS `0/1` x function/block/interpreter returns rc 101, checksum `9f52b7d59285dbe5` and one
+  identical output SHA in all six cells. No temporary diagnostic, new environment switch, stress
+  run or full suite remains in this stage.
 
 ## Orb loop
 
