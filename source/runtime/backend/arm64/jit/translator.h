@@ -165,6 +165,8 @@ private:
         std::vector<ir::Inst*> aliases{};
         u16 target{};
     };
+    void PrepareDeadPinnedGPRWrites(ir::Block* block);
+    [[nodiscard]] bool IsDeadPinnedGPRWrite(ir::Inst* inst) const;
     void PreparePinnedGPRSelfWrites(ir::Block* block);
     [[nodiscard]] std::optional<PinnedGPRSelfWrite>
     MatchPinnedGPRSelfWrite(ir::Inst* inst) const;
@@ -577,6 +579,7 @@ private:
     std::map<ir::Inst*, u16> fused_pin_gpr_reads{};
     std::map<ir::Inst*, u16> pinned_gpr_values{};
     std::map<ir::Inst*, PinnedGPRSelfWrite> pinned_gpr_self_writes{};
+    std::unordered_set<ir::Inst*> dead_pinned_gpr_writes{};
     std::map<ir::Inst*, ScalarFPRPublication> scalar_load_fpr_fusions{};
     std::map<ir::Inst*, ScalarFPRPublication> scalar_value_fpr_fusions{};
     std::optional<DeadEdgeIntegerBranchPlan> dead_edge_integer_branch{};

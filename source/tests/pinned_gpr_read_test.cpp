@@ -21,6 +21,8 @@ enum class PinnedReadShape {
     Or,
     SelfAnd,
     SelfWrite,
+    OverwrittenWrite,
+    OverwrittenWriteFault,
     MemoryAddress,
     SignExtend,
     StoreMemory,
@@ -40,7 +42,10 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
     auto module = address_space.GetDefaultModule();
 
     IntrusivePtr<Block> block{new Block(0, Location{0x8940})};
-    auto value = block->GetHostGPR(HostRegIndex(22), Imm{0u})
+    const bool overwritten_write = shape == PinnedReadShape::OverwrittenWrite ||
+                                   shape == PinnedReadShape::OverwrittenWriteFault;
+    const auto source_index = overwritten_write ? 1u : 22u;
+    auto value = block->GetHostGPR(HostRegIndex(source_index), Imm{0u})
                          .SetType(type);
     if (shape == PinnedReadShape::Or) {
         auto right = block->GetHostGPR(HostRegIndex(29), Imm{0u})
@@ -54,6 +59,22 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
         auto loaded = block->LoadMemory(Operand{address, Imm{8u}})
                               .SetType(ValueType::U8);
         block->StoreUniform(Uniform{64, ValueType::U8}, loaded);
+    } else if (overwritten_write) {
+        auto copied = block->ZeroExtend32To64(value).SetType(ValueType::U64);
+        block->SetHostGPR(copied, HostRegIndex(23), Imm{0u});
+        block->AdvancePC(Imm{2u});
+        if (shape == PinnedReadShape::OverwrittenWriteFault) {
+            auto address = block->LoadImm(Imm{swift::u64{0x1000}})
+                                   .SetType(ValueType::U64);
+            auto loaded = block->LoadMemory(Operand{address}).SetType(ValueType::U8);
+            block->StoreUniform(Uniform{64, ValueType::U8}, loaded);
+        }
+        auto low = block->BitExtract(copied, Imm{0u}, Imm{32u})
+                           .SetType(ValueType::U32);
+        auto masked = block->And(low, Operand{Imm{swift::u32{0x70}}})
+                              .SetType(ValueType::U32);
+        auto result = block->ZeroExtend32To64(masked).SetType(ValueType::U64);
+        block->SetHostGPR(result, HostRegIndex(23), Imm{0u});
     } else if (shape == PinnedReadShape::MemoryAddress) {
         auto address = block->GetOperand(Operand{value}).SetType(ValueType::U64);
         if (reuse_read) {
@@ -174,6 +195,14 @@ TEST_CASE("a pinned GPR supplies a sole memory address without a copy") {
                                             ValueType::U64);
     REQUIRE(Count(overwritten, "ldr w", "[x22]") == 0);
     REQUIRE(Count(overwritten, "mov x", ", x22") == 1);
+}
+
+TEST_CASE("a superseded pinned GPR publication is omitted without observers") {
+    const auto direct = EmitPinnedRead(PinnedReadShape::OverwrittenWrite, false);
+    REQUIRE(Count(direct, "mov w23", "w1") == 1);
+
+    const auto faulting = EmitPinnedRead(PinnedReadShape::OverwrittenWriteFault, false);
+    REQUIRE(Count(faulting, "mov w23", "w1") == 2);
 }
 
 TEST_CASE("a later pinned GPR snapshot use keeps the read move") {

@@ -1288,6 +1288,11 @@ void JitTranslator::EmitGetHostFPR(ir::Inst* inst) {
 }
 
 void JitTranslator::EmitSetHostGPR(ir::Inst* inst) {
+    if (dead_pinned_gpr_writes.contains(inst)) {
+        ASSERT_MSG(IsDeadPinnedGPRWrite(inst),
+                   "dead pinned GPR write proof diverged at IR {}", inst->Id());
+        return;
+    }
     if (auto self_write = pinned_gpr_self_writes.find(inst);
         self_write != pinned_gpr_self_writes.end()) {
         const auto reproved = MatchPinnedGPRSelfWrite(inst);

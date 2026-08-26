@@ -752,6 +752,7 @@ JitTranslator::PrepareBlockState(ir::Block* block) {
     // before the per-block backedge proof marks the two sunk IR instructions.
     disable_instructions.resize(
             std::max<size_t>(disable_instructions.size(), block->MaxInstrId()));
+    PrepareDeadPinnedGPRWrites(block);
     PreparePinnedGPRSelfWrites(block);
     PrepareDeadEdgeIntegerBranch(block);
     PrepareBooleanSelects(block);
