@@ -245,4 +245,51 @@ std::optional<ir::Cond> JitTranslator::DeadEdgeIntegerBranchCondition(
     return dead_edge_integer_branch->raw_condition;
 }
 
+std::optional<JitTranslator::DeadNarrowZeroBranchPlan>
+JitTranslator::MatchDeadNarrowZeroBranch(ir::Inst* inst) const {
+    if (!inst || inst->GetOp() != ir::OpCode::Sub || inst->GetUses() != 0 ||
+        !IsDeadEdgeIntegerBranchProducer(inst) ||
+        dead_edge_integer_branch->required != ir::Flags::Zero) {
+        return std::nullopt;
+    }
+    const u32 width = ir::GetValueSizeByte(inst->ReturnType());
+    if (width != sizeof(u8) && width != sizeof(u16)) {
+        return std::nullopt;
+    }
+
+    const auto right = inst->GetArg<ir::Operand>(1);
+    if (!right.GetRight().Null() || !right.GetLeft().IsValue() ||
+        right.GetOp() != ir::OperandOp::Plus) {
+        return std::nullopt;
+    }
+    auto* load = right.GetLeft().value.Def();
+    if (!load || load->GetOp() != ir::OpCode::LoadImm ||
+        load->GetUses(false) != 1) {
+        return std::nullopt;
+    }
+    const u64 immediate = load->GetArg<ir::Imm>(0).Get();
+    if (!masm.IsImmAddSub(immediate)) {
+        return std::nullopt;
+    }
+    return DeadNarrowZeroBranchPlan{
+            .producer = inst,
+            .immediate_load = load,
+            .immediate = immediate,
+            .width = static_cast<u8>(width),
+    };
+}
+
+void JitTranslator::PrepareDeadNarrowZeroBranch() {
+    dead_narrow_zero_branch.reset();
+    if (!dead_edge_integer_branch) {
+        return;
+    }
+    dead_narrow_zero_branch =
+            MatchDeadNarrowZeroBranch(dead_edge_integer_branch->producer);
+    if (dead_narrow_zero_branch) {
+        disable_instructions.set(
+                dead_narrow_zero_branch->immediate_load->Id());
+    }
+}
+
 }  // namespace swift::runtime::backend::arm64

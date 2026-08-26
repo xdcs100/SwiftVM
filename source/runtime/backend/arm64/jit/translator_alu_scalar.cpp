@@ -124,8 +124,6 @@ void JitTranslator::EmitSub(ir::Inst* inst) {
     if (MatchPreIndexMemoryUpdate(inst)) {
         return;
     }
-    auto left = inst->GetArg<ir::Value>(0);
-    auto right = inst->GetArg<ir::Operand>(1);
     auto pinned_w = [&](ir::Value value) -> std::optional<WRegister> {
         if (value.Def()) {
             if (auto it = fused_pin_gpr_reads.find(value.Def());
@@ -135,6 +133,32 @@ void JitTranslator::EmitSub(ir::Inst* inst) {
         }
         return std::nullopt;
     };
+    if (dead_narrow_zero_branch &&
+        dead_narrow_zero_branch->producer == inst) {
+        const auto reproved = MatchDeadNarrowZeroBranch(inst);
+        ASSERT_MSG(reproved &&
+                           reproved->producer ==
+                                   dead_narrow_zero_branch->producer &&
+                           reproved->immediate_load ==
+                                   dead_narrow_zero_branch->immediate_load &&
+                           reproved->immediate ==
+                                   dead_narrow_zero_branch->immediate &&
+                           reproved->width ==
+                                   dead_narrow_zero_branch->width,
+                   "dead narrow zero branch proof diverged at IR {}", inst->Id());
+        const auto left = inst->GetArg<ir::Value>(0);
+        const auto result = context.W(ir::Value{inst});
+        const auto pinned = pinned_w(left);
+        __ Sub(result,
+               pinned ? *pinned : context.W(left),
+               dead_narrow_zero_branch->immediate);
+        __ Tst(result,
+               dead_narrow_zero_branch->width == sizeof(u8) ? UINT8_MAX
+                                                             : UINT16_MAX);
+        return;
+    }
+    auto left = inst->GetArg<ir::Value>(0);
+    auto right = inst->GetArg<ir::Operand>(1);
     auto right_pinned = right.GetLeft().IsValue()
             ? pinned_w(right.GetLeft().value)
             : std::nullopt;
