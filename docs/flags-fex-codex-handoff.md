@@ -81,6 +81,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 | `d9eb980` | Align direct-hash L1 storage and form each 16-byte entry address with one `BFI` |
 | `e2f9527` | Preserve identity-mode `[base + index]` in memory IR and use the AArch64 register-offset encoding directly |
 | `4821182` | Fold fault-exact identity-mode stack pushes into one AArch64 pre-index store; retain biased-memory and base/data-overlap paths |
+| `1a69a59` | Fold an identity-mode fixed-base load plus the following dead-flags +1 base update into one fault-exact pre-index load |
 | `6b10c73` | Share one materialized 4 KiB guest page base across encodable absolute memory addresses and make the proven path default |
 | `e10fec4` | Let one audited consumer reuse a pinned W view for every operand occurrence and feed callee-saved pinned values directly into sign extension |
 | `7620306` | Store a sole narrow pinned GPR read directly from its fixed W home while preserving snapshot and address-use semantics |
@@ -1733,12 +1734,27 @@ peepholes.
   184 / 297 assertions on Mac and Orb. The promoted CoreMark and smallpt gates complete in 3.152
   and 2.308 seconds; smallpt retains all 2,730 PCs / 2,998 versions and the canonical PPM. No stress
   run, debug path or new environment switch remains.
+- `1a69a59` folds the identity-mode sequence `load [base+1]; add base,1` when the base is a fixed
+  GPR, the load and update are its only ordinary uses, the update flags are dead, the full update
+  publishes back to the same home, and the intervening window has no fault, helper or base
+  observer. The load emits the original scalar access with AArch64 pre-index writeback and the
+  separate Add/publication emit nothing. A fault does not commit writeback, so the guest base still
+  reflects the x86 state before its following Add. The exact CoreMark comparison keeps all 2,761
+  PCs / 2,864 versions and moves `3,466,959,740 -> 3,441,199,737` (`-25,760,003`,
+  `-0.743014%`) with 100% coverage, no growing PC and CRC `0x382f`. `0x4033bb` contributes
+  `-19,360,000`, `0x4033d8` contributes `-5,440,000`, and `0x4033dc` contributes `-960,000`;
+  each shrinks by one instruction. The focused code-shape / fault cases pass 2 / 5 assertions and
+  the pinned group passes 90 assertions on Mac and Orb. CoreMark and smallpt complete in 3.357 and
+  2.353 seconds; smallpt remains byte-identical at 2,730 PCs / 2,998 versions with the canonical
+  PPM. No stress run, debug path or new environment switch remains.
 - Current default-region CoreMark, joined against the retained W67 guest-instruction/entry table,
   still covers `99.999694457%` of entries. Applying the known 434.25M-entry `0x402668` reduction to
   the previous exact denominator gives a conservative estimate of `1.929192` SVM host instructions
   per guest instruction; it excludes the smaller `0x402745` reduction. Reusing the unchanged FEX
   `f2e35f3` value `1.807` gives approximately **`1.067622x`**, down from W67's `2.305x` and the later
-  RE=0 refresh's `2.000x`. Dynamic return dispatch remains the largest concentrated boundary pool.
+  RE=0 refresh's `2.000x`. The pre-index stage above is not folded into this retained-W67 estimate,
+  so the quoted ratio is a conservative upper bound until that join is refreshed. Dynamic return
+  dispatch remains the largest concentrated boundary pool.
   `0x402668` now emits seven host instructions for three guest instructions; `0x402808` emits eight
   for three.
   The CRC family remains move-heavy after both safe fusions: `0x4039b8/0x403958` emit 24
