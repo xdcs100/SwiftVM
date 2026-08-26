@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`162a4d8`** `perf: publish spilled additions to pinned GPRs`
+- Code tip: **`e959074`** `perf: fuse low extracts into immediate branches`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -19,6 +19,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 
 | Commit | What |
 |---|---|
+| `e959074` | Compose low-extract input forwarding with dead narrow immediate branches so the specialized compare reads the original source |
 | `162a4d8` | Emit a spilled U32 Add directly into its pinned publication home and keep proven post-publication low-32 ALU uses on that home |
 | `b5936ac` | Admit a single adjacent carry inversion on a dead U8/U16 memory-operand `Sub` branch when the condition does not read carry, then discard the irrelevant normalization |
 | `9fb39ef` | Retain an arithmetic result token only when parity is live; NZCV-only narrow producers no longer restore result bits solely for a dead PF token |
@@ -1451,6 +1452,15 @@ peepholes.
   move; pinned/read/spill focuses pass on Mac and Orb, and the FLAGS six-grid remains checksum-
   identical. The temporary rejection diagnostic reused `SVM_DUMP_IR` and was removed before
   delivery; no new switch or fallback remains.
+- `e959074` composes the adjacent low-extract input plan with the dead narrow immediate branch
+  plan instead of treating them as mutually exclusive. The specialized U8/U16 compare now resolves
+  the original source before choosing a pinned W view, and the redundant `BitExtract` emits
+  nothing. CoreMark's `sub edx,0x30; cmp dl,9; jbe` unit at `0x4034b0` shrinks by one instruction.
+  Exact 20k host work moves `4,103,652,536 -> 4,077,892,443` (`-25,760,093`, `-0.627736%`) with
+  CRC `0x382f`; the 100%-covered 2k join is `416,610,119 -> 414,034,026` (`-0.618346%`) with no
+  growing PC. Smallpt moves `368,937 -> 368,902`, and its weighted join moves `369,963 -> 369,928`
+  (`-35`, `-0.009460%`) with all shape, spill and PPM gates exact. A dedicated branch/extract test
+  and the existing dead-edge matrix pass on Mac and Orb.
 
 ## Orb loop
 
