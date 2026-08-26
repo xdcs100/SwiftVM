@@ -755,7 +755,11 @@ void JitTranslator::EmitMul(ir::Inst* inst) {
     auto right = inst->GetArg<ir::Operand>(1);
     auto type = left.Type();
     auto result = context.R(ir::Value{inst});
-    auto left_register = context.R(left, true);
+    auto pinned = left.Def() ? fused_pin_gpr_reads.find(left.Def())
+                             : fused_pin_gpr_reads.end();
+    Register left_register = pinned != fused_pin_gpr_reads.end()
+            ? Register{WRegister(pinned->second)}
+            : context.R(left, true);
     auto pseudo_flags = GetPseudoFlags(inst);
     auto right_operand = EmitOperand(right);
 

@@ -437,6 +437,9 @@ void JitTranslator::EmitBitExtract(ir::Inst* inst) {
 }
 
 void JitTranslator::EmitSignExtend(ir::Inst* inst) {
+    if (fused_pin_sign_extends.contains(inst)) {
+        return;
+    }
     auto value = inst->GetArg<ir::Value>(0);
     auto result = context.R(ir::Value{inst});
     auto fused = value.Def() ? fused_pin_gpr_reads.find(value.Def())

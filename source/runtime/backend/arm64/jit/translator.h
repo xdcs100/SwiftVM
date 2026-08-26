@@ -163,6 +163,7 @@ private:
         ir::Inst* read{};
         ir::Inst* narrow_extend{};
         ir::Inst* extend{};
+        bool signed_load{};
         std::vector<ir::Inst*> aliases{};
         std::optional<u16> source{};
         u16 target{};
@@ -603,8 +604,9 @@ private:
     std::unordered_set<ir::Inst*> normalized_bool_selects{};
     std::unordered_map<ir::Inst*, ir::Cond> direct_cond_selects{};
     std::unordered_set<ir::Inst*> fused_pin_zext32{};
-    // Narrow mapped reads whose single audited consumer can use the pinned W
-    // register directly (for example CL masking and U32 XOR).
+    std::unordered_set<ir::Inst*> fused_pin_sign_extends{};
+    // Narrow mapped values whose audited consumers can read the pinned W
+    // register directly.
     std::map<ir::Inst*, u16> fused_pin_gpr_reads{};
     std::map<ir::Inst*, ir::Value> narrow_flags_inputs{};
     std::map<ir::Inst*, u16> pinned_gpr_values{};

@@ -1300,6 +1300,7 @@ void JitTranslator::EmitSetHostGPR(ir::Inst* inst) {
                            reproved->narrow_extend ==
                                    copy->second.narrow_extend &&
                            reproved->extend == copy->second.extend &&
+                           reproved->signed_load == copy->second.signed_load &&
                            reproved->aliases == copy->second.aliases &&
                            reproved->source == copy->second.source &&
                            reproved->target == copy->second.target &&
@@ -1586,7 +1587,9 @@ void JitTranslator::EmitLoadMemory(ir::Inst* inst) {
                     (it->GetOp() == ir::OpCode::SignExtend ||
                      it->GetOp() == ir::OpCode::ZeroExtend32) &&
                     it->GetArg<ir::Value>(0).Def() == inst;
-            if (extending && context.SharesGPR(value, ir::Value{it.operator->()})) {
+            if (extending &&
+                (context.SharesGPR(value, ir::Value{it.operator->()}) ||
+                 fused_pin_sign_extends.contains(it.operator->()))) {
                 narrow_consumer = it.operator->();
             }
             break;

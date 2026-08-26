@@ -24,6 +24,7 @@ enum class PinnedReadShape {
     Copy,
     CopyU16,
     LoadU16,
+    SignedLoadU16,
     LoadU8Flags,
     OverwrittenWrite,
     OverwrittenWriteFault,
@@ -54,19 +55,33 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
     const auto source_index = overwritten_write
             ? 1u
             : (copy ? 20u : 22u);
-    if (shape == PinnedReadShape::CopyU16 || shape == PinnedReadShape::LoadU16) {
+    if (shape == PinnedReadShape::CopyU16 || shape == PinnedReadShape::LoadU16 ||
+        shape == PinnedReadShape::SignedLoadU16) {
         type = ValueType::U16;
     } else if (shape == PinnedReadShape::LoadU8Flags) {
         type = ValueType::U8;
     }
     auto value = shape == PinnedReadShape::LoadU16 ||
+                         shape == PinnedReadShape::SignedLoadU16 ||
                          shape == PinnedReadShape::LoadU8Flags
             ? block->LoadMemory(Operand{block->LoadImm(Imm{swift::u64{0x1000}})
                                                 .SetType(ValueType::U64)})
                       .SetType(type)
             : block->GetHostGPR(HostRegIndex(source_index), Imm{0u})
                       .SetType(type);
-    if (shape == PinnedReadShape::LoadU8Flags) {
+    if (shape == PinnedReadShape::SignedLoadU16) {
+        auto signed_value = block->SignExtend(value).SetType(ValueType::S32);
+        auto extended = block->ZeroExtend32To64(signed_value)
+                                .SetType(ValueType::U64);
+        block->SetHostGPR(extended, HostRegIndex(22), Imm{0u});
+        auto alias = block->BitExtract(extended, Imm{0u}, Imm{32u})
+                             .SetType(ValueType::U32);
+        auto widened = block->SignExtend(alias).SetType(ValueType::U64);
+        auto product = block->Mul(alias, Operand{Imm{3u}})
+                               .SetType(ValueType::U32);
+        block->StoreUniform(Uniform{64, ValueType::U64}, widened);
+        block->StoreUniform(Uniform{72, ValueType::U32}, product);
+    } else if (shape == PinnedReadShape::LoadU8Flags) {
         auto extended = block->ZeroExtend32To64(value).SetType(ValueType::U64);
         block->SetHostGPR(extended, HostRegIndex(23), Imm{0u});
         auto alias = block->BitExtract(extended, Imm{0u}, Imm{8u})
@@ -241,6 +256,16 @@ TEST_CASE("a pinned narrow load publishes directly into its fixed home") {
     REQUIRE(Count(lines, "uxth w22", "") == 0);
     REQUIRE(Count(lines, "mov w22", "") == 0);
     REQUIRE(Count(lines, "ldrb ", "[x22") == 1);
+}
+
+TEST_CASE("a signed narrow load publishes directly into its fixed home") {
+    const auto lines = EmitPinnedRead(PinnedReadShape::SignedLoadU16, false);
+    REQUIRE(Count(lines, "ldrsh w22", "") == 1);
+    REQUIRE(Count(lines, "sxth ", "") == 0);
+    REQUIRE(Count(lines, "mov w22", "") == 0);
+    REQUIRE(Count(lines, "ubfx ", "") == 0);
+    REQUIRE(Count(lines, "sxtw ", "w22") == 1);
+    REQUIRE(Count(lines, "mul w", "w22") == 1);
 }
 
 TEST_CASE("a pinned narrow load keeps a branch flag alias in its fixed home") {
