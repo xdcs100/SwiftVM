@@ -1707,18 +1707,28 @@ peepholes.
   assertions, and the narrow group passes 289 assertions on Mac and Orb. The promoted CoreMark and
   smallpt runs complete in 3.186 and 2.285 seconds; no stress run, diagnostic or new environment
   switch remains.
+- `b969f7d` lets a proved dead-edge EQ/NE self-test branch directly on the value's fixed GPR home.
+  The flags pass hands the narrow proof to the backend only for `BranchOnlyFlags(AND value,value)`,
+  and the backend requires an exact full-width publication, the same allocated register, and no
+  intervening write to that home before it removes the logical result and emits `CBZ/CBNZ`. The
+  exact CoreMark comparison keeps all 2,761 PCs / 2,864 versions and moves weighted
+  `3,473,279,625 -> 3,469,019,615` (`-4,260,010`, `-0.122651%`) with no growing PC and CRC `0x382f`.
+  `0x402683` and `0x4026b0` each lose one host instruction; the retained W67 census also applies the
+  same reduction to the 416.7M-entry `0x402808` loop. Smallpt keeps all 2,730 PCs / 2,998 versions,
+  the canonical PPM, and moves weighted `226,317 -> 226,306`. The focused fixed-home shape and full
+  dead-edge group pass 4 and 184 assertions on Mac and Orb. The post-refactor 2k screen completes in
+  2.394 seconds with 2,761 PCs / 2,864 versions and `346,944,290` dynamic host instructions; no
+  stress run, debug path or new environment switch remains.
 - Current default-region CoreMark, joined against the retained W67 guest-instruction/entry table,
-  covers `99.999694457%` of entries and measures `2.000428` SVM host instructions per guest
-  instruction. Reusing the unchanged FEX `f2e35f3` value `1.807` gives **`1.107044x`**, down from
+  covers `99.999694457%` of entries and measures `1.965544` SVM host instructions per guest
+  instruction. Reusing the unchanged FEX `f2e35f3` value `1.807` gives **`1.087739x`**, down from
   W67's `2.305x` and the later RE=0 refresh's `2.000x`. Dynamic return dispatch remains the largest
-  concentrated boundary pool. The W67-weighted top is now `0x402808` at nine host instructions for
-  three guest instructions across 416.7M retained entries. It is a load plus `test rax,rax; je`, but
-  the backend still emits a separate `ANDS` result before the condition; a proved branch-only
-  self-test should use `CBZ/CBNZ` directly. `0x402668` is second at eight for three. The CRC family
-  remains move-heavy after both safe fusions: `0x4039b8/0x403958` emit 24 instructions and 11 moves,
-  while `0x403990/0x403930/0x403908/0x4038e0` emit 23 and 10. Do not retry the failed multi-use
-  fixed-home snapshot reuse. Return-level work remains the dynamic `current_loc` publication or a
-  shorter invalidation-safe seven-instruction L1 hit path.
+  concentrated boundary pool. The W67-weighted instruction top is now the `0x402668` family at
+  eight host instructions for three guest instructions; `0x402808` also falls to eight for three.
+  The CRC family remains move-heavy after both safe fusions: `0x4039b8/0x403958` emit 24
+  instructions and 11 moves, while `0x403990/0x403930/0x403908/0x4038e0` emit 23 and 10. Do not
+  retry the failed multi-use fixed-home snapshot reuse. Return-level work remains the dynamic
+  `current_loc` publication or a shorter invalidation-safe seven-instruction L1 hit path.
 
 ## Orb loop
 
