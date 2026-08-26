@@ -14,6 +14,7 @@ namespace swift::runtime::backend::arm64 {
 
 void JitTranslator::EmitAdd(ir::Inst* inst) {
     auto left = inst->GetArg<ir::Value>(0);
+    auto left_input = ResolveNarrowFlagsInput(left, inst);
     auto right = inst->GetArg<ir::Operand>(1);
     auto pinned_w = [&](ir::Value value) -> std::optional<WRegister> {
         if (value.Def()) {
@@ -33,8 +34,9 @@ void JitTranslator::EmitAdd(ir::Inst* inst) {
             : (right_pinned ? Operand{*right_pinned} : EmitOperand(right));
     auto pseudo_flags = GetPseudoFlags(inst);
     auto result = FlagsResultRegister(inst, pseudo_flags);
-    auto left_pinned = pinned_w(left);
-    Register left_register = left_pinned ? Register{*left_pinned} : context.R(left, true);
+    auto left_pinned = pinned_w(left_input);
+    Register left_register = left_pinned ? Register{*left_pinned}
+                                         : context.R(left_input, true);
 
     if (!pseudo_flags.Null()) {
         const bool needs_nzcv = True(pseudo_flags.set & ir::Flags::NZCV);
@@ -45,7 +47,7 @@ void JitTranslator::EmitAdd(ir::Inst* inst) {
             // input only when linear scan tied it to the destination, because
             // AF still needs the original bit 4 after the result is produced.
             Register af_left = left_register.W();
-            if (context.SharesGPR(left, ir::Value{inst})) {
+            if (context.SharesGPR(left_input, ir::Value{inst})) {
                 auto saved = context.GetTmpX();
                 __ Mov(saved.W(), left_register.W());
                 af_left = saved.W();
@@ -162,6 +164,7 @@ void JitTranslator::EmitSub(ir::Inst* inst) {
         return;
     }
     auto left = inst->GetArg<ir::Value>(0);
+    auto left_input = ResolveNarrowFlagsInput(left, inst);
     auto right = inst->GetArg<ir::Operand>(1);
     auto right_pinned = right.GetLeft().IsValue()
             ? pinned_w(right.GetLeft().value)
@@ -169,14 +172,15 @@ void JitTranslator::EmitSub(ir::Inst* inst) {
     auto right_operand = right_pinned ? Operand{*right_pinned} : EmitOperand(right);
     auto pseudo_flags = GetPseudoFlags(inst);
     auto result = FlagsResultRegister(inst, pseudo_flags);
-    auto left_pinned = pinned_w(left);
-    Register left_register = left_pinned ? Register{*left_pinned} : context.R(left, true);
+    auto left_pinned = pinned_w(left_input);
+    Register left_register = left_pinned ? Register{*left_pinned}
+                                         : context.R(left_input, true);
 
     if (!pseudo_flags.Null()) {
         const bool needs_nzcv = True(pseudo_flags.set & ir::Flags::NZCV);
         if (needs_nzcv && ir::GetValueSizeByte(inst->ReturnType()) <= 2) {
             Register af_left = left_register.W();
-            if (context.SharesGPR(left, ir::Value{inst})) {
+            if (context.SharesGPR(left_input, ir::Value{inst})) {
                 auto saved = context.GetTmpX();
                 __ Mov(saved.W(), left_register.W());
                 af_left = saved.W();
@@ -265,7 +269,8 @@ void JitTranslator::EmitSub(ir::Inst* inst) {
 void JitTranslator::EmitNeg(ir::Inst* inst) {
     ASSERT(context.GetFeatures().int_imm_fold);
     const auto source = inst->GetArg<ir::Value>(0);
-    auto source_reg = context.R(source, true);
+    const auto source_input = ResolveNarrowFlagsInput(source, inst);
+    auto source_reg = context.R(source_input, true);
     auto pseudo_flags = GetPseudoFlags(inst);
     auto result = FlagsResultRegister(inst, pseudo_flags);
     Register zero = result.Is64Bits() ? Register{xzr} : Register{wzr};
@@ -273,7 +278,7 @@ void JitTranslator::EmitNeg(ir::Inst* inst) {
     Register af_source = source_reg;
     const bool save_af = !pseudo_flags.branch_only &&
                          True(pseudo_flags.set & ir::Flags::AuxiliaryCarry);
-    if (save_af && context.SharesGPR(source, ir::Value{inst})) {
+    if (save_af && context.SharesGPR(source_input, ir::Value{inst})) {
         auto saved = context.GetTmpX();
         __ Mov(saved, source_reg);
         af_source = source_reg.Is64Bits() ? saved.X() : saved.W();

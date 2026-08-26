@@ -756,6 +756,7 @@ JitTranslator::PrepareBlockState(ir::Block* block) {
     PreparePinnedGPRCopies(block);
     PrepareDeadEdgeIntegerBranch(block);
     PrepareDeadNarrowImmediateBranch();
+    PrepareNarrowFlagsInputs(block);
     PrepareBooleanSelects(block);
     resident_scalar_fpr_analysis.Analyze(block);
     for (auto& inst : block->GetInstList()) {

@@ -171,6 +171,11 @@ private:
     void PrepareDeadPinnedGPRWrites(ir::Block* block);
     [[nodiscard]] bool IsDeadPinnedGPRWrite(ir::Inst* inst) const;
     void PreparePinnedGPRCopies(ir::Block* block);
+    void PrepareNarrowFlagsInputs(ir::Block* block);
+    [[nodiscard]] std::optional<ir::Value>
+    MatchNarrowFlagsInput(ir::Inst* extract);
+    [[nodiscard]] ir::Value ResolveNarrowFlagsInput(ir::Value value,
+                                                    ir::Inst* consumer);
     [[nodiscard]] std::optional<PinnedGPRCopy>
     MatchPinnedGPRCopy(ir::Inst* inst) const;
     [[nodiscard]] std::optional<XRegister>
@@ -589,6 +594,7 @@ private:
     // Narrow mapped reads whose single audited consumer can use the pinned W
     // register directly (for example CL masking and U32 XOR).
     std::map<ir::Inst*, u16> fused_pin_gpr_reads{};
+    std::map<ir::Inst*, ir::Value> narrow_flags_inputs{};
     std::map<ir::Inst*, u16> pinned_gpr_values{};
     std::map<ir::Inst*, PinnedGPRCopy> pinned_gpr_copies{};
     std::unordered_set<ir::Inst*> dead_pinned_gpr_writes{};
