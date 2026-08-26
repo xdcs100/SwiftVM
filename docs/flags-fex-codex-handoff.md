@@ -1656,16 +1656,29 @@ peepholes.
   both binaries, so it was used only as a candidate-delta audit rather than claimed as a passing
   suite. The promoted 20k and smallpt runs complete in 3.055 and 2.361 seconds; no stress run,
   diagnostic or new environment switch remains.
+- `4655e75` lets an adjacent same-width U8/U16 flags-producing `ADD/SUB` read fixed x6-x9 directly.
+  The proof requires the pinned read and arithmetic to be adjacent, the producer to request host
+  NZCV, and the value to have one exact consumer; ordinary narrow arithmetic and snapshot-breaking
+  writes retain the materialized path. CoreMark's two dominant U16 comparisons at `0x402814` and
+  `0x402668` each lose `UBFX + UXTH`, shrinking 13 to 11 and 10 to eight host instructions. Exact
+  20k raw host work moves `3,476,032,828 -> 3,467,792,816`, and the 100%-covered weighted comparison
+  moves `3,476,032,843 -> 3,467,792,831` (`-8,240,012`, `-0.237052%`) with no growing PC and CRC
+  `0x382f`. Units/versions remain 2,761 / 2,864. Smallpt keeps all 2,733 PCs / 2,985 versions and
+  the canonical PPM while moving raw `227,552 -> 227,538` and weighted `227,570 -> 227,556`.
+  New fixed-home static/runtime coverage passes four and two assertions, while pinned and narrow
+  groups pass 83 and 282 assertions on Mac and Orb.
+  The promoted 20k and smallpt runs complete in 3.823 and 3.199 seconds; no stress run, diagnostic
+  or new environment switch remains.
 - Current default-region CoreMark, joined against the retained W67 guest-instruction/entry table,
-  covers `99.999694457%` of entries and measures `2.154192` SVM host instructions per guest
-  instruction. Reusing the unchanged FEX `f2e35f3` value `1.807` gives **`1.192137x`**, down from
+  covers `99.999694457%` of entries and measures `2.120248` SVM host instructions per guest
+  instruction. Reusing the unchanged FEX `f2e35f3` value `1.807` gives **`1.173353x`**, down from
   W67's `2.305x` and the later RE=0 refresh's `2.000x`. Dynamic return dispatch remains the largest
-  concentrated boundary pool, but the W67-weighted next head is now the narrow compare/flags family.
-  `0x402814` still emits 13 host instructions for four guest instructions across 418.65M retained
-  entries; `0x402668` emits 10 for three across 434.25M, and `0x402808` emits nine for three across
-  416.7M. The publication transport is gone at `0x402814`; its remaining cost is the other pinned
-  U16 input extraction plus narrow flags alignment/publication. Audit that flags mechanism before
-  widening another fixed-home consumer whitelist. Return-level work remains the dynamic
+  concentrated boundary pool, while the W67-weighted top remains `0x402814` at 11 host instructions
+  for four guest instructions across 418.65M retained entries. `0x402808` is now second at nine for
+  three across 416.7M, followed by the move-heavy `0x4039b8` and `0x403990`; `0x402668` is down to
+  eight for three. Both fixed-home transports are gone from the U16 compare family. Its remaining
+  cost is now genuine narrow flags alignment/publication and region-edge control, so audit those
+  mechanisms rather than widening another GetHost whitelist. Return-level work remains the dynamic
   `current_loc` publication or a shorter invalidation-safe seven-instruction L1 hit path.
 
 ## Orb loop
