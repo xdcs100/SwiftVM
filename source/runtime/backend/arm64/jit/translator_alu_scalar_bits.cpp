@@ -400,6 +400,15 @@ bool JitTranslator::ReproveLow32Copy(ir::Inst* inst) const {
 }
 
 void JitTranslator::EmitBitExtract(ir::Inst* inst) {
+    if (auto fused = fused_narrow_masked_extracts.find(inst);
+        fused != fused_narrow_masked_extracts.end()) {
+        const auto plan = narrow_masked_inputs.find(fused->second);
+        const auto reproved = MatchNarrowMaskedInput(fused->second);
+        ASSERT_MSG(plan != narrow_masked_inputs.end() && reproved &&
+                           *reproved == plan->second && reproved->extract == inst,
+                   "narrow masked input proof diverged at IR {}", inst->Id());
+        return;
+    }
     if (auto value = pinned_memory_values.find(inst);
         value != pinned_memory_values.end()) {
         ASSERT_MSG(MatchPinnedMemoryValue(inst) == value->second,

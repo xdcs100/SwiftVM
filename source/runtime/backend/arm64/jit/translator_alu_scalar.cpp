@@ -430,6 +430,13 @@ void JitTranslator::EmitAnd(ir::Inst* inst) {
         return;
     }
     auto left = inst->GetArg<ir::Value>(0);
+    if (auto masked = narrow_masked_inputs.find(inst);
+        masked != narrow_masked_inputs.end()) {
+        const auto reproved = MatchNarrowMaskedInput(inst);
+        ASSERT_MSG(reproved && *reproved == masked->second,
+                   "narrow masked input proof diverged at IR {}", inst->Id());
+        left = reproved->source;
+    }
     auto right = inst->GetArg<ir::Operand>(1);
     auto pinned_w = [&](ir::Value value) -> std::optional<WRegister> {
         if (value.Def()) {

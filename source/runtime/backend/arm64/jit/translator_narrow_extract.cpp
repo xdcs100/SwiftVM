@@ -82,10 +82,57 @@ JitTranslator::MatchNarrowExtractExtension(ir::Inst* wrapper) const {
     };
 }
 
+std::optional<JitTranslator::NarrowMaskedInput>
+JitTranslator::MatchNarrowMaskedInput(ir::Inst* consumer) const {
+    if (!consumer || consumer->GetOp() != ir::OpCode::And) {
+        return std::nullopt;
+    }
+    auto left = consumer->GetArg<ir::Value>(0);
+    auto* extract = left.Def();
+    const u32 width = ir::GetValueSizeByte(consumer->ReturnType());
+    if (!extract || extract->GetOp() != ir::OpCode::BitExtract ||
+        (width != sizeof(u8) && width != sizeof(u16)) ||
+        ir::GetValueSizeByte(left.Type()) != width ||
+        extract->GetArg<ir::Imm>(1).Get() != 0 ||
+        extract->GetArg<ir::Imm>(2).Get() != width * 8 ||
+        extract->GetUses() != 1 || extract->GetUses(false) != 1 ||
+        !extract->GetArg<ir::Value>(0).Defined() ||
+        fused_pin_gpr_reads.contains(extract) ||
+        narrow_flags_inputs.contains(extract) ||
+        context.IsWidthChainCoalesced(extract->Id()) ||
+        context.IsLow32CopyCoalesced(extract->Id()) ||
+        scalar_identity_analysis.InputDiscarded(extract)) {
+        return std::nullopt;
+    }
+    const auto right = consumer->GetArg<ir::Operand>(1);
+    u64 mask{};
+    if (right.IsImm()) {
+        mask = right.GetLeft().imm.Get();
+    } else if (right.GetLeft().IsValue() && right.GetRight().Null()) {
+        auto* definition = right.GetLeft().value.Def();
+        if (!definition || definition->GetOp() != ir::OpCode::LoadImm) {
+            return std::nullopt;
+        }
+        mask = definition->GetArg<ir::Imm>(0).Get();
+    } else {
+        return std::nullopt;
+    }
+    if ((mask >> (width * 8)) != 0) {
+        return std::nullopt;
+    }
+    return NarrowMaskedInput{
+            .extract = extract,
+            .source = extract->GetArg<ir::Value>(0),
+            .width = static_cast<u8>(width),
+    };
+}
+
 void JitTranslator::PrepareNarrowExtractExtensions(ir::Block* block) {
     narrow_extract_extensions.clear();
     fused_narrow_extracts.clear();
     fused_narrow_extract_shifts.clear();
+    narrow_masked_inputs.clear();
+    fused_narrow_masked_extracts.clear();
     for (auto& inst : block->GetInstList()) {
         auto plan = MatchNarrowExtractExtension(&inst);
         if (!plan) {
@@ -96,6 +143,14 @@ void JitTranslator::PrepareNarrowExtractExtensions(ir::Block* block) {
         if (plan->shift) {
             fused_narrow_extract_shifts.emplace(plan->shift, &inst);
         }
+    }
+    for (auto& inst : block->GetInstList()) {
+        auto plan = MatchNarrowMaskedInput(&inst);
+        if (!plan) {
+            continue;
+        }
+        narrow_masked_inputs.emplace(&inst, *plan);
+        fused_narrow_masked_extracts.emplace(plan->extract, &inst);
     }
 }
 

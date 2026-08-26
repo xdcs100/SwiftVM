@@ -184,6 +184,15 @@ private:
     };
     [[nodiscard]] std::optional<NarrowExtractExtension>
     MatchNarrowExtractExtension(ir::Inst* wrapper) const;
+    struct NarrowMaskedInput {
+        ir::Inst* extract{};
+        ir::Value source{};
+        u8 width{};
+
+        bool operator==(const NarrowMaskedInput&) const = default;
+    };
+    [[nodiscard]] std::optional<NarrowMaskedInput>
+    MatchNarrowMaskedInput(ir::Inst* consumer) const;
     void PrepareNarrowExtractExtensions(ir::Block* block);
     void PrepareNarrowFlagsInputs(ir::Block* block);
     [[nodiscard]] std::optional<ir::Value>
@@ -630,6 +639,8 @@ private:
     std::map<ir::Inst*, NarrowExtractExtension> narrow_extract_extensions{};
     std::map<ir::Inst*, ir::Inst*> fused_narrow_extracts{};
     std::map<ir::Inst*, ir::Inst*> fused_narrow_extract_shifts{};
+    std::map<ir::Inst*, NarrowMaskedInput> narrow_masked_inputs{};
+    std::map<ir::Inst*, ir::Inst*> fused_narrow_masked_extracts{};
     std::unordered_set<ir::Inst*> dead_pinned_gpr_writes{};
     std::map<ir::Inst*, ScalarFPRPublication> scalar_load_fpr_fusions{};
     std::map<ir::Inst*, ScalarFPRPublication> scalar_value_fpr_fusions{};
