@@ -59,6 +59,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 | `fa1768a` | Reuse the retained dynamic return target in both RSB pop formats instead of reloading `State::current_loc` |
 | `729b826` | Route same-module static `SetLocation + ReturnToDispatch` exits through tracked direct-link sites, with the prior L2/dispatcher fallbacks retained |
 | `24f9d49` | Skip RSB pushes in indirect-L1 modules and route retained return targets through the signal-safe inline L1; L1-off modules keep the exact RSB path |
+| `2829a8d` | Back each active RSB with a 4 MiB guarded mapping and recover lower/upper guard faults by resetting the live x25 pointer in the interrupted context |
 | `b3998d5` | Use the next region block for cycle-polled conditional layout without falling through into per-block cold stubs |
 | `3ec9582` | Pair the production indirect-L1 request and cache-base loads; confirm observed signals through the shared acquire-checking trampoline |
 | `e74e734` | Keep a complete V128 producer in its resident home through safe post-publication SSA uses; reject later home writes and multi-home remaps |
@@ -1747,6 +1748,15 @@ peepholes.
   the pinned group passes 90 assertions on Mac and Orb. CoreMark and smallpt complete in 3.357 and
   2.353 seconds; smallpt remains byte-identical at 2,730 PCs / 2,998 versions with the canonical
   PPM. No stress run, debug path or new environment switch remains.
+- `2829a8d` replaces Runtime's inline 64-frame RSB storage with a 4 MiB usable mapping bracketed by
+  inaccessible host pages. The stack starts at the midpoint so either call overflow or unmatched
+  return growth reaches a guard. Runtime fault recovery claims the address only after the fault PC
+  resolves to the current JIT and x25 is adjacent to that Runtime's guard, resets x25 to the empty
+  midpoint in `ucontext`, and retries the interrupted instruction. The existing explicit RSB bounds
+  remain for this infrastructure stage, so default code shape and benchmark totals do not change.
+  Real `STP` lower-guard and `LDP` upper-guard recovery passes five assertions on Mac and Orb; the
+  existing guest PageFatal case also passes five assertions on both. No stress run, diagnostic or
+  environment switch was added.
 - Current default-region CoreMark, joined against the retained W67 guest-instruction/entry table,
   still covers `99.999694457%` of entries. Applying the known 434.25M-entry `0x402668` reduction to
   the previous exact denominator gives a conservative estimate of `1.929192` SVM host instructions
@@ -1759,8 +1769,9 @@ peepholes.
   for three.
   The CRC family remains move-heavy after both safe fusions: `0x4039b8/0x403958` emit 24
   instructions and 11 moves, while `0x403990/0x403930/0x403908/0x4038e0` emit 23 and 10. Do not
-  retry the failed multi-use fixed-home snapshot reuse. Return-level work remains the dynamic
-  `current_loc` publication or a shorter invalidation-safe seven-instruction L1 hit path.
+  retry the failed multi-use fixed-home snapshot reuse. Return-level work can now use the guarded
+  stack substrate to remove explicit bounds, but should first measure the lower-risk terminal-only
+  deferred `current_loc` publication against a shared cold publisher.
 
 ## Orb loop
 
