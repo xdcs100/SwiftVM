@@ -607,3 +607,42 @@ TEST_CASE("dead-edge proof follows one direct call to a dominating flag write") 
     REQUIRE(rejected_markers == 0);
     REQUIRE(rejected_dependencies.empty());
 }
+
+TEST_CASE("dead-edge proof follows one direct jump to a dominating flag write") {
+    auto decode_marker = [](const std::array<swift::u8, 20>& code) {
+        DirectMemory memory;
+        const auto address = reinterpret_cast<swift::VAddr>(code.data());
+        IntrusivePtr<Block> block{new Block(0, Location{address})};
+        Assembler assembler{block.get()};
+        FeatureSet features{};
+        swift::x86::X64Decoder decoder{
+                address, &memory, &assembler, true, Arm64Features::FlagM,
+                false, false, features};
+        decoder.Decode();
+        const auto markers = std::count_if(
+                block->GetInstList().begin(), block->GetInstList().end(),
+                [](const Inst& inst) {
+                    return inst.GetOp() == OpCode::BranchOnlyEdges;
+                });
+        return std::pair{markers, block->GetGuestCodeDependencies()};
+    };
+
+    std::array<swift::u8, 20> code{
+            0x3c, 0x50, 0x75, 0x04, 0xeb, 0x0a, 0x90, 0x90,
+            0x48, 0x85, 0xc0, 0xf4, 0x90, 0x90, 0x90, 0x90,
+            0x31, 0xc9, 0xf4, 0x90,
+    };
+    const auto [markers, dependencies] = decode_marker(code);
+    REQUIRE(markers == 1);
+    REQUIRE(dependencies.size() == 1);
+    REQUIRE(dependencies[0].start.Value() ==
+            reinterpret_cast<swift::VAddr>(code.data()) + 4);
+    REQUIRE(dependencies[0].end.Value() ==
+            reinterpret_cast<swift::VAddr>(code.data()) + 18);
+
+    code[16] = 0x74;
+    code[17] = 0x00;
+    const auto [rejected_markers, rejected_dependencies] = decode_marker(code);
+    REQUIRE(rejected_markers == 0);
+    REQUIRE(rejected_dependencies.empty());
+}

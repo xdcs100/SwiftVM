@@ -1149,11 +1149,11 @@ bool X64Decoder::FlagsBranchOnlyEnabled() const {
 }
 
 X64Decoder::SuccessorFlagsProof X64Decoder::ProveSuccessorFlagsDead(
-        VAddr successor, u32 direct_call_depth) const {
+        VAddr successor, u32 direct_transfer_depth) const {
     // This is the block/lazy-function counterpart of the HIR CFG fixed point:
-    // prove only a very small straight-line prefix. One direct call may redirect
-    // the proof to a callee prefix whose bytes become an SMC dependency. Other
-    // control instructions, unknown opcodes, or flag reads fail conservatively.
+    // prove only a very small straight-line prefix. One direct transfer may
+    // redirect the proof to a prefix whose bytes become an SMC dependency.
+    // Other control instructions, unknown opcodes, or flag reads fail.
     constexpr u16 kArithmeticFlags = D_CF | D_PF | D_AF | D_ZF | D_SF | D_OF;
     u16 incoming = kArithmeticFlags;
     VAddr cursor = successor;
@@ -1203,7 +1203,7 @@ X64Decoder::SuccessorFlagsProof X64Decoder::ProveSuccessorFlagsDead(
         }
         const auto flow = META_GET_FC(insn.meta);
         if (flow == FC_CALL) {
-            if (direct_call_depth != 0 || insn.opcode != I_CALL ||
+            if (direct_transfer_depth != 0 || insn.opcode != I_CALL ||
                 insn.ops[0].type != O_PC ||
                 !runtime::GetSvmConfig().jit_cache.empty()) {
                 return {};
@@ -1211,7 +1211,7 @@ X64Decoder::SuccessorFlagsProof X64Decoder::ProveSuccessorFlagsDead(
             const auto next = (cursor + insn.size) & addr_mask;
             const auto target = (next + insn.imm.sqword) & addr_mask;
             const auto callee = ProveSuccessorFlagsDead(
-                    target, direct_call_depth + 1);
+                    target, direct_transfer_depth + 1);
             if (!callee.dead) {
                 return {};
             }
@@ -1219,6 +1219,27 @@ X64Decoder::SuccessorFlagsProof X64Decoder::ProveSuccessorFlagsDead(
                     .has_dependency = true,
                     .dependency_start = target,
                     .covered_end = callee.covered_end};
+        }
+        if (flow == FC_UNC_BRANCH) {
+            if (direct_transfer_depth != 0 || insn.opcode != I_JMP ||
+                insn.ops[0].type != O_PC ||
+                !runtime::GetSvmConfig().jit_cache.empty()) {
+                return {};
+            }
+            const auto next = (cursor + insn.size) & addr_mask;
+            const auto target = (next + insn.imm.sqword) & addr_mask;
+            const auto tail = ProveSuccessorFlagsDead(
+                    target, direct_transfer_depth + 1);
+            if (!tail.dead) {
+                return {};
+            }
+            if (next < cursor || tail.covered_end < target) {
+                return {};
+            }
+            return {.dead = true,
+                    .has_dependency = true,
+                    .dependency_start = std::min(successor, target),
+                    .covered_end = std::max(next, tail.covered_end)};
         }
         if (flow != FC_NONE) {
             return {};

@@ -425,7 +425,7 @@ private:
     [[nodiscard]] bool FlagsBranchOnlyEnabled() const;
     [[nodiscard]] bool FlagsFcmpFuseEnabled() const;
     [[nodiscard]] SuccessorFlagsProof ProveSuccessorFlagsDead(
-            VAddr successor, u32 direct_call_depth = 0) const;
+            VAddr successor, u32 direct_transfer_depth = 0) const;
     [[nodiscard]] bool FlagsFcmpCompactEnabled() const {
         return flags_fcmp_compact_;
     }
