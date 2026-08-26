@@ -1216,6 +1216,20 @@ peepholes.
   Smallpt stays exact at `399,441`, and CoreMark stays at `5,868,557,582` with 2,846 PCs / 3,379
   versions and `crcfinal=0x382f`. Local and Orb scalar focuses pass 22 cases with 1,020 / 1,025
   assertions. This stage ran no long benchmark, stress test or full suite.
+- `be4b705` recognizes a low-lane `VecExtract64` whose V128 source is published to a resident FPR
+  before its sole U64 memory store. The exact full-width publication must precede the store; opaque
+  barriers and any later non-equivalent write to that home reject the plan. The extract is then
+  removed and ARM64 stores the resident D register directly. Against `0512649`, the bounded c-ray
+  static common set falls `214,155 -> 214,138`: 14 PCs shrink, none grow. On the explicitly partial
+  22.719321%-covered retained-entry subset, host work falls `9,357,174,698 -> 9,345,606,001`
+  (`-11,568,697`, `-0.123635%`), led by `tform_point`, `tform_vector`, `intersectSphere` and
+  `tform_vector_transpose`. The deterministic c-ray oracle remains SHA
+  `89ccd2e15dba67378197d05524a6223795f8b8ab2d11f4d40deaef4af9f35c6e`. Smallpt keeps 2,802 PCs /
+  3,435 versions, zero spills and the exact PPM while moving `399,441 -> 399,439`; CoreMark remains
+  `5,868,557,582` with `crcfinal=0x382f`. The low64 focus passes five assertions on Mac and Orb;
+  the scalar focus passes 1,020 / 1,025 assertions. A broader direct-resident-read variant added no
+  c-ray static reduction and was removed. This stage ran no long benchmark, stress test or full
+  suite.
 
 ## Orb loop
 
