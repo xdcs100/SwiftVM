@@ -123,6 +123,41 @@ std::vector<std::string> Disassemble(arm64::JitContext& context) {
     return instructions;
 }
 
+std::vector<std::string> EmitCompoundLogicalClear(bool exact_clear) {
+    Config config{
+            .loc_start = 0,
+            .loc_end = 1ull << 48,
+            .enable_jit = true,
+            .has_local_operation = false,
+            .backend_isa = kArm64,
+    };
+    AddressSpace address_space{config};
+    auto module = address_space.GetDefaultModule();
+
+    IntrusivePtr<Block> block{new Block(0, Location{0x8a20})};
+    auto source = block->LoadUniform<TypedValue<ValueType::U32>>(
+            Uniform{0, ValueType::U32});
+    auto result = block->And(source, Operand{source}).SetType(ValueType::U32);
+    const auto clear = exact_clear
+            ? Flags::CV | Flags::AuxiliaryCarry
+            : Flags::CV;
+    block->ClearFlags(clear);
+    block->SaveFlags(result, Flags::NZ | Flags::Parity);
+    block->SetTerminal(terminal::ReturnToDispatch{});
+    block->ReIdInstr();
+
+    FeatureSet features{};
+    RegAlloc alloc{block->MaxInstrId(),
+                   address_space.GetTrampolines().GetGPRRegs(),
+                   address_space.GetTrampolines().GetFPRRegs(), features};
+    RegisterAllocPass::Run(block.get(), &alloc, false, features);
+    arm64::JitContext context{module, alloc};
+    arm64::JitTranslator translator{context};
+    translator.Translate(block.get());
+    context.Finish();
+    return Disassemble(context);
+}
+
 std::vector<std::string> EmitParityOnlyLogicalBeforeSelect() {
     Config config{
             .loc_start = 0,
@@ -181,6 +216,15 @@ TEST_CASE("parity-only logical publication leaves NZCV clean") {
     REQUIRE_FALSE(Contains(instructions, "tst "));
     REQUIRE(Contains(instructions, "cmp "));
     REQUIRE(Contains(instructions, "csel "));
+}
+
+TEST_CASE("logical NZ publication absorbs an adjacent CVAF clear") {
+    const auto exact = EmitCompoundLogicalClear(true);
+    REQUIRE(Contains(exact, "#26, #6"));
+    REQUIRE_FALSE(Contains(exact, "bfc x26, #26, #4"));
+
+    const auto partial = EmitCompoundLogicalClear(false);
+    REQUIRE_FALSE(Contains(partial, "#26, #6"));
 }
 
 TEST_CASE("narrow register self tests skip the redundant AND") {

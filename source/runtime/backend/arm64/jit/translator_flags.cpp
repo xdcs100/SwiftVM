@@ -451,6 +451,21 @@ void JitTranslator::SaveHostFlags(HostFlags host, ir::Flags guest) {
 void JitTranslator::ClearFlags(ir::Flags guest) {
     const auto cv_af = ir::Flags::CV | ir::Flags::AuxiliaryCarry;
     const bool clear_cv_af = (guest & cv_af) == cv_af;
+    const bool compound_logical = compound_logical_clear_pending &&
+            guest == cv_af && FlagsRegsEnabled() && nzcv_dirty &&
+            nzcv_requested == HostFlags::NZ;
+    compound_logical_clear_pending = false;
+    if (compound_logical) {
+        PublishFlagsToken();
+        const auto scratch = context.GetSharedTmpX();
+        constexpr u32 width = HostFlagsBit::N - HostFlagsBit::AuxiliaryCarry + 1;
+        __ Mrs(scratch, NZCV);
+        __ Ubfx(scratch, scratch, HostFlagsBit::AuxiliaryCarry, width);
+        __ Bfi(flags, scratch, HostFlagsBit::AuxiliaryCarry, width);
+        nzcv_dirty = false;
+        nzcv_requested = {};
+        return;
+    }
     if (True(guest & ir::Flags::NZCV)) {
         // ClearFlags is an independent IR write, not merely an annotation on
         // the preceding flag producer. Flag elimination can delete a dead
@@ -817,6 +832,8 @@ void JitTranslator::EmitBranchOnlyFlags(ir::Inst* inst) {
 
 void JitTranslator::EmitClearFlags(ir::Inst* inst) {
     // See EmitSaveFlags: merge instead of asserting on a pending window.
+    compound_logical_clear_pending =
+            flags_clear == ir::Flags::None && MatchCompoundLogicalClear(inst);
     flags_clear |= inst->GetArg<ir::Flags>(0);
 }
 

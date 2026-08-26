@@ -554,6 +554,7 @@ private:
     void MaterializeFlagsTokenResult();
     void InvalidateFlagsToken();
     void EmitSplitFlagsPublish();
+    [[nodiscard]] bool MatchCompoundLogicalClear(ir::Inst* inst) const;
     void ParkFlagsHot();
     void UnparkFlagsHot();
     void EmitFlagsPublishedVeneer(ir::Block* block);
@@ -591,6 +592,7 @@ private:
     // Terminals may emit several successors. Keep the compile-time token
     // live so every arm packs; mid-block Merge still consumes it.
     bool flags_token_keep{false};
+    bool compound_logical_clear_pending{false};
     // Which host NZCV bits were actually requested by SaveFlags since the
     // last MergeNZCV. Only these bits are merged; the rest keep their
     // existing value in the flags register (so a ClearFlags(CF) between

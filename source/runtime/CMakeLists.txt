@@ -152,6 +152,7 @@ add_library(swift_runtime STATIC
         backend/arm64/jit/translator_x87.cpp
         backend/arm64/jit/translator_flags.cpp
         backend/arm64/jit/translator_flags_abi.cpp
+        backend/arm64/jit/translator_compound_flags.cpp
         backend/arm64/jit/translator_dead_edge_branch.cpp
         backend/arm64/jit/translator_pinned_self_write.cpp
         backend/arm64/jit/translator_pinned_memory.cpp

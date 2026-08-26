@@ -747,6 +747,7 @@ JitTranslator::PrepareBlockState(ir::Block* block) {
     }
     static_next_loc.reset();
     dynamic_next_loc.reset();
+    compound_logical_clear_pending = false;
     // Function mode keeps one function-sized suppression bitmap. Grow it
     // before the per-block backedge proof marks the two sunk IR instructions.
     disable_instructions.resize(
