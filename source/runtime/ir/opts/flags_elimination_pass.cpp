@@ -21,6 +21,7 @@
 
 #include "flags_elimination_pass.h"
 
+#include <algorithm>
 #include <cstring>
 #include <optional>
 #include <unordered_map>
@@ -467,6 +468,7 @@ bool TryBranchOnly(Block* block,
 
     std::vector<Inst*> flag_writes;
     std::vector<Inst*> polarity_stores;
+    std::vector<Inst*> carry_inversions;
     Inst* primary = nullptr;
     for (size_t i = producer_begin; i < producer_advance; ++i) {
         Inst* inst = insts[i];
@@ -488,6 +490,9 @@ bool TryBranchOnly(Block* block,
                 }
                 break;
             }
+            case OpCode::InvertCarry:
+                carry_inversions.push_back(inst);
+                break;
             case OpCode::TestFlags:
             case OpCode::TestNotFlags:
             case OpCode::GetFlags:
@@ -495,7 +500,6 @@ bool TryBranchOnly(Block* block,
             case OpCode::Sbb:
             case OpCode::SetCarry:
             case OpCode::SetOverflow:
-            case OpCode::InvertCarry:
             case OpCode::PublishFCmpFlags:
             case OpCode::CondSelect:
             case OpCode::CondSet:
@@ -538,8 +542,36 @@ bool TryBranchOnly(Block* block,
         }
     }
 
+    if (!carry_inversions.empty()) {
+        const auto value = primary ? primary->GetArg<Value>(0) : Value{};
+        const u32 width = value.Def()
+                ? GetValueSizeByte(value.Def()->ReturnType())
+                : 0;
+        const auto right = value.Def() && value.Def()->GetOp() == OpCode::Sub
+                ? value.Def()->GetArg<Operand>(1)
+                : Operand{};
+        auto* right_value = right.GetLeft().IsValue()
+                ? right.GetLeft().value.Def()
+                : nullptr;
+        const auto primary_it = primary
+                ? std::find(insts.begin(), insts.end(), primary)
+                : insts.end();
+        const bool adjacent = primary_it != insts.end() &&
+                std::next(primary_it) != insts.end() &&
+                *std::next(primary_it) == carry_inversions.front();
+        if (carry_inversions.size() != 1 || flag_writes.size() != 1 ||
+            !adjacent || width > sizeof(u16) ||
+            !right.GetRight().Null() || right.GetOp() != OperandOp::Plus ||
+            !right_value || right_value->GetOp() != OpCode::LoadMemory ||
+            True(required & Flags::Carry)) {
+            stats.reject_shape++;
+            return false;
+        }
+    }
+
     std::unordered_set<Inst*> victims(flag_writes.begin(), flag_writes.end());
     victims.insert(polarity_stores.begin(), polarity_stores.end());
+    victims.insert(carry_inversions.begin(), carry_inversions.end());
     if (edge_marker) {
         victims.insert(edge_marker);
     }
