@@ -21,6 +21,7 @@ enum class PinnedReadShape {
     Or,
     SelfAnd,
     SelfWrite,
+    MemoryAddress,
     SignExtend,
     StoreMemory,
     Subtract,
@@ -53,6 +54,15 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
         auto loaded = block->LoadMemory(Operand{address, Imm{8u}})
                               .SetType(ValueType::U8);
         block->StoreUniform(Uniform{64, ValueType::U8}, loaded);
+    } else if (shape == PinnedReadShape::MemoryAddress) {
+        auto address = block->GetOperand(Operand{value}).SetType(ValueType::U64);
+        if (reuse_read) {
+            auto replacement = block->LoadImm(Imm{swift::u64{0x1000}})
+                                       .SetType(ValueType::U64);
+            block->SetHostGPR(replacement, HostRegIndex(22), Imm{0u});
+        }
+        auto loaded = block->LoadMemory(Operand{address}).SetType(ValueType::U32);
+        block->StoreUniform(Uniform{64, ValueType::U32}, loaded);
     } else if (shape == PinnedReadShape::SelfAnd) {
         auto result = block->And(value, Operand{value}).SetType(ValueType::U32);
         block->SaveFlags(result, Flags::Negate | Flags::Zero | Flags::Parity);
@@ -68,7 +78,7 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
                                .SetType(ValueType::U64);
         block->StoreMemory(Operand{address}, value);
     }
-    if (reuse_read) {
+    if (reuse_read && shape != PinnedReadShape::MemoryAddress) {
         block->StoreUniform(Uniform{0, ValueType::U32}, value);
     }
     block->SetTerminal(terminal::ReturnToDispatch{});
@@ -152,6 +162,18 @@ TEST_CASE("a pinned low-32 self-write clears its high half in one instruction") 
     REQUIRE(Count(lines, "mov w22, w22", "") == 1);
     REQUIRE(Count(lines, "mov w", "w22") == 1);
     REQUIRE(Count(lines, "ldrb ", "[x22") == 1);
+}
+
+TEST_CASE("a pinned GPR supplies a sole memory address without a copy") {
+    const auto direct = EmitPinnedRead(PinnedReadShape::MemoryAddress, false,
+                                       ValueType::U64);
+    REQUIRE(Count(direct, "mov x", "x22") == 0);
+    REQUIRE(Count(direct, "ldr w", "[x22]") == 1);
+
+    const auto overwritten = EmitPinnedRead(PinnedReadShape::MemoryAddress, true,
+                                            ValueType::U64);
+    REQUIRE(Count(overwritten, "ldr w", "[x22]") == 0);
+    REQUIRE(Count(overwritten, "mov x", ", x22") == 1);
 }
 
 TEST_CASE("a later pinned GPR snapshot use keeps the read move") {

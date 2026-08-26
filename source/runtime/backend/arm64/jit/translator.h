@@ -170,6 +170,8 @@ private:
     MatchPinnedGPRSelfWrite(ir::Inst* inst) const;
     [[nodiscard]] std::optional<XRegister>
     ResolvePinnedGPRValue(ir::Value value) const;
+    [[nodiscard]] std::optional<u16>
+    MatchPinnedMemoryAddress(ir::Inst* address) const;
 
     enum class BoundarySubsequence : size_t {
         Prologue,

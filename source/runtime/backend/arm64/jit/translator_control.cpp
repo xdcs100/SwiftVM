@@ -540,6 +540,10 @@ std::optional<u64> JitTranslator::CachedConstAddressOffset(ir::Inst* inst) const
 }
 
 void JitTranslator::EmitGetOperand(ir::Inst* inst) {
+    if (const auto target = MatchPinnedMemoryAddress(inst)) {
+        pinned_gpr_values.emplace(inst, *target);
+        return;
+    }
     auto operand = inst->GetArg<ir::Operand>(0);
     auto result = context.R(ir::Value{inst});
     if (context.IsConstAddressCached(inst->Id())) {
