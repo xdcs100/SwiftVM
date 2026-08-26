@@ -1757,21 +1757,32 @@ peepholes.
   Real `STP` lower-guard and `LDP` upper-guard recovery passes five assertions on Mac and Orb; the
   existing guest PageFatal case also passes five assertions on both. No stress run, diagnostic or
   environment switch was added.
+- `52441a2` consumes the guarded RSB substrate and attacks the two remaining concentrated boundary
+  costs. RSB push/pop no longer loads or compares explicit bottom/top pointers; empty frames are
+  rejected by their zero dispatch slot, while real lower/upper escapes use guarded-fault recovery.
+  Function translation now groups repeated dynamic terminal targets by physical register, suppresses
+  eager `current_loc` stores, and branches misses to one cold publisher per register. Separately,
+  fixed-home copy ownership may transfer selected post-publication U32 Add/Sub/And/Or/Xor consumers
+  to the destination home after the source home is overwritten. The proof remains fail-closed for
+  target rewrites, helper clobbers, observable operations, non-U32 values and other consumers.
+  Against the guarded-stack baseline, exact CoreMark 20k moves `3,438,479,676 -> 3,416,879,675`
+  (`-21,600,001`, `-0.628185%`) with all 2,761 PCs / 2,864 versions, 100% coverage, top-20 20/20 and
+  `crcfinal=0x382f`. The retained W67 join including deferred terminal publication moves
+  `13,188,392,770 -> 12,999,112,545` (`-1.435203%`) at 99.997866% coverage with no growing PC.
+  Calibrated smallpt remains byte-identical at 2,730 PCs / 2,998 versions, zero spills and
+  `226,048` weighted host instructions. Mac and Orb pinned-GPR, guarded-return and direct-link
+  focuses pass; no stress run, diagnostic or environment switch remains.
 - Current default-region CoreMark, joined against the retained W67 guest-instruction/entry table,
-  still covers `99.999694457%` of entries. Applying the known 434.25M-entry `0x402668` reduction to
-  the previous exact denominator gives a conservative estimate of `1.929192` SVM host instructions
-  per guest instruction; it excludes the smaller `0x402745` reduction. Reusing the unchanged FEX
-  `f2e35f3` value `1.807` gives approximately **`1.067622x`**, down from W67's `2.305x` and the later
-  RE=0 refresh's `2.000x`. The pre-index stage above is not folded into this retained-W67 estimate,
-  so the quoted ratio is a conservative upper bound until that join is refreshed. Dynamic return
-  dispatch remains the largest concentrated boundary pool.
+  gives a conservative estimate of `1.901504` SVM host instructions per guest instruction. Reusing
+  the unchanged FEX `f2e35f3` value `1.807` gives approximately **`1.052299x`**, down from W67's
+  `2.305x` and the later RE=0 refresh's `2.000x`. The pre-index stage above is not folded into this
+  estimate, so the quoted ratio remains a conservative upper bound until the FEX/SVM join is
+  refreshed from the same current run.
   `0x402668` now emits seven host instructions for three guest instructions; `0x402808` emits eight
   for three.
-  The CRC family remains move-heavy after both safe fusions: `0x4039b8/0x403958` emit 24
-  instructions and 11 moves, while `0x403990/0x403930/0x403908/0x4038e0` emit 23 and 10. Do not
-  retry the failed multi-use fixed-home snapshot reuse. Return-level work can now use the guarded
-  stack substrate to remove explicit bounds, but should first measure the lower-risk terminal-only
-  deferred `current_loc` publication against a shared cold publisher.
+  The dominant matrix units at `0x402d58` and `0x402df8` now emit 15 and 23 instructions, down from
+  17 and 24. Do not broaden per-consumer fixed-home ownership beyond consumers with an explicit
+  version-preservation proof.
 
 ## Orb loop
 
