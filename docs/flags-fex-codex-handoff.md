@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`b5936ac`** `perf: keep narrow memory branches in raw flags`
+- Code tip: **`162a4d8`** `perf: publish spilled additions to pinned GPRs`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -19,6 +19,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 
 | Commit | What |
 |---|---|
+| `162a4d8` | Emit a spilled U32 Add directly into its pinned publication home and keep proven post-publication low-32 ALU uses on that home |
 | `b5936ac` | Admit a single adjacent carry inversion on a dead U8/U16 memory-operand `Sub` branch when the condition does not read carry, then discard the irrelevant normalization |
 | `9fb39ef` | Retain an arithmetic result token only when parity is live; NZCV-only narrow producers no longer restore result bits solely for a dead PF token |
 | `f42b7cc` | Fold `BitExtract(SignExtend(v32),0,32)` back to the original 32-bit SSA and remove both signed low-32 round trips through DCE |
@@ -1434,6 +1435,22 @@ peepholes.
   remains checksum-identical. A broad `SVM_FLAG_FULL_ELIM=1` retry grew smallpt by 2.376% and made
   short CoreMark abort; a later memory-left/immediate-right expansion saved only 0.000022% on the
   common CoreMark shape. Both prototypes were removed completely.
+- `162a4d8` extends the fixed-home publication transaction to a spilled U32 `Add` whose complete
+  value graph is one `ZeroExtend32To64` publication plus post-publication U32 Add/Sub uses or exact
+  low-32 aliases. The producer writes the pinned W home directly, its wrapper and publication emit
+  nothing, and later proven ALU uses read that home instead of the spill slot. The proof requires a
+  genuinely spilled producer with no pseudo flags, closes every producer/wrapper/alias use, rejects
+  target rewrites and caller-saved helper clobbers through the final use, and is independently
+  replayed before emission. In CoreMark's two matrix loops this replaces the x18 add, spill store,
+  spill reload and pinned move, plus later spill reloads, with one `ADD wPin`. Exact 20k host work moves
+  `4,206,692,536 -> 4,103,652,536` (`-103,040,000`, `-2.449430%`); dynamic spill operations move
+  `388,800,030 -> 38,880,030` (`-90%`) and CRC remains `0x382f`. The 100%-covered 2k shape join is
+  `426,914,119 -> 416,610,119` (`-2.413600%`) with six shrinking PCs and no growth. Smallpt is
+  exactly unchanged at 2,802 PCs / 3,435 versions, `368,937` raw host instructions, 288 spills and
+  the canonical PPM. A forced-MEM publication test verifies `ADD wPinned` with no x18 publication
+  move; pinned/read/spill focuses pass on Mac and Orb, and the FLAGS six-grid remains checksum-
+  identical. The temporary rejection diagnostic reused `SVM_DUMP_IR` and was removed before
+  delivery; no new switch or fallback remains.
 
 ## Orb loop
 
