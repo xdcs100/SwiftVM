@@ -11,6 +11,7 @@ add_executable(swift_test
         logical_flags_codegen_test.cpp
         narrow_flags_input_test.cpp
         pinned_gpr_read_test.cpp
+        pinned_spill_publication_test.cpp
         register_alloc_copy_test.cpp
         register_alloc_fpr_test.cpp
         scalar_identity_analysis_test.cpp

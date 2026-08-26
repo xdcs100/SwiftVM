@@ -400,6 +400,9 @@ bool JitTranslator::ReproveLow32Copy(ir::Inst* inst) const {
 }
 
 void JitTranslator::EmitBitExtract(ir::Inst* inst) {
+    if (fused_pin_gpr_reads.contains(inst)) {
+        return;
+    }
     if (narrow_flags_inputs.contains(inst)) {
         ASSERT_MSG(MatchNarrowFlagsInput(inst) == narrow_flags_inputs.at(inst),
                    "narrow flags input proof drifted before emission at IR {}",

@@ -66,6 +66,11 @@ void JitTranslator::BeginFlagsTokenProducer(const PseudoFlags& pseudo) {
 
 Register JitTranslator::FlagsResultRegister(
         ir::Inst* inst, const PseudoFlags& pseudo) {
+    if (const auto pinned = ResolvePinnedGPRValue(ir::Value{inst})) {
+        return ir::GetValueSizeByte(inst->ReturnType()) > sizeof(u32)
+                ? Register{*pinned}
+                : Register{pinned->W()};
+    }
     if (FlagsRegsEnabled() && !pseudo.Null() && !pseudo.branch_only &&
         inst->GetUses() == 0) {
         return ir::GetValueSizeByte(inst->ReturnType()) > sizeof(u32)

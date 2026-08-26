@@ -1303,7 +1303,8 @@ void JitTranslator::EmitSetHostGPR(ir::Inst* inst) {
                            reproved->aliases == copy->second.aliases &&
                            reproved->source == copy->second.source &&
                            reproved->target == copy->second.target &&
-                           reproved->width == copy->second.width,
+                           reproved->width == copy->second.width &&
+                           reproved->last_use == copy->second.last_use,
                    "pinned GPR copy proof diverged at IR {}", inst->Id());
         if (!copy->second.source) {
             return;

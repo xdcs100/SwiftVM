@@ -167,6 +167,7 @@ private:
         std::optional<u16> source{};
         u16 target{};
         u8 width{};
+        u32 last_use{};
     };
     void PrepareDeadPinnedGPRWrites(ir::Block* block);
     [[nodiscard]] bool IsDeadPinnedGPRWrite(ir::Inst* inst) const;

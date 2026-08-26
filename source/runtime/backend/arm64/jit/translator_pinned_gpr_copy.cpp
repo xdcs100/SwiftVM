@@ -20,6 +20,45 @@ bool IsMemoryAddressUse(ir::Inst& inst, ir::Inst* definition) {
            (right.IsValue() && right.value.Def() == definition);
 }
 
+bool IsLow32AluAlias(ir::Block* block,
+                     ir::Inst* alias,
+                     ir::Inst* definition) {
+    if (alias->GetOp() != ir::OpCode::BitExtract ||
+        alias->GetArg<ir::Value>(0).Def() != definition ||
+        alias->GetArg<ir::Imm>(1).Get() != 0 ||
+        alias->GetArg<ir::Imm>(2).Get() != 32 ||
+        alias->ReturnType() != ir::ValueType::U32 || alias->GetUses() != 1) {
+        return false;
+    }
+    for (auto& consumer : block->GetInstList()) {
+        u32 uses = 0;
+        for (auto value : consumer.GetValues()) {
+            uses += value.Def() == alias;
+        }
+        if (!uses) {
+            continue;
+        }
+        return uses == 1 &&
+               (consumer.GetOp() == ir::OpCode::Add ||
+                consumer.GetOp() == ir::OpCode::Sub) &&
+               ir::GetValueSizeByte(consumer.ReturnType()) == sizeof(u32);
+    }
+    return false;
+}
+
+bool IsU32AluUse(ir::Inst& consumer, ir::Inst* definition) {
+    if (consumer.GetOp() != ir::OpCode::Add &&
+        consumer.GetOp() != ir::OpCode::Sub) {
+        return false;
+    }
+    u32 uses = 0;
+    for (auto value : consumer.GetValues()) {
+        uses += value.Def() == definition;
+    }
+    return uses == 1 &&
+           ir::GetValueSizeByte(consumer.ReturnType()) == sizeof(u32);
+}
+
 bool IsHelperClobber(ir::OpCode op) {
     switch (op) {
         case ir::OpCode::CallLambda:
@@ -65,14 +104,17 @@ JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
     }
     auto* read = source.Def();
     const u32 source_width = ir::GetValueSizeByte(source.Type());
-    if (!read || read->GetUses() != 1 ||
+    if (!read ||
         (source_width != sizeof(u8) && source_width != sizeof(u16) &&
          source_width != sizeof(u32))) {
         return std::nullopt;
     }
     const bool load_source = read->GetOp() == ir::OpCode::LoadMemory;
+    const bool add_source = read->GetOp() == ir::OpCode::Add &&
+            source_width == sizeof(u32) && context.IsSpilled(source) &&
+            read->GetPseudoOperations().empty();
     std::optional<u16> source_index;
-    if (!load_source) {
+    if (!load_source && !add_source) {
         if (read->GetOp() != ir::OpCode::GetHostGPR ||
             read->GetArg<ir::Imm>(1).Get() != 0 ||
             context.IsHostReadCoalesced(read->Id())) {
@@ -85,9 +127,42 @@ JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
         source_index = static_cast<u16>(index);
     }
 
+    std::vector<ir::Inst*> aliases;
+    u32 producer_last_use = inst->Id();
+    if (add_source) {
+        bool saw_extend = false;
+        u32 source_uses = 0;
+        for (auto& scan : cur_block->GetInstList()) {
+            for (auto used : scan.GetValues()) {
+                if (used.Def() != read) {
+                    continue;
+                }
+                ++source_uses;
+                if (&scan == extend) {
+                    saw_extend = true;
+                    continue;
+                }
+                if (scan.Id() > inst->Id() && IsU32AluUse(scan, read)) {
+                    producer_last_use = std::max<u32>(producer_last_use,
+                                                      scan.Id());
+                    continue;
+                }
+                if (!IsLow32AluAlias(cur_block, &scan, read) ||
+                    scan.Id() <= inst->Id()) {
+                    return std::nullopt;
+                }
+                aliases.push_back(&scan);
+            }
+        }
+        if (!saw_extend || source_uses != read->GetUses()) {
+            return std::nullopt;
+        }
+    } else if (read->GetUses() != 1) {
+        return std::nullopt;
+    }
+
     bool saw_publication = false;
     u32 published_uses = 0;
-    std::vector<ir::Inst*> aliases;
     for (auto& scan : cur_block->GetInstList()) {
         for (auto used : scan.GetValues()) {
             if (used.Def() != extend) {
@@ -99,9 +174,11 @@ JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
                 saw_publication = true;
                 continue;
             }
-            if (scan.GetOp() != ir::OpCode::BitCast ||
-                scan.GetArg<ir::Value>(0).Def() != extend ||
-                scan.Id() <= inst->Id()) {
+            const bool bitcast = scan.GetOp() == ir::OpCode::BitCast &&
+                    scan.GetArg<ir::Value>(0).Def() == extend;
+            const bool low32_alias =
+                    IsLow32AluAlias(cur_block, &scan, extend);
+            if ((!bitcast && !low32_alias) || scan.Id() <= inst->Id()) {
                 return std::nullopt;
             }
             aliases.push_back(&scan);
@@ -111,13 +188,20 @@ JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
         return std::nullopt;
     }
 
-    u32 last_use = inst->Id();
+    u32 last_use = producer_last_use;
     for (auto* alias : aliases) {
         u32 alias_uses = 0;
         for (auto& scan : cur_block->GetInstList()) {
             if (IsMemoryAddressUse(scan, alias)) {
                 ++alias_uses;
                 last_use = std::max<u32>(last_use, scan.Id());
+            } else if (alias->GetOp() == ir::OpCode::BitExtract) {
+                for (auto used : scan.GetValues()) {
+                    if (used.Def() == alias) {
+                        ++alias_uses;
+                        last_use = std::max<u32>(last_use, scan.Id());
+                    }
+                }
             }
         }
         if (alias_uses == 0 || alias_uses != alias->GetUses()) {
@@ -152,6 +236,7 @@ JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
             .source = source_index,
             .target = static_cast<u16>(target),
             .width = static_cast<u8>(source_width),
+            .last_use = last_use,
     };
 }
 
@@ -179,6 +264,9 @@ void JitTranslator::PreparePinnedGPRCopies(ir::Block* block) {
         }
         if (!plan->source) {
             pinned_gpr_values.emplace(plan->read, plan->target);
+            if (plan->read->GetOp() == ir::OpCode::Add) {
+                fused_pin_gpr_reads.emplace(plan->read, plan->target);
+            }
         } else {
             fused_pin_gpr_reads.emplace(plan->read, *plan->source);
         }
@@ -187,7 +275,11 @@ void JitTranslator::PreparePinnedGPRCopies(ir::Block* block) {
         }
         fused_pin_zext32.insert(plan->extend);
         for (auto* alias : plan->aliases) {
-            pinned_gpr_values.emplace(alias, plan->target);
+            if (alias->GetOp() == ir::OpCode::BitExtract) {
+                fused_pin_gpr_reads.emplace(alias, plan->target);
+            } else {
+                pinned_gpr_values.emplace(alias, plan->target);
+            }
         }
         pinned_gpr_copies.emplace(&inst, *plan);
     }
