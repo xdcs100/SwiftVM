@@ -22,6 +22,7 @@ enum class PinnedReadShape {
     SelfAnd,
     SelfWrite,
     Copy,
+    CopyU16,
     OverwrittenWrite,
     OverwrittenWriteFault,
     MemoryAddress,
@@ -45,9 +46,14 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
     IntrusivePtr<Block> block{new Block(0, Location{0x8940})};
     const bool overwritten_write = shape == PinnedReadShape::OverwrittenWrite ||
                                    shape == PinnedReadShape::OverwrittenWriteFault;
+    const bool copy = shape == PinnedReadShape::Copy ||
+                      shape == PinnedReadShape::CopyU16;
     const auto source_index = overwritten_write
             ? 1u
-            : (shape == PinnedReadShape::Copy ? 20u : 22u);
+            : (copy ? 20u : 22u);
+    if (shape == PinnedReadShape::CopyU16) {
+        type = ValueType::U16;
+    }
     auto value = block->GetHostGPR(HostRegIndex(source_index), Imm{0u})
                          .SetType(type);
     if (shape == PinnedReadShape::Or) {
@@ -56,8 +62,12 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
         auto result = block->Or(value, Operand{right}).SetType(type);
         block->SaveFlags(result, Flags::Negate | Flags::Zero | Flags::Parity);
     } else if (shape == PinnedReadShape::SelfWrite ||
-               shape == PinnedReadShape::Copy) {
-        auto result = block->ZeroExtend32To64(value).SetType(ValueType::U64);
+               shape == PinnedReadShape::Copy ||
+               shape == PinnedReadShape::CopyU16) {
+        auto extended = shape == PinnedReadShape::CopyU16
+                ? block->ZeroExtend32(value).SetType(ValueType::U32)
+                : value;
+        auto result = block->ZeroExtend32To64(extended).SetType(ValueType::U64);
         block->SetHostGPR(result, HostRegIndex(22), Imm{0u});
         auto address = block->BitCast(result).SetType(ValueType::U64);
         auto loaded = block->LoadMemory(Operand{address, Imm{8u}})
@@ -194,6 +204,14 @@ TEST_CASE("a pinned low-32 copy publishes directly between fixed homes") {
     REQUIRE(Count(lines, "ubfx ", "x20") == 0);
     REQUIRE(Count(lines, "mov w22, w20", "") == 1);
     REQUIRE(Count(lines, "mov w", "w20") == 1);
+    REQUIRE(Count(lines, "ldrb ", "[x22") == 1);
+}
+
+TEST_CASE("a pinned narrow copy zero-extends directly between fixed homes") {
+    const auto lines = EmitPinnedRead(PinnedReadShape::CopyU16, false);
+    REQUIRE(Count(lines, "ubfx ", "x20") == 0);
+    REQUIRE(Count(lines, "uxth w22, w20", "") == 1);
+    REQUIRE(Count(lines, "mov w", "w20") == 0);
     REQUIRE(Count(lines, "ldrb ", "[x22") == 1);
 }
 

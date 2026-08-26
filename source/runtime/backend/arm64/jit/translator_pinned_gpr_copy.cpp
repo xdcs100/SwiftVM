@@ -53,13 +53,24 @@ JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
     }
 
     auto source = extend->GetArg<ir::Value>(0);
+    ir::Inst* narrow_extend{};
+    if (source.Def() && source.Def()->GetOp() == ir::OpCode::ZeroExtend32) {
+        narrow_extend = source.Def();
+        if (narrow_extend->GetUses() != 1 ||
+            ir::GetValueSizeByte(source.Type()) != sizeof(u32)) {
+            return std::nullopt;
+        }
+        source = narrow_extend->GetArg<ir::Value>(0);
+    }
     auto* read = source.Def();
+    const u32 source_width = ir::GetValueSizeByte(source.Type());
     const u32 source_index = read && read->GetOp() == ir::OpCode::GetHostGPR
             ? read->GetArg<ir::Imm>(0).Get()
             : UINT32_MAX;
     if (!read || read->GetOp() != ir::OpCode::GetHostGPR ||
         read->GetUses() != 1 ||
-        ir::GetValueSizeByte(source.Type()) != sizeof(u32) ||
+        (source_width != sizeof(u8) && source_width != sizeof(u16) &&
+         source_width != sizeof(u32)) ||
         !IsPinnedGPR(source_index) ||
         read->GetArg<ir::Imm>(1).Get() != 0 ||
         context.IsHostReadCoalesced(read->Id())) {
@@ -126,10 +137,12 @@ JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
     }
     return PinnedGPRCopy{
             .read = read,
+            .narrow_extend = narrow_extend,
             .extend = extend,
             .aliases = std::move(aliases),
             .source = static_cast<u16>(source_index),
             .target = static_cast<u16>(target),
+            .width = static_cast<u8>(source_width),
     };
 }
 
@@ -156,6 +169,9 @@ void JitTranslator::PreparePinnedGPRCopies(ir::Block* block) {
             continue;
         }
         fused_pin_gpr_reads.emplace(plan->read, plan->source);
+        if (plan->narrow_extend) {
+            fused_pin_zext32.insert(plan->narrow_extend);
+        }
         fused_pin_zext32.insert(plan->extend);
         for (auto* alias : plan->aliases) {
             pinned_gpr_values.emplace(alias, plan->target);

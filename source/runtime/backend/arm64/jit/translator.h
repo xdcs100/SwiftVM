@@ -161,10 +161,12 @@ private:
 
     struct PinnedGPRCopy {
         ir::Inst* read{};
+        ir::Inst* narrow_extend{};
         ir::Inst* extend{};
         std::vector<ir::Inst*> aliases{};
         u16 source{};
         u16 target{};
+        u8 width{};
     };
     void PrepareDeadPinnedGPRWrites(ir::Block* block);
     [[nodiscard]] bool IsDeadPinnedGPRWrite(ir::Inst* inst) const;

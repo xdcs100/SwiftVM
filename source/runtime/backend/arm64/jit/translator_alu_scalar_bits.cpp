@@ -503,6 +503,9 @@ void JitTranslator::EmitZeroExtend32(ir::Inst* inst) {
     if (CanUseZeroStoreRegister(ir::Value{inst})) {
         return;
     }
+    if (fused_pin_zext32.contains(inst)) {
+        return;
+    }
     auto value = inst->GetArg<ir::Value>(0);
     auto result = context.W(ir::Value{inst});
     auto fused = value.Def() ? fused_pin_gpr_reads.find(value.Def())

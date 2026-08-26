@@ -1297,14 +1297,23 @@ void JitTranslator::EmitSetHostGPR(ir::Inst* inst) {
         copy != pinned_gpr_copies.end()) {
         const auto reproved = MatchPinnedGPRCopy(inst);
         ASSERT_MSG(reproved && reproved->read == copy->second.read &&
+                           reproved->narrow_extend ==
+                                   copy->second.narrow_extend &&
                            reproved->extend == copy->second.extend &&
                            reproved->aliases == copy->second.aliases &&
                            reproved->source == copy->second.source &&
-                           reproved->target == copy->second.target,
+                           reproved->target == copy->second.target &&
+                           reproved->width == copy->second.width,
                    "pinned GPR copy proof diverged at IR {}", inst->Id());
         auto source = XRegister(copy->second.source);
         auto target = XRegister(copy->second.target);
-        __ Mov(target.W(), source.W());
+        if (copy->second.width == sizeof(u8)) {
+            __ Uxtb(target.W(), source.W());
+        } else if (copy->second.width == sizeof(u16)) {
+            __ Uxth(target.W(), source.W());
+        } else {
+            __ Mov(target.W(), source.W());
+        }
         return;
     }
     const auto published = inst->GetArg<ir::Value>(0);
