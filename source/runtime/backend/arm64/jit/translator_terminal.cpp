@@ -161,11 +161,13 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
             nzcv_requested = {};
             InvalidateFlagsToken();
             Label else_label;
-            if (auto local = LocalConditionFor(term.cond)) {
-                __ B(&else_label,
-                     static_cast<Condition>(static_cast<u8>(*local) ^ 1));
-            } else {
-                __ Cbz(context.W(term.cond), &else_label);
+            if (!EmitDeadEdgeZeroBranch(term.cond, &else_label, false)) {
+                if (auto local = LocalConditionFor(term.cond)) {
+                    __ B(&else_label,
+                         static_cast<Condition>(static_cast<u8>(*local) ^ 1));
+                } else {
+                    __ Cbz(context.W(term.cond), &else_label);
+                }
             }
             EmitTerminal(term.then_,
                          LinkSiteKind::ConditionalThen,

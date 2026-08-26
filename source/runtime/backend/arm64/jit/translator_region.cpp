@@ -366,15 +366,17 @@ bool JitTranslator::EmitRegionIf(const ir::terminal::If& terminal,
                   FlagsRegsAuditEdgeKind::RegionInternal);
     }
     auto branch = [&](Label* label, bool on_true) {
-        if (local) {
-            const auto cond = on_true
-                    ? *local
-                    : static_cast<Condition>(static_cast<u8>(*local) ^ 1);
-            __ B(label, cond);
-        } else if (on_true) {
-            __ Cbnz(context.W(terminal.cond), label);
-        } else {
-            __ Cbz(context.W(terminal.cond), label);
+        if (!EmitDeadEdgeZeroBranch(terminal.cond, label, on_true)) {
+            if (local) {
+                const auto cond = on_true
+                        ? *local
+                        : static_cast<Condition>(static_cast<u8>(*local) ^ 1);
+                __ B(label, cond);
+            } else if (on_true) {
+                __ Cbnz(context.W(terminal.cond), label);
+            } else {
+                __ Cbz(context.W(terminal.cond), label);
+            }
         }
     };
     auto needs_stub = [&](ir::Location target) {

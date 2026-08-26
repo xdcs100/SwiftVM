@@ -166,6 +166,13 @@ void JitTranslator::PrepareDeadEdgeIntegerBranch(ir::Block* block) {
     };
     u32 inverts = 0;
     u32 polarity_stores = 0;
+    ir::Value zero_value{};
+    auto resolve_bitcast = [](ir::Value value) {
+        while (value.Def() && value.Def()->IsBitCastOperation()) {
+            value = value.Def()->GetArg<ir::Value>(0);
+        }
+        return value;
+    };
     for (size_t i = producer_begin; i < condition_index; ++i) {
         auto* inst = instructions[i];
         if (plan.discarded.contains(inst)) {
@@ -175,11 +182,35 @@ void JitTranslator::PrepareDeadEdgeIntegerBranch(ir::Block* block) {
             case ir::OpCode::SaveFlags: {
                 plan.discarded.insert(inst);
                 auto value = inst->GetArg<ir::Value>(0);
-                if (!value.Def() || value.Def()->GetOp() != ir::OpCode::Sub ||
+                if (!value.Def() ||
                     (plan.producer && plan.producer != value.Def())) {
                     return;
                 }
+                if (value.Def()->GetOp() != ir::OpCode::Sub) {
+                    return;
+                }
                 plan.producer = value.Def();
+                break;
+            }
+            case ir::OpCode::BranchOnlyFlags: {
+                plan.discarded.insert(inst);
+                const auto value = inst->GetArg<ir::Value>(0);
+                if (plan.producer || !value.Def() ||
+                    value.Def()->GetOp() != ir::OpCode::And ||
+                    plan.required != ir::Flags::Zero ||
+                    !True(inst->GetArg<ir::Flags>(1) & plan.required)) {
+                    return;
+                }
+                const auto left = value.Def()->GetArg<ir::Value>(0);
+                const auto right = value.Def()->GetArg<ir::Operand>(1);
+                if (!right.GetRight().Null() ||
+                    !right.GetLeft().IsValue() ||
+                    resolve_bitcast(left).Def() !=
+                            resolve_bitcast(right.GetLeft().value).Def()) {
+                    return;
+                }
+                plan.producer = value.Def();
+                zero_value = resolve_bitcast(left);
                 break;
             }
             case ir::OpCode::ClearFlags:
@@ -206,9 +237,48 @@ void JitTranslator::PrepareDeadEdgeIntegerBranch(ir::Block* block) {
                 break;
         }
     }
-    if (!plan.producer || inverts != 1 || polarity_stores > 1 ||
+    if (!plan.producer || inverts != (zero_value.Defined() ? 0u : 1u) ||
+        polarity_stores > 1 ||
         plan.producer->Id() >= condition->Id()) {
         return;
+    }
+
+    if (zero_value.Defined()) {
+        const u32 width = ir::GetValueSizeByte(plan.producer->ReturnType());
+        ir::Inst* publication{};
+        u16 target{};
+        for (auto* inst : instructions) {
+            if (inst->Id() >= plan.producer->Id() ||
+                inst->GetOp() != ir::OpCode::SetHostGPR ||
+                inst->GetArg<ir::Imm>(2).Get() != 0 ||
+                ir::GetValueSizeByte(inst->GetArg<ir::Value>(0).Type()) != width ||
+                resolve_bitcast(inst->GetArg<ir::Value>(0)).Def() !=
+                        zero_value.Def()) {
+                continue;
+            }
+            const u32 candidate = inst->GetArg<ir::Imm>(1).Get();
+            if (candidate > 9 && (candidate < 19 || candidate > 23) &&
+                candidate != 29) {
+                continue;
+            }
+            publication = inst;
+            target = static_cast<u16>(candidate);
+        }
+        if (!publication || context.X(zero_value).GetCode() != target) {
+            return;
+        }
+        for (auto* inst : instructions) {
+            if (inst->Id() <= publication->Id() ||
+                inst->Id() >= condition->Id()) {
+                continue;
+            }
+            if (inst->GetOp() == ir::OpCode::SetHostGPR &&
+                inst->GetArg<ir::Imm>(1).Get() == target) {
+                return;
+            }
+        }
+        plan.zero_target = target;
+        plan.zero_is_64 = width == sizeof(u64);
     }
 
     bool after_producer = false;
@@ -243,6 +313,27 @@ std::optional<ir::Cond> JitTranslator::DeadEdgeIntegerBranchCondition(
         return std::nullopt;
     }
     return dead_edge_integer_branch->raw_condition;
+}
+
+bool JitTranslator::EmitDeadEdgeZeroBranch(ir::Value condition, Label* label,
+                                           bool on_true) {
+    if (!dead_edge_integer_branch ||
+        dead_edge_integer_branch->condition != condition.Def() ||
+        !dead_edge_integer_branch->zero_target) {
+        return false;
+    }
+    const auto target = XRegister(*dead_edge_integer_branch->zero_target);
+    const auto value = dead_edge_integer_branch->zero_is_64
+            ? Register{target.X()}
+            : Register{target.W()};
+    const bool zero_on_true =
+            dead_edge_integer_branch->raw_condition == ir::Cond::EQ;
+    if (zero_on_true == on_true) {
+        masm.Cbz(value, label);
+    } else {
+        masm.Cbnz(value, label);
+    }
+    return true;
 }
 
 std::optional<JitTranslator::DeadNarrowImmediateBranchPlan>

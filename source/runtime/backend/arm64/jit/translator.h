@@ -437,6 +437,8 @@ private:
         ir::Inst* condition{};
         ir::Flags required{};
         ir::Cond raw_condition{};
+        std::optional<u16> zero_target{};
+        bool zero_is_64{};
         std::unordered_set<ir::Inst*> discarded{};
     };
 
@@ -444,6 +446,8 @@ private:
     [[nodiscard]] bool IsDeadEdgeIntegerBranchProducer(ir::Inst* inst) const;
     [[nodiscard]] std::optional<ir::Cond>
     DeadEdgeIntegerBranchCondition(ir::Inst* inst) const;
+    bool EmitDeadEdgeZeroBranch(ir::Value condition, Label* label,
+                                bool on_true);
 
     struct DeadNarrowImmediateBranchPlan {
         ir::Inst* producer{};

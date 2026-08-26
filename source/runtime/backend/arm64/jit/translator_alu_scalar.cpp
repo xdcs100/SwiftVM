@@ -426,6 +426,11 @@ void JitTranslator::EmitSbb(ir::Inst* inst) {
 }
 
 void JitTranslator::EmitAnd(ir::Inst* inst) {
+    if (dead_edge_integer_branch &&
+        dead_edge_integer_branch->producer == inst &&
+        dead_edge_integer_branch->zero_target) {
+        return;
+    }
     if (local_conditions.contains(inst)) {
         return;
     }

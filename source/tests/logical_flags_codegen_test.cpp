@@ -335,6 +335,60 @@ TEST_CASE("narrow register self tests skip the redundant AND") {
     }
 }
 
+TEST_CASE("dead-edge fixed-home self tests branch without a logical result") {
+    Config config{
+            .loc_start = 0,
+            .loc_end = 1ull << 48,
+            .enable_jit = true,
+            .has_local_operation = false,
+            .backend_isa = kArm64,
+            .global_opts = Optimizations::All,
+    };
+    AddressSpace address_space{config};
+    IntrusivePtr<Block> block{new Block(0, Location{0x8a80})};
+    auto base = block->GetHostGPR(HostRegIndex(22), Imm{0u})
+                        .SetType(ValueType::U64);
+    auto loaded = block->LoadMemory(Operand{base}).SetType(ValueType::U64);
+    auto* publication = block->AppendInst(
+            OpCode::SetHostGPR, loaded, HostRegIndex(22), Imm{0u});
+    block->AdvancePC(Imm{3u});
+    auto left = block->BitCast(loaded).SetType(ValueType::U64);
+    auto right = block->BitCast(loaded).SetType(ValueType::U64);
+    auto tested = block->And(left, Operand{right}).SetType(ValueType::U64);
+    block->ClearFlags(Flags::Carry | Flags::Overflow | Flags::AuxiliaryCarry);
+    block->SaveFlags(tested, Flags::Negate | Flags::Zero | Flags::Parity);
+    block->AdvancePC(Imm{3u});
+    block->BranchOnlyEdges();
+    auto condition = block->LocalCondSet(Cond::EQ).SetType(ValueType::U8);
+    block->SetTerminal(terminal::If{
+            condition,
+            terminal::LinkBlock{Location{0x8a90}},
+            terminal::LinkBlock{Location{0x8aa0}},
+    });
+
+    FeatureSet features{};
+    FlagsEliminationPass::Run(block.get(), nullptr, features);
+    block->ReIdInstr();
+    RegAlloc alloc{block->MaxInstrId(),
+                   address_space.GetTrampolines().GetGPRRegs(),
+                   address_space.GetTrampolines().GetFPRRegs(), features};
+    RegisterAllocPass::Run(block.get(), &alloc, false, features);
+    alloc.MapRegister(loaded.Id(), HostGPR{22});
+    alloc.MarkHostWriteCoalesced(publication->Id());
+    arm64::JitContext context{address_space.GetDefaultModule(), alloc};
+    arm64::JitTranslator translator{context};
+    translator.Translate(block.get());
+    context.Finish();
+
+    const auto instructions = Disassemble(context);
+    REQUIRE(Count(instructions, "ldr x22, [x22]") == 1);
+    REQUIRE(Count(instructions, "cbnz x22") +
+                    Count(instructions, "cbz x22") ==
+            1);
+    REQUIRE_FALSE(Contains(instructions, "ands "));
+    REQUIRE_FALSE(Contains(instructions, "tst "));
+}
+
 TEST_CASE("compact FP compare stays local across audited moves") {
     for (const auto& code : {
                  std::array<swift::u8, 24>{

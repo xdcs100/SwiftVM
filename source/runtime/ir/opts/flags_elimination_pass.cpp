@@ -257,6 +257,30 @@ bool HasBackendSubBranchMarker(Block* block) {
     return marker && invert && sub_flags;
 }
 
+bool HasBackendZeroBranchProof(Block* block) {
+    auto terminal = block->GetTerminal();
+    auto* branch = boost::get<terminal::If>(&terminal);
+    auto* condition = branch ? branch->cond.Def() : nullptr;
+    if (!condition || condition->GetOp() != OpCode::LocalCondSet ||
+        condition->GetUses() != 1) {
+        return false;
+    }
+    const auto cond = condition->GetArg<Cond>(0);
+    if (cond != Cond::EQ && cond != Cond::NE) {
+        return false;
+    }
+    bool zero_test = false;
+    for (auto& inst : block->GetInstList()) {
+        if (inst.GetOp() != OpCode::BranchOnlyFlags) {
+            continue;
+        }
+        const auto value = inst.GetArg<Value>(0);
+        zero_test |= value.Def() && value.Def()->GetOp() == OpCode::And &&
+                     True(inst.GetArg<Flags>(1) & Flags::Zero);
+    }
+    return zero_test;
+}
+
 bool PreservesRawFCmp(OpCode op) {
     switch (op) {
         case OpCode::LoadUniform:
@@ -610,7 +634,9 @@ void FlagsEliminationPass::Run(Block* block, HIRFunction* hir_function,
         const LiveMap no_live_in;
         TryBranchOnly(block, nullptr, nullptr, no_live_in, stats);
     }
-    block->SetDeadEdgeIntegerBranchProof(HasBackendSubBranchMarker(block));
+    block->SetDeadEdgeIntegerBranchProof(
+            HasBackendSubBranchMarker(block) ||
+            HasBackendZeroBranchProof(block));
     // The marker is proof input, never executable IR. Remove it on every
     // conservative rejection as well as on accepted paths.
     for (auto it = inst_list.begin(); it != inst_list.end();) {
