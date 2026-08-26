@@ -20,14 +20,17 @@ bool IsMemoryAddressUse(ir::Inst& inst, ir::Inst* definition) {
            (right.IsValue() && right.value.Def() == definition);
 }
 
-bool IsLow32AluAlias(ir::Block* block,
-                     ir::Inst* alias,
-                     ir::Inst* definition) {
+bool IsLowAluAlias(ir::Block* block,
+                   ir::Inst* alias,
+                   ir::Inst* definition) {
+    const u32 width = ir::GetValueSizeByte(alias->ReturnType());
     if (alias->GetOp() != ir::OpCode::BitExtract ||
         alias->GetArg<ir::Value>(0).Def() != definition ||
         alias->GetArg<ir::Imm>(1).Get() != 0 ||
-        alias->GetArg<ir::Imm>(2).Get() != 32 ||
-        alias->ReturnType() != ir::ValueType::U32 || alias->GetUses() != 1) {
+        alias->GetArg<ir::Imm>(2).Get() != width * 8 ||
+        (width != sizeof(u8) && width != sizeof(u16) &&
+         width != sizeof(u32)) ||
+        alias->GetUses() != 1) {
         return false;
     }
     for (auto& consumer : block->GetInstList()) {
@@ -38,10 +41,20 @@ bool IsLow32AluAlias(ir::Block* block,
         if (!uses) {
             continue;
         }
-        return uses == 1 &&
-               (consumer.GetOp() == ir::OpCode::Add ||
-                consumer.GetOp() == ir::OpCode::Sub) &&
-               ir::GetValueSizeByte(consumer.ReturnType()) == sizeof(u32);
+        const bool u32_alu = width == sizeof(u32) && uses == 1 &&
+                (consumer.GetOp() == ir::OpCode::Add ||
+                 consumer.GetOp() == ir::OpCode::Sub) &&
+                ir::GetValueSizeByte(consumer.ReturnType()) == sizeof(u32);
+        const bool logical_zero_test = uses == 1 &&
+                consumer.GetOp() == ir::OpCode::Or &&
+                ir::GetValueSizeByte(consumer.ReturnType()) == width &&
+                consumer.GetUses() == 0 &&
+                consumer.GetArg<ir::Operand>(1).IsImm() &&
+                consumer.GetArg<ir::Operand>(1).GetLeft().imm.Get() == 0 &&
+                !consumer.GetPseudoOperations(
+                                 ir::OpCode::BranchOnlyFlags)
+                         .empty();
+        return u32_alu || logical_zero_test;
     }
     return false;
 }
@@ -147,7 +160,7 @@ JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
                                                       scan.Id());
                     continue;
                 }
-                if (!IsLow32AluAlias(cur_block, &scan, read) ||
+                if (!IsLowAluAlias(cur_block, &scan, read) ||
                     scan.Id() <= inst->Id()) {
                     return std::nullopt;
                 }
@@ -177,7 +190,7 @@ JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
             const bool bitcast = scan.GetOp() == ir::OpCode::BitCast &&
                     scan.GetArg<ir::Value>(0).Def() == extend;
             const bool low32_alias =
-                    IsLow32AluAlias(cur_block, &scan, extend);
+                    IsLowAluAlias(cur_block, &scan, extend);
             if ((!bitcast && !low32_alias) || scan.Id() <= inst->Id()) {
                 return std::nullopt;
             }

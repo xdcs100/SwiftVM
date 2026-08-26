@@ -24,6 +24,7 @@ enum class PinnedReadShape {
     Copy,
     CopyU16,
     LoadU16,
+    LoadU8Flags,
     OverwrittenWrite,
     OverwrittenWriteFault,
     MemoryAddress,
@@ -55,14 +56,25 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
             : (copy ? 20u : 22u);
     if (shape == PinnedReadShape::CopyU16 || shape == PinnedReadShape::LoadU16) {
         type = ValueType::U16;
+    } else if (shape == PinnedReadShape::LoadU8Flags) {
+        type = ValueType::U8;
     }
-    auto value = shape == PinnedReadShape::LoadU16
+    auto value = shape == PinnedReadShape::LoadU16 ||
+                         shape == PinnedReadShape::LoadU8Flags
             ? block->LoadMemory(Operand{block->LoadImm(Imm{swift::u64{0x1000}})
                                                 .SetType(ValueType::U64)})
                       .SetType(type)
             : block->GetHostGPR(HostRegIndex(source_index), Imm{0u})
                       .SetType(type);
-    if (shape == PinnedReadShape::Or) {
+    if (shape == PinnedReadShape::LoadU8Flags) {
+        auto extended = block->ZeroExtend32To64(value).SetType(ValueType::U64);
+        block->SetHostGPR(extended, HostRegIndex(23), Imm{0u});
+        auto alias = block->BitExtract(extended, Imm{0u}, Imm{8u})
+                             .SetType(ValueType::U8);
+        auto result = block->Or(alias, Operand{Imm{0u}})
+                              .SetType(ValueType::U8);
+        block->AppendInst(OpCode::BranchOnlyFlags, result, Flags::Zero);
+    } else if (shape == PinnedReadShape::Or) {
         auto right = block->GetHostGPR(HostRegIndex(29), Imm{0u})
                              .SetType(type);
         auto result = block->Or(value, Operand{right}).SetType(type);
@@ -229,6 +241,13 @@ TEST_CASE("a pinned narrow load publishes directly into its fixed home") {
     REQUIRE(Count(lines, "uxth w22", "") == 0);
     REQUIRE(Count(lines, "mov w22", "") == 0);
     REQUIRE(Count(lines, "ldrb ", "[x22") == 1);
+}
+
+TEST_CASE("a pinned narrow load keeps a branch flag alias in its fixed home") {
+    const auto lines = EmitPinnedRead(PinnedReadShape::LoadU8Flags, false);
+    REQUIRE(Count(lines, "ldrb w23", "") == 1);
+    REQUIRE(Count(lines, "mov w23", "") == 0);
+    REQUIRE(Count(lines, "w23, lsl #24", "") == 1);
 }
 
 TEST_CASE("a pinned GPR supplies a sole memory address without a copy") {

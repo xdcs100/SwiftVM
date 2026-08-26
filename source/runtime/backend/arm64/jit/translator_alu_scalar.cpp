@@ -525,7 +525,8 @@ void JitTranslator::EmitOr(ir::Inst* inst) {
     auto pseudo_flags = GetPseudoFlags(inst);
     if (!pseudo_flags.Null() && inst->GetUses() == 0 && right.IsImm() &&
         right.GetLeft().imm.Get() == 0) {
-        auto value = context.R(left);
+        const auto pinned = pinned_w(left);
+        Register value = pinned ? Register{*pinned} : context.R(left);
         if (!pseudo_flags.branch_only) {
             BeginFlagsTokenProducer(pseudo_flags);
         }
