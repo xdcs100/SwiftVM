@@ -1669,17 +1669,32 @@ peepholes.
   groups pass 83 and 282 assertions on Mac and Orb.
   The promoted 20k and smallpt runs complete in 3.823 and 3.199 seconds; no stress run, diagnostic
   or new environment switch remains.
+- `f2b20c3` lets the decoder's successor-flags proof follow one direct unconditional jump, sharing
+  the existing one-transfer budget with direct calls. The jump and proved target span are registered
+  as one conservative SMC dependency; indirect or second transfers, wrapping ranges, flag reads and
+  unknown instructions still reject the proof. This exposes the already-existing region PFAF
+  sinking path for jump veneers such as CoreMark `0x402821 -> 0x402673`, removing hot full-flags
+  publication from several loops. The exact 20k retained-weight comparison keeps all 2,761 PCs /
+  2,864 versions and moves `3,467,792,831 -> 3,384,479,634` (`-83,313,197`, `-2.402485%`) with no
+  growing PC and CRC `0x382f`. `0x402593` shrinks 10 to six, `0x403360` and `0x4033ec` six to three,
+  and `0x402814` 11 to eight host instructions. Smallpt matches `99.990001%` of entries and moves
+  `227,528 -> 226,213` (`-0.577951%`) with no common growth and the canonical PPM. Dead-edge,
+  narrow and production region groups pass 180, 282 and 46 assertions on Mac and Orb. A fixed-seed
+  JCC differential A/B produced the same 25 pre-existing mismatch sequences with identical SHA in
+  both builds, so it was used only as a candidate-delta audit. The promoted CoreMark and smallpt
+  runs complete in 3.289 and 2.386 seconds; no stress run, diagnostic or new environment switch
+  remains.
 - Current default-region CoreMark, joined against the retained W67 guest-instruction/entry table,
-  covers `99.999694457%` of entries and measures `2.120248` SVM host instructions per guest
-  instruction. Reusing the unchanged FEX `f2e35f3` value `1.807` gives **`1.173353x`**, down from
+  covers `99.999694457%` of entries and measures `2.041986` SVM host instructions per guest
+  instruction. Reusing the unchanged FEX `f2e35f3` value `1.807` gives **`1.130042x`**, down from
   W67's `2.305x` and the later RE=0 refresh's `2.000x`. Dynamic return dispatch remains the largest
-  concentrated boundary pool, while the W67-weighted top remains `0x402814` at 11 host instructions
-  for four guest instructions across 418.65M retained entries. `0x402808` is now second at nine for
-  three across 416.7M, followed by the move-heavy `0x4039b8` and `0x403990`; `0x402668` is down to
-  eight for three. Both fixed-home transports are gone from the U16 compare family. Its remaining
-  cost is now genuine narrow flags alignment/publication and region-edge control, so audit those
-  mechanisms rather than widening another GetHost whitelist. Return-level work remains the dynamic
-  `current_loc` publication or a shorter invalidation-safe seven-instruction L1 hit path.
+  concentrated boundary pool. The W67-weighted top is now `0x402808` at nine host instructions for
+  three guest instructions across 416.7M retained entries, but it has no move transport. The next
+  broad mechanism is the move-heavy `0x4039b8`, `0x403990`, `0x403958`, `0x403930`, `0x403908` and
+  `0x4038e0` family, each emitting 11-12 moves in 26-27 instructions. `0x402668` is down to eight
+  for three and `0x402814` to eight for four. Audit the shared move mechanism before another narrow
+  flags whitelist. Return-level work remains the dynamic `current_loc` publication or a shorter
+  invalidation-safe seven-instruction L1 hit path.
 
 ## Orb loop
 
