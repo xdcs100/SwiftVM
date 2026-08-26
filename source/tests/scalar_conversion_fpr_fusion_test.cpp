@@ -59,6 +59,21 @@ IntrusivePtr<Block> MakeResidentStore(bool overwrite) {
     return block;
 }
 
+IntrusivePtr<Block> MakeNarrowResidentStore(bool overwrite) {
+    IntrusivePtr<Block> block{new Block(0, Location{0x8b80})};
+    auto value = block->GetHostFPR(HostRegIndex(kTarget), Imm{0u}).SetType(ValueType::U64);
+    auto narrow = block->ZeroExtend32(value);
+    if (overwrite) {
+        auto replacement = block->LoadUniform(Uniform{16, ValueType::U64});
+        block->SetHostFPR(replacement, HostRegIndex(kTarget), Imm{0u});
+    }
+    auto address = block->LoadUniform(Uniform{0, ValueType::U64});
+    block->StoreMemory(Operand{address}, narrow);
+    block->SetTerminal(terminal::ReturnToDispatch{});
+    block->ReIdInstr();
+    return block;
+}
+
 IntrusivePtr<Block> MakeConversionStore(bool overwrite) {
     IntrusivePtr<Block> block{new Block(0, Location{0x8b80})};
     auto current = block->GetHostFPR(HostRegIndex(kTarget), Imm{0u}).SetType(ValueType::V128);
@@ -145,6 +160,19 @@ TEST_CASE("resident scalar FPR reads store to memory without a GPR bridge") {
     REQUIRE(Count(overwritten, "str d17") == 0);
     REQUIRE(Count(overwritten, "mov x") == 1);
     REQUIRE(Count(overwritten, "str x") == 1);
+}
+
+TEST_CASE("resident narrow FPR reads store to memory without a GPR bridge") {
+    const auto direct = Emit(MakeNarrowResidentStore(false));
+    REQUIRE(Count(direct, "str s17") == 1);
+    REQUIRE(Count(direct, "mov x") == 0);
+    REQUIRE(Count(direct, "mov w") == 0);
+
+    const auto overwritten = Emit(MakeNarrowResidentStore(true));
+    REQUIRE(Count(overwritten, "str s17") == 0);
+    REQUIRE(Count(overwritten, "mov x") == 1);
+    REQUIRE(Count(overwritten, "mov w") == 1);
+    REQUIRE(Count(overwritten, "str w") == 1);
 }
 
 TEST_CASE("resident scalar conversions store to memory without a GPR bridge") {

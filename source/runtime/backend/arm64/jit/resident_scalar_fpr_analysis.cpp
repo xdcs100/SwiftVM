@@ -116,6 +116,8 @@ void ResidentScalarFPRAnalysis::AnalyzeMemoryStores(ir::Block* block) {
             continue;
         }
 
+        ir::Inst* source = &read;
+        ir::Inst* extension = nullptr;
         for (auto& scan : list) {
             if (scan.Id() <= read.Id()) {
                 continue;
@@ -124,17 +126,29 @@ void ResidentScalarFPRAnalysis::AnalyzeMemoryStores(ir::Block* block) {
                                                   scan.GetArg<ir::Imm>(1).Get() == target)) {
                 break;
             }
-            bool uses_read = false;
+            bool uses_source = false;
             for (const auto value : scan.GetValues()) {
-                uses_read |= value.Def() == &read;
+                uses_source |= value.Def() == source;
             }
-            if (!uses_read) {
+            if (!uses_source) {
+                continue;
+            }
+            if (!extension && ir::GetValueSizeByte(read.ReturnType()) == sizeof(u64) &&
+                scan.GetOp() == ir::OpCode::ZeroExtend32 &&
+                scan.GetArg<ir::Value>(0).Def() == &read && scan.GetUses(false) == 1) {
+                extension = &scan;
+                source = extension;
                 continue;
             }
             if (scan.GetOp() == ir::OpCode::StoreMemory &&
-                scan.GetArg<ir::Value>(1).Def() == &read) {
+                scan.GetArg<ir::Value>(1).Def() == source &&
+                ir::GetValueSizeByte(scan.GetArg<ir::Value>(1).Type()) ==
+                        (extension ? sizeof(u32) : ir::GetValueSizeByte(read.ReturnType()))) {
                 memory_stores.emplace(&scan, static_cast<u16>(target));
                 discarded.insert(&read);
+                if (extension) {
+                    discarded.insert(extension);
+                }
             }
             break;
         }
