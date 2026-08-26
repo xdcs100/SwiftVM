@@ -1719,12 +1719,26 @@ peepholes.
   dead-edge group pass 4 and 184 assertions on Mac and Orb. The post-refactor 2k screen completes in
   2.394 seconds with 2,761 PCs / 2,864 versions and `346,944,290` dynamic host instructions; no
   stress run, debug path or new environment switch remains.
+- `32cd3ed` folds branch-only U8/U16 equality comparisons when at least one operand is an exact
+  zero-extending narrow load. Because the branch requests only Z, the backend may commute the
+  operands and compare the loaded W value against the other register with `UXTB/UXTH`; other flags,
+  region PF/AF preservation, shifted operands and non-load pairs retain the general alignment path.
+  CoreMark's `0x402668` loop changes from `LDRH; LSL; SUBS` to `LDRH; CMP ..., UXTH`. Applying the
+  formal candidate entries to the prior shape covers `99.999998%` of host weight and moves
+  `3,469,019,672 -> 3,466,959,672` (`-2,060,000`, `-0.059383%`) with no growing PC and CRC `0x382f`.
+  `0x402668` contributes `-2,040,000` and `0x402745` contributes `-20,000`; both shrink by one host
+  instruction. The focused shape passes eight assertions and the dead-edge / narrow groups pass
+  184 / 297 assertions on Mac and Orb. The promoted CoreMark and smallpt gates complete in 3.152
+  and 2.308 seconds; smallpt retains all 2,730 PCs / 2,998 versions and the canonical PPM. No stress
+  run, debug path or new environment switch remains.
 - Current default-region CoreMark, joined against the retained W67 guest-instruction/entry table,
-  covers `99.999694457%` of entries and measures `1.965544` SVM host instructions per guest
-  instruction. Reusing the unchanged FEX `f2e35f3` value `1.807` gives **`1.087739x`**, down from
-  W67's `2.305x` and the later RE=0 refresh's `2.000x`. Dynamic return dispatch remains the largest
-  concentrated boundary pool. The W67-weighted instruction top is now the `0x402668` family at
-  eight host instructions for three guest instructions; `0x402808` also falls to eight for three.
+  still covers `99.999694457%` of entries. Applying the known 434.25M-entry `0x402668` reduction to
+  the previous exact denominator gives a conservative estimate of `1.929192` SVM host instructions
+  per guest instruction; it excludes the smaller `0x402745` reduction. Reusing the unchanged FEX
+  `f2e35f3` value `1.807` gives approximately **`1.067622x`**, down from W67's `2.305x` and the later
+  RE=0 refresh's `2.000x`. Dynamic return dispatch remains the largest concentrated boundary pool.
+  `0x402668` now emits seven host instructions for three guest instructions; `0x402808` emits eight
+  for three.
   The CRC family remains move-heavy after both safe fusions: `0x4039b8/0x403958` emit 24
   instructions and 11 moves, while `0x403990/0x403930/0x403908/0x4038e0` emit 23 and 10. Do not
   retry the failed multi-use fixed-home snapshot reuse. Return-level work remains the dynamic
