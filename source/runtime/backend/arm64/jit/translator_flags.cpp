@@ -77,16 +77,33 @@ Register JitTranslator::FlagsResultRegister(
 
 bool JitTranslator::CanRetainFlagsTokenResult(
         ir::Inst* producer, const Register& result) {
-    if (!producer || ir::GetValueSizeByte(producer->ReturnType()) != sizeof(u64)) {
+    if (!producer) {
+        return false;
+    }
+    const u32 width = ir::GetValueSizeByte(producer->ReturnType());
+    if (width != sizeof(u32) && width != sizeof(u64)) {
         return false;
     }
     if (!backend::IsFixedGPRHome(result.GetCode())) {
         return false;
     }
     const ir::Value value{producer};
+    auto is_publication_wrapper = [&](ir::Inst* wrapper) {
+        if (width != sizeof(u32) || !wrapper ||
+            wrapper->GetOp() != ir::OpCode::ZeroExtend32To64) {
+            return false;
+        }
+        auto source = wrapper->GetArg<ir::Value>(0);
+        while (source.Defined() && source.Def()->IsBitCastOperation()) {
+            source = source.Def()->GetArg<ir::Value>(0);
+        }
+        return source.Def() == producer &&
+               context.SharesGPR(source, ir::Value{wrapper});
+    };
 
     bool after_producer = false;
     bool published = false;
+    ir::Inst* publication_wrapper = nullptr;
     for (auto& inst : cur_block->GetInstList()) {
         if (&inst == producer) {
             after_producer = true;
@@ -97,9 +114,19 @@ bool JitTranslator::CanRetainFlagsTokenResult(
         }
         if (inst.GetOp() == ir::OpCode::SetHostGPR &&
             inst.GetArg<ir::Imm>(1).Get() == result.GetCode()) {
+            auto stored = inst.GetArg<ir::Value>(0);
+            while (stored.Defined() && stored.Def()->IsBitCastOperation()) {
+                stored = stored.Def()->GetArg<ir::Value>(0);
+            }
+            auto* wrapper = stored.Def();
+            bool publishes_producer = wrapper == producer;
+            if (!publishes_producer && is_publication_wrapper(wrapper)) {
+                publishes_producer = true;
+                publication_wrapper = wrapper;
+            }
             if (!published && inst.GetArg<ir::Imm>(2).Get() == 0 &&
                 context.IsHostWriteCoalesced(inst.Id()) &&
-                inst.GetArg<ir::Value>(0).Def() == producer) {
+                publishes_producer) {
                 published = true;
                 continue;
             }
@@ -110,6 +137,13 @@ bool JitTranslator::CanRetainFlagsTokenResult(
             return false;
         }
         if (inst.HasValue() && !inst.IsBitCastOperation()) {
+            if (!publication_wrapper && is_publication_wrapper(&inst)) {
+                publication_wrapper = &inst;
+                continue;
+            }
+            if (&inst == publication_wrapper) {
+                continue;
+            }
             const ir::Value other{&inst};
             if (context.SharesGPR(value, other)) {
                 return false;

@@ -188,6 +188,21 @@ TEST_CASE("flags-only arithmetic writes the result token directly") {
     REQUIRE(Contains(pinned, "bfxil x26, x21"));
     REQUIRE_FALSE(Contains(pinned, "mov x12, x21"));
 
+    std::vector<std::string> pinned_u32;
+    EmitBlock([](Block& block) {
+        auto left = block.GetHostGPR(HostRegIndex(21), Imm{0u})
+                            .SetType(ValueType::U32);
+        auto right = block.GetHostGPR(HostRegIndex(20), Imm{0u})
+                             .SetType(ValueType::U32);
+        auto result = block.Sub(left, Operand{right}).SetType(ValueType::U32);
+        block.SaveFlags(result, Flags::All);
+        auto published = block.ZeroExtend32To64(result).SetType(ValueType::U64);
+        block.SetHostGPR(published, HostRegIndex(21), Imm{0u});
+    }, &pinned_u32, true);
+
+    REQUIRE(Contains(pinned_u32, "subs w21"));
+    REQUIRE_FALSE(Contains(pinned_u32, "mov w12, w21"));
+
     std::vector<std::string> overwritten;
     EmitBlock([](Block& block) {
         auto left = block.GetHostGPR(HostRegIndex(21), Imm{0u})
