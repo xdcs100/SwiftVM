@@ -123,8 +123,10 @@ std::vector<std::string> Disassemble(arm64::JitContext& context) {
     return instructions;
 }
 
-std::vector<std::string> EmitNarrowBranchOnlyArithmetic(OpCode op,
-                                                        bool observe_result) {
+std::vector<std::string> EmitNarrowArithmetic(OpCode op,
+                                              bool observe_result,
+                                              Flags flags,
+                                              bool branch_only) {
     Config config{
             .loc_start = 0,
             .loc_end = 1ull << 48,
@@ -146,7 +148,11 @@ std::vector<std::string> EmitNarrowBranchOnlyArithmetic(OpCode op,
     } else {
         result = block->Neg(source).SetType(ValueType::U8);
     }
-    block->AppendInst(OpCode::BranchOnlyFlags, result, Flags::NZCV);
+    if (branch_only) {
+        block->AppendInst(OpCode::BranchOnlyFlags, result, flags);
+    } else {
+        block->SaveFlags(result, flags);
+    }
     if (observe_result) {
         block->StoreUniform(Uniform{8, ValueType::U8}, result);
     }
@@ -256,11 +262,26 @@ TEST_CASE("observed narrow logical identities keep their result") {
 TEST_CASE("dead narrow branch-only arithmetic omits result truncation") {
     for (const auto op : {OpCode::Add, OpCode::Sub, OpCode::Neg}) {
         CAPTURE(op);
-        const auto dead = EmitNarrowBranchOnlyArithmetic(op, false);
+        const auto dead =
+                EmitNarrowArithmetic(op, false, Flags::NZCV, true);
         REQUIRE(Count(dead, "lsr ") == 0);
 
-        const auto observed = EmitNarrowBranchOnlyArithmetic(op, true);
+        const auto observed =
+                EmitNarrowArithmetic(op, true, Flags::NZCV, true);
         REQUIRE(Count(observed, "lsr ") == 1);
+    }
+}
+
+TEST_CASE("dead narrow NZCV producers omit parity result retention") {
+    for (const auto op : {OpCode::Add, OpCode::Sub, OpCode::Neg}) {
+        CAPTURE(op);
+        const auto nzcv =
+                EmitNarrowArithmetic(op, false, Flags::NZCV, false);
+        REQUIRE(Count(nzcv, "lsr ") == 0);
+
+        const auto parity = EmitNarrowArithmetic(
+                op, false, Flags::NZCV | Flags::Parity, false);
+        REQUIRE(Count(parity, "lsr ") == 1);
     }
 }
 

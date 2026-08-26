@@ -335,6 +335,11 @@ private:
         [[nodiscard]] bool IsNZ_ZeroCV() const {
             return True(set & ir::Flags::NZ) && True(clear & ir::Flags::CV);
         }
+
+        [[nodiscard]] bool NeedsResultBits() const {
+            return True(set & (ir::Flags::Parity |
+                               ir::Flags::AuxiliaryCarry));
+        }
     };
 
     void Translate(ir::Inst *inst);

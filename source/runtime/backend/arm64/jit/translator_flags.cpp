@@ -198,7 +198,8 @@ void JitTranslator::FinishFlagsTokenProducer(const Register& result,
                                              ir::ValueType type,
                                              const PseudoFlags& pseudo,
                                              ir::Inst* producer) {
-    if (!FlagsRegsEnabled() || pseudo.branch_only || flags_token_valid) {
+    if (!FlagsRegsEnabled() || pseudo.branch_only || flags_token_valid ||
+        !True(pseudo.set & ir::Flags::Parity)) {
         return;
     }
     CaptureFlagsToken(result, type, producer);
