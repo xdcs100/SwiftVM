@@ -1281,6 +1281,27 @@ peepholes.
   claimed because the build-only planner-disabled control was not a valid runtime baseline. Local
   and Orb pinned/page-fault focuses pass 75 assertions across 13 cases. This stage ran no long
   benchmark, stress test or full suite.
+- The Orb phase-c mirror must be synchronized with the tracked checkout using the checksum command
+  below before every A/B. A partial source copy left the x86 frontend's AFP detection stale while
+  rebuilding newer runtime objects; that mixed binary incorrectly restored the legacy scalar-SSE
+  lane moves. The exact tracked HEAD with `SVM_X86_PIN_EXT=3` gives the calibrated smallpt baseline
+  used for the next stage: 2,802 PCs / 3,435 versions, `385,558` dynamic host instructions, 288
+  dynamic spill operations and the canonical PPM SHA
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`.
+- `3e47a16` lets a U32 producer retain its flags token in a fixed guest
+  GPR through the exact `ZeroExtend32To64 -> coalesced full SetHostGPR` publication. The wrapper and
+  producer must share the physical register; any later same-home write, fixed clobber or unrelated
+  overlapping SSA definition rejects the proof. This removes the otherwise required
+  `mov w12, wPin` without changing the fault or exit publication ABI. Against the exact tracked
+  HEAD, smallpt keeps 2,802 PCs / 3,435 versions and the canonical PPM while moving `385,558 ->
+  385,479`; its 100%-covered equal-entry comparison is `386,584 -> 386,505` (`-79`,
+  `-0.020435%`). CoreMark keeps 2,846 PCs / 3,379 versions and `crcfinal=0x382f` while moving
+  `5,823,593,568 -> 5,813,471,244`; the 100%-covered equal-entry comparison is
+  `5,884,553,649 -> 5,874,431,325` (`-10,122,324`, `-0.172015%`). Local and Orb flags focuses pass
+  41 assertions across seven cases; pinned/page-fault focuses pass 75 assertions across 13 cases.
+  A broader fixed-home publication remap grew smallpt `+4.736618%`; a generic x12 result-placement
+  pass did not improve the dominant regions. Both implementations and every diagnostic path were
+  removed. This stage ran no long benchmark, stress test or full suite.
 
 ## Orb loop
 
