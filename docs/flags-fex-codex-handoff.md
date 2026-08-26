@@ -1204,6 +1204,18 @@ peepholes.
   `399,441`, and CoreMark keeps 2,846 PCs / 3,379 versions plus `crcfinal=0x382f` while moving
   `5,868,557,584 -> 5,868,557,582` and 22 -> 20 dynamic spill operations. The Orb spill focus
   passes four cases / 26,861 assertions. This stage ran no long benchmark, stress test or full suite.
+- `0512649` extends the existing resident-FPR memory-store proof through the exact
+  `GetHostFPR(U64) -> ZeroExtend32 -> StoreMemory(U32)` chain produced by x86 `MOVSS` stores. The
+  read and bridge must each have one use, the store width must remain U32, and any same-home write
+  or existing opaque barrier rejects the fusion. ARM64 then emits `STR S` directly instead of
+  `lane-to-GPR + W copy + STR W`. The bounded c-ray static common set falls `214,907 -> 214,749`
+  (`-158`, `-0.073520%`): 34 PCs shrink and none grow. On the explicitly partial
+  22.719349%-covered retained-entry subset, host work falls `9,421,515,234 -> 9,357,193,844`
+  (`-64,321,390`, `-0.682707%`); `0x402e70` contributes `-45,896,074`. The deterministic c-ray
+  oracle remains SHA `89ccd2e15dba67378197d05524a6223795f8b8ab2d11f4d40deaef4af9f35c6e`.
+  Smallpt stays exact at `399,441`, and CoreMark stays at `5,868,557,582` with 2,846 PCs / 3,379
+  versions and `crcfinal=0x382f`. Local and Orb scalar focuses pass 22 cases with 1,020 / 1,025
+  assertions. This stage ran no long benchmark, stress test or full suite.
 
 ## Orb loop
 
