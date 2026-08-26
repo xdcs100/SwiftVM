@@ -1641,15 +1641,32 @@ peepholes.
   weighted `361,475 -> 359,309` (`-0.599212%`). Static shape and pending-Signal coverage pass 28
   and six assertions on Mac and Orb. The promoted 20k and smallpt runs complete in 3.289 and 2.369
   seconds; no stress run, full suite, diagnostic or new environment switch remains.
+- `673fbe1` extends the existing pinned low-alias proof from U32 arithmetic to exact same-width
+  U8/U16 `ADD/SUB`. A zero-extended narrow load can now publish directly into its fixed GPR home,
+  and a later low alias consumes that W register while the proof still rejects intervening target
+  writes, helper clobbers and unrecognized consumers. CoreMark's `movzbl (%rdx), %edx; cmp %dx,
+  %r14w` block at `0x402814` drops both the publication `MOV` and alias `UXTH`, shrinking 15 to 13
+  host instructions. The exact 20k raw total moves `3,480,422,816 -> 3,476,032,828`; the matched
+  weighted comparison covers `99.994908%` of entries and moves `3,480,317,008 -> 3,476,036,977`
+  (`-4,280,031`, `-0.122978%`) with no growing common PC and CRC `0x382f`. The candidate compile
+  set is deterministic at 2,761 PCs / 2,864 versions; its exact weighted total is `3,476,032,843`.
+  Smallpt retains the canonical PPM. Static fixed-home coverage passes six assertions and a real
+  JIT execution test checks 256 narrow compare inputs plus ZF/CF/SF/OF/PF-derived conditions on Mac
+  and Orb. A bounded fixed-seed ALU A/B produced the identical set of 73 pre-existing mismatches in
+  both binaries, so it was used only as a candidate-delta audit rather than claimed as a passing
+  suite. The promoted 20k and smallpt runs complete in 3.055 and 2.361 seconds; no stress run,
+  diagnostic or new environment switch remains.
 - Current default-region CoreMark, joined against the retained W67 guest-instruction/entry table,
-  covers `99.999987528%` of entries and measures `2.171152` SVM host instructions per guest
-  instruction. Reusing the unchanged FEX `f2e35f3` value `1.807` gives **`1.201523x`**, down from
+  covers `99.999694457%` of entries and measures `2.154192` SVM host instructions per guest
+  instruction. Reusing the unchanged FEX `f2e35f3` value `1.807` gives **`1.192137x`**, down from
   W67's `2.305x` and the later RE=0 refresh's `2.000x`. Dynamic return dispatch remains the largest
-  concentrated boundary pool after removing one static instruction from every inline-L1 exit:
-  `0x403383` executes 15.52M times in the formal table and now has ten production instructions.
-  The next return-level gain requires eliminating or deferring the dynamic `current_loc`
-  publication, or shortening the seven-instruction hit path without weakening Signal and SMC
-  invalidation behavior; another Get/SetHost bridge whitelist will not close this pool.
+  concentrated boundary pool, but the W67-weighted next head is now the narrow compare/flags family.
+  `0x402814` still emits 13 host instructions for four guest instructions across 418.65M retained
+  entries; `0x402668` emits 10 for three across 434.25M, and `0x402808` emits nine for three across
+  416.7M. The publication transport is gone at `0x402814`; its remaining cost is the other pinned
+  U16 input extraction plus narrow flags alignment/publication. Audit that flags mechanism before
+  widening another fixed-home consumer whitelist. Return-level work remains the dynamic
+  `current_loc` publication or a shorter invalidation-safe seven-instruction L1 hit path.
 
 ## Orb loop
 
