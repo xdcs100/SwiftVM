@@ -1230,6 +1230,22 @@ peepholes.
   the scalar focus passes 1,020 / 1,025 assertions. A broader direct-resident-read variant added no
   c-ray static reduction and was removed. This stage ran no long benchmark, stress test or full
   suite.
+- `02a5e77` removes a sole-use simple `GetOperand` address copy when its source is an exact full-64
+  pinned `GetHostGPR` mapping. The proof accepts only direct `LoadMemory`/`StoreMemory` consumers,
+  rejects any intervening write to the pin, and rejects caller-saved-pin helper boundaries. The
+  memory emitter then reads the fixed X register directly; ordinary SSA addresses retain the
+  existing RA lifetime tie. Smallpt keeps 2,802 PCs / 3,435 versions, zero spills and the exact PPM
+  while moving `399,439 -> 396,873` (`-2,566`, `-0.642401%`); `0x4192f0` contributes `-2,502`.
+  CoreMark keeps 2,846 PCs / 3,379 versions and `crcfinal=0x382f` while moving
+  `5,868,557,582 -> 5,849,153,108` (`-19,404,474`, `-0.330652%`). The bounded c-ray static common
+  set falls `214,517 -> 214,381`: 101 PCs shrink and none grow. On the explicitly partial
+  22.719336%-covered retained-entry subset, host work falls `9,345,619,486 -> 9,334,177,681`
+  (`-11,441,805`, `-0.122430%`). The deterministic c-ray oracle remains SHA
+  `89ccd2e15dba67378197d05524a6223795f8b8ab2d11f4d40deaef4af9f35c6e`. Local and Orb pinned/page-
+  fault focuses pass 52 + 21 assertions. A broader live pinned-publication prototype reduced the
+  covered c-ray shape but made even `16x12/s1` time out; it was fully removed after confirming the
+  committed baseline completes in one second. This stage ran no long benchmark, stress test or
+  full suite.
 
 ## Orb loop
 
