@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`d5e45c7`** `perf: reuse pinned load addresses`
+- Code tip: **`7194669`** `perf: publish signed narrow loads directly`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -19,6 +19,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 
 | Commit | What |
 |---|---|
+| `7194669` | Publish a signed U8/U16 memory load directly into its fixed GPR home and keep audited low-32 SignExtend/Mul consumers on that home |
 | `d5e45c7` | Keep a post-publication full-width load alias on its pinned home when its sole later role is a memory address |
 | `38cea6e` | Feed the known zero-extended W result of LDRB/LDRH directly to a dead narrow immediate branch compare |
 | `b734438` | Follow one static direct call in the dead-successor flags proof when the callee overwrites every incoming flag before control flow, and track the inspected callee prefix for SMC |
@@ -770,9 +771,10 @@ peepholes.
    read the fixed home directly while retaining snapshot, width and helper-clobber proofs; the
    same `Add` extension was only `-51` and is closed. Selective R12/R14 pinning is landed; do not extend
    the map to R13/R15 without resolving the Mac 15-register hang. The pre-R12 bounded emitted-write census has
-   31,705 weighted `SetHostGPR` instructions: 13,002 are `GetHostGPR`-root guest copies, while the
-   3,944 `SignExtend` pool is now closed. Recount roots after each landed stage; do not treat the
-   remaining total as a generally safe GetHost elimination. Another 5,157 `Sub`-root live writes
+   31,705 weighted `SetHostGPR` instructions: 13,002 are `GetHostGPR`-root guest copies. The older
+   3,944 `SignExtend` pool and the signed-load publication/low-alias pool are now closed. Recount
+   roots after each landed stage; do not treat the remaining total as a generally safe GetHost
+   elimination. Another 5,157 `Sub`-root live writes
    are Mac biased-memory stack updates separated from publication by a faulting store; Linux
    identity already folds the exact safe form into pre-index stores, so this is not a remaining
    FEX-alignment pool.
@@ -1539,6 +1541,20 @@ peepholes.
   canonical PPM while moving raw `361,711 -> 361,709` and weighted `361,729 -> 361,727`.
   Existing pinned-GPR publication/address coverage passes 30 assertions across ten cases on Mac
   and Orb; no temporary diagnostic, feature switch or compatibility path remains.
+- `7194669` extends fixed-home publication through an allocator-coalesced signed U8/U16 memory
+  load. The load emits `LDRSB/LDRSH` directly into the published home and suppresses the separate
+  narrow sign extension, outer low-32 publication wrapper and `SetHostGPR`. A post-publication
+  low-32 alias may remain on that home only when every use is an audited `SignExtend` or left-hand
+  U32 `Mul`; the proof closes the complete use graph and rejects target rewrites or caller-saved
+  helper clobbers before the last use. Exact 20k CoreMark raw host work moves
+  `3,666,996,824 -> 3,625,676,818`, and the 100%-covered weighted comparison moves
+  `3,666,996,839 -> 3,625,676,833` (`-41,320,006`, `-1.126808%`) with no growing PC and CRC
+  `0x382f`. The 2k screen moves `366,844,307 -> 362,712,301`. Units/versions remain
+  2,820 / 2,915. Smallpt keeps all 2,792 PCs / 3,052 versions and the canonical PPM while moving
+  raw `361,709 -> 361,697` and weighted `361,727 -> 361,715`. Orb pinned-GPR coverage passes
+  73 assertions across 17 cases, and the signed-load multi-consumer case passes six assertions.
+  The promoted 20k run completes in 3.476 seconds; no stress run, full suite, diagnostic or new
+  environment switch remains.
 
 ## Orb loop
 
