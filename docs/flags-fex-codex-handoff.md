@@ -748,6 +748,7 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 | Pinned-copy low-32 `BitExtract` address aliases | the focused local/Orb case passed, but bounded smallpt and 1,000-iteration CoreMark were both byte-identical with 100% weighted coverage. The emitter hook, matcher extension and test were removed. |
 | Multi-use fixed-home snapshot reuse | The exact post-publication Xor/narrow-alias graph shrank three formal CoreMark CRC blocks by two instructions each and the common subset by `9,120,008`, but changed `crcfinal` to `0x4555`. A later consumer still requires the original snapshot even when the visible target-home overwrite window appears closed. The matcher, diagnostics and test were fully removed. |
 | Direct pinned immediate publication | The broad constant form shrank the formal common CoreMark subset by `16,240,214` but returned CRC `0x6096`. Restricting it to the audited `LoadImm(8) -> home 0` shape still shrank `13,400,033` and returned CRC `0x398e`. Writing the fixed home at the producer crosses an old-value observation not represented by the local alias whitelist; the emitter path, state and test were fully removed. |
+| Disable inline indirect L1 and use the existing RSB path | The exact 2k CoreMark unit/version set and CRC remain stable, but weighted host work grows `351,368,645 -> 368,914,549` (`+4.993588%`). The current guarded RSB pop is longer than the seven-instruction inline-L1 hit path; do not flip the existing feature or re-enable RSB pushes while indirect L1 is active without a new continuation ABI. |
 
 ## Next ready (pick one, measure, revert on 124/134)
 
@@ -1627,6 +1628,14 @@ peepholes.
   `361,466 -> 361,457` and weighted `361,484 -> 361,475`. Narrow and pinned-load coverage passes
   270 and 11 assertions on Mac and Orb. The promoted 20k and smallpt runs complete in 3.264 and
   2.431 seconds; no stress run, full suite, diagnostic or new environment switch remains.
+- Current default-region CoreMark, joined against the retained W67 guest-instruction/entry table,
+  covers `99.999987528%` of entries and measures `2.177468` SVM host instructions per guest
+  instruction. Reusing the unchanged FEX `f2e35f3` value `1.807` gives **`1.205018x`**, down from
+  W67's `2.305x` and the later RE=0 refresh's `2.000x`. The largest newly re-audited residual is
+  dynamic return dispatch: `0x403383` executes 15.52M times in the formal table, with nine of its
+  eleven production instructions classified as boundary. Its inline-L1 hit is already the audited
+  `LDP + TBNZ + BFI + LDP + CMP + CSEL + BR` sequence; closing this pool requires an invalidation-
+  safe host-return continuation or a shorter return ABI, not another Get/SetHost bridge whitelist.
 
 ## Orb loop
 
