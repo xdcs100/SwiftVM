@@ -713,7 +713,7 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 | Zero-register `SetHostGPR` publication | smallpt / c-ray equal-entry only `-1` / `-22`; existing GPR coalescing already absorbs it, fully reverted |
 | Transparent `BitCast` zero-store graph | formal smallpt and c-ray are byte-identical at every equal-entry PC; the proof reaches no remaining materialization and was fully reverted |
 | Pinned GPR immediate-offset memory address | smallpt is byte-identical and c-ray's partial retained-entry subset saves only `0.012823%`; the extension was fully reverted |
-| Dead overwritten `SetHostGPR` publication | the common smallpt subset shrinks, but unit/version formation diverges, 1,675 dynamic spills appear, and c-ray `64x48/s1` times out at eight seconds; the IR-lifetime prototype and its test were fully removed |
+| Dead overwritten `SetHostGPR` IR deletion | the common smallpt subset shrinks, but unit/version formation diverges, 1,675 dynamic spills appear, and c-ray `64x48/s1` times out at eight seconds; the IR-lifetime prototype and its test were fully removed |
 | Remaining absolute `GetOperand` materialization | 21.75M left-immediate instances are true two-part constants; ADRP/literal alternatives do not preserve the current relocation and mapping contract |
 | Saved-flags compound `CondSet` | two-instruction HI/LS and GE/LT forms were implemented and validated, but execute 0 times in formal smallpt/CoreMark and the c-ray audit sample; GT/LE still need three inputs, so the zero-gain prototype was removed |
 | General narrow `TEST` direct-`And` flags | 496-PC bounded A/B had 29 shrinking and 31 growing PCs, only 13 net static instructions and `-623` retained-formal-weighted instructions; fully reverted |
@@ -1265,6 +1265,21 @@ peepholes.
   retains its two incumbent failures: the stale default-OFF assertion and the immediate-shift case
   reproduced with the new matcher disabled. This stage ran no long benchmark, stress test or full
   suite.
+- `86b104f` omits an actually emitted pinned-GPR publication when the next access to that home is a
+  complete overwrite. Unlike the rejected IR-deletion prototype, it leaves IR use counts, register
+  allocation and unit formation untouched. The proof rejects a target read, partial rewrite,
+  fault/helper, uniform-address barrier, `SetLocation` and local control; a later coalesced rewrite
+  must also have a publication root after the omitted store. Smallpt keeps all 2,802 PCs / 3,435
+  versions, zero spills and the exact PPM while moving `394,264 -> 391,408` (`-2,856`,
+  `-0.724388%`); the equal-entry comparison is `394,282 -> 391,426` (`-0.724355%`), with every
+  changed PC smaller and `0x41928c` contributing `-2,502`. CoreMark keeps all 2,846 PCs / 3,379
+  versions, its existing 20 dynamic spills and `crcfinal=0x382f` while moving
+  `5,775,449,473 -> 5,697,687,040` (`-77,762,433`, `-1.346431%`). The bounded c-ray static candidate
+  completes in 0.936 seconds and the deterministic oracle remains SHA
+  `89ccd2e15dba67378197d05524a6223795f8b8ab2d11f4d40deaef4af9f35c6e`; no c-ray density delta is
+  claimed because the build-only planner-disabled control was not a valid runtime baseline. Local
+  and Orb pinned/page-fault focuses pass 75 assertions across 13 cases. This stage ran no long
+  benchmark, stress test or full suite.
 
 ## Orb loop
 
