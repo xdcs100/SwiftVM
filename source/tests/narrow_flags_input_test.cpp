@@ -19,7 +19,8 @@ using namespace swift::runtime::ir;
 
 std::vector<std::string> EmitNarrowSub(ValueType type,
                                        bool reuse_extract,
-                                       bool branch_only = false) {
+                                       bool branch_only = false,
+                                       bool memory_source = false) {
     Config config{
             .loc_start = 0,
             .loc_end = 1ull << 48,
@@ -37,7 +38,9 @@ std::vector<std::string> EmitNarrowSub(ValueType type,
     if (branch_only) {
         right = Operand{block->LoadImm(Imm{3u}).SetType(type)};
     }
-    auto extract = block->BitExtract(source, Imm{0u}, Imm{bits}).SetType(type);
+    auto extract = memory_source
+            ? block->LoadMemory(Operand{source}).SetType(type)
+            : block->BitExtract(source, Imm{0u}, Imm{bits}).SetType(type);
     auto result = block->Sub(extract, right).SetType(type);
     block->SaveFlags(result, Flags::All);
     if (branch_only) {
@@ -120,4 +123,16 @@ TEST_CASE("dead narrow immediate branches consume low extracts directly") {
     REQUIRE(Count(instructions, "uxtb ") == 1);
     REQUIRE(Count(instructions, "cmp ") == 1);
     REQUIRE(Count(instructions, "lsl ") == 0);
+}
+
+TEST_CASE("dead narrow immediate branches keep loaded widths") {
+    for (const auto type : {ValueType::U8, ValueType::U16}) {
+        CAPTURE(type);
+        const auto instructions = EmitNarrowSub(type, false, true, true);
+        REQUIRE(Count(instructions, type == ValueType::U8 ? "ldrb " : "ldrh ") ==
+                1);
+        REQUIRE(Count(instructions, type == ValueType::U8 ? "uxtb " : "uxth ") ==
+                0);
+        REQUIRE(Count(instructions, "cmp ") == 1);
+    }
 }

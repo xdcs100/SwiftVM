@@ -157,12 +157,20 @@ void JitTranslator::EmitSub(ir::Inst* inst) {
         const auto result = context.W(ir::Value{inst});
         const auto pinned = pinned_w(left_input);
         const auto source = pinned ? *pinned : context.W(left_input);
-        if (dead_narrow_immediate_branch->width == sizeof(u8)) {
-            __ Uxtb(result, source);
-        } else {
-            __ Uxth(result, source);
+        const bool zero_extended_load = left_input.Def() &&
+                left_input.Def()->GetOp() == ir::OpCode::LoadMemory &&
+                ir::GetValueSizeByte(left_input.Def()->ReturnType()) ==
+                        dead_narrow_immediate_branch->width;
+        Register compare = source;
+        if (!zero_extended_load) {
+            if (dead_narrow_immediate_branch->width == sizeof(u8)) {
+                __ Uxtb(result, source);
+            } else {
+                __ Uxth(result, source);
+            }
+            compare = result;
         }
-        __ Cmp(result, dead_narrow_immediate_branch->immediate);
+        __ Cmp(compare, dead_narrow_immediate_branch->immediate);
         return;
     }
     auto left = inst->GetArg<ir::Value>(0);
