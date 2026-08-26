@@ -157,6 +157,7 @@ add_library(swift_runtime STATIC
         backend/arm64/jit/translator_narrow_flags_input.cpp
         backend/arm64/jit/translator_dead_gpr_write.cpp
         backend/arm64/jit/translator_pinned_gpr_copy.cpp
+        backend/arm64/jit/translator_pinned_load_update.cpp
         backend/arm64/jit/translator_pinned_memory.cpp
         backend/arm64/jit/translator_narrow_extract.cpp
         backend/arm64/jit/scalar_fpr_liveness.cpp

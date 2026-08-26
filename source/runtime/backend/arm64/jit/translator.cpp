@@ -754,6 +754,7 @@ JitTranslator::PrepareBlockState(ir::Block* block) {
             std::max<size_t>(disable_instructions.size(), block->MaxInstrId()));
     PrepareDeadPinnedGPRWrites(block);
     PreparePinnedGPRCopies(block);
+    PreparePinnedLoadUpdates(block);
     PreparePinnedMemoryValues(block);
     PrepareDeadEdgeIntegerBranch(block);
     PrepareDeadNarrowImmediateBranch();

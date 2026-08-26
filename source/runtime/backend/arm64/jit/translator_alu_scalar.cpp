@@ -13,6 +13,14 @@ namespace swift::runtime::backend::arm64 {
 #define __ masm.
 
 void JitTranslator::EmitAdd(ir::Inst* inst) {
+    if (auto update = pinned_load_update_instructions.find(inst);
+        update != pinned_load_update_instructions.end() &&
+        inst == update->second.update) {
+        const auto reproved = MatchPinnedLoadUpdate(inst);
+        ASSERT_MSG(reproved && *reproved == update->second,
+                   "pinned load update proof diverged at IR {}", inst->Id());
+        return;
+    }
     auto left = inst->GetArg<ir::Value>(0);
     auto left_input = ResolveNarrowFlagsInput(left, inst);
     auto right = inst->GetArg<ir::Operand>(1);

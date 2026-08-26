@@ -1300,6 +1300,14 @@ void JitTranslator::EmitGetHostFPR(ir::Inst* inst) {
 }
 
 void JitTranslator::EmitSetHostGPR(ir::Inst* inst) {
+    if (auto update = pinned_load_update_instructions.find(inst);
+        update != pinned_load_update_instructions.end() &&
+        inst == update->second.publication) {
+        const auto reproved = MatchPinnedLoadUpdate(update->second.update);
+        ASSERT_MSG(reproved && *reproved == update->second,
+                   "pinned load update proof diverged at IR {}", inst->Id());
+        return;
+    }
     if (dead_pinned_gpr_writes.contains(inst)) {
         ASSERT_MSG(IsDeadPinnedGPRWrite(inst),
                    "dead pinned GPR write proof diverged at IR {}", inst->Id());
@@ -1632,14 +1640,23 @@ void JitTranslator::EmitLoadMemory(ir::Inst* inst) {
                                  structured_guest_ea,
                                  operand.GetOp() == ir::OperandOp::Plus,
                                  false);
-    auto vixl_operand =
-            EmitMemOperand(operand,
-                           type,
-                           false,
-                           q_access && !fold_host_base,
-                           !q_access,
-                           structured_guest_ea,
-                           inst);
+    auto load_update = pinned_load_updates.find(inst);
+    auto vixl_operand = load_update != pinned_load_updates.end()
+            ? MemOperand{XRegister(load_update->second.target),
+                         load_update->second.offset,
+                         PreIndex}
+            : EmitMemOperand(operand,
+                             type,
+                             false,
+                             q_access && !fold_host_base,
+                             !q_access,
+                             structured_guest_ea,
+                             inst);
+    if (load_update != pinned_load_updates.end()) {
+        const auto reproved = MatchPinnedLoadUpdate(load_update->second.update);
+        ASSERT_MSG(reproved && *reproved == load_update->second,
+                   "pinned load update proof diverged at IR {}", inst->Id());
+    }
     if (direct_narrow_consumer && vixl_operand.GetAddrMode() != Offset &&
         vixl_operand.GetBaseRegister().GetCode() ==
                 context.R(ir::Value{narrow_consumer}).GetCode()) {

@@ -133,6 +133,19 @@ private:
     };
     [[nodiscard]] std::optional<PreIndexMemoryUpdate>
     MatchPreIndexMemoryUpdate(ir::Inst* update) const;
+    struct PinnedLoadUpdate {
+        ir::Inst* load{};
+        ir::Inst* update{};
+        ir::Inst* publication{};
+        ir::Inst* base_read{};
+        u16 target{};
+        s16 offset{};
+
+        bool operator==(const PinnedLoadUpdate&) const = default;
+    };
+    void PreparePinnedLoadUpdates(ir::Block* block);
+    [[nodiscard]] std::optional<PinnedLoadUpdate>
+    MatchPinnedLoadUpdate(ir::Inst* update);
     struct ScalarFPRPublication {
         ir::Inst* low_store{};
         ir::Inst* high_store{};
@@ -640,6 +653,8 @@ private:
     std::map<ir::Inst*, ir::Value> narrow_flags_inputs{};
     std::map<ir::Inst*, u16> pinned_gpr_values{};
     std::map<ir::Inst*, PinnedGPRCopy> pinned_gpr_copies{};
+    std::map<ir::Inst*, PinnedLoadUpdate> pinned_load_updates{};
+    std::map<ir::Inst*, PinnedLoadUpdate> pinned_load_update_instructions{};
     std::map<ir::Inst*, NarrowExtractExtension> narrow_extract_extensions{};
     std::map<ir::Inst*, ir::Inst*> fused_narrow_extracts{};
     std::map<ir::Inst*, ir::Inst*> fused_narrow_extract_shifts{};
