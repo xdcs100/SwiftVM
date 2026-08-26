@@ -1628,14 +1628,28 @@ peepholes.
   `361,466 -> 361,457` and weighted `361,484 -> 361,475`. Narrow and pinned-load coverage passes
   270 and 11 assertions on Mac and Orb. The promoted 20k and smallpt runs complete in 3.264 and
   2.431 seconds; no stress run, full suite, diagnostic or new environment switch remains.
+- `8c8b26d` removes the per-site cold `RET` from production inline-L1 indirect exits. `TST` retains
+  the Signal bit result while the cache address and entry load are formed; `CCMP` then accepts the
+  cache tag only when no Signal is pending, so `CSEL + BR` selects either the hit entry or the
+  unchanged trampoline continuation. The hot hit remains seven instructions, Signal still returns
+  through the trampoline, and low-bit SMC requests retain their previous behavior. Exact 20k
+  CoreMark raw host work moves `3,512,247,843 -> 3,480,422,816`, and the 100%-covered weighted
+  comparison moves `3,512,247,858 -> 3,480,422,901` (`-31,824,957`, `-0.906114%`) with no growing
+  PC and CRC `0x382f`. The 2k screen moves weighted `351,368,645 -> 348,185,623`; `0x403383`
+  shrinks from 11 to 10 host instructions. Units/versions remain 2,820 / 2,915. Smallpt keeps all
+  2,792 PCs / 3,052 versions and the canonical PPM while moving raw `361,457 -> 359,291` and
+  weighted `361,475 -> 359,309` (`-0.599212%`). Static shape and pending-Signal coverage pass 28
+  and six assertions on Mac and Orb. The promoted 20k and smallpt runs complete in 3.289 and 2.369
+  seconds; no stress run, full suite, diagnostic or new environment switch remains.
 - Current default-region CoreMark, joined against the retained W67 guest-instruction/entry table,
-  covers `99.999987528%` of entries and measures `2.177468` SVM host instructions per guest
-  instruction. Reusing the unchanged FEX `f2e35f3` value `1.807` gives **`1.205018x`**, down from
-  W67's `2.305x` and the later RE=0 refresh's `2.000x`. The largest newly re-audited residual is
-  dynamic return dispatch: `0x403383` executes 15.52M times in the formal table, with nine of its
-  eleven production instructions classified as boundary. Its inline-L1 hit is already the audited
-  `LDP + TBNZ + BFI + LDP + CMP + CSEL + BR` sequence; closing this pool requires an invalidation-
-  safe host-return continuation or a shorter return ABI, not another Get/SetHost bridge whitelist.
+  covers `99.999987528%` of entries and measures `2.171152` SVM host instructions per guest
+  instruction. Reusing the unchanged FEX `f2e35f3` value `1.807` gives **`1.201523x`**, down from
+  W67's `2.305x` and the later RE=0 refresh's `2.000x`. Dynamic return dispatch remains the largest
+  concentrated boundary pool after removing one static instruction from every inline-L1 exit:
+  `0x403383` executes 15.52M times in the formal table and now has ten production instructions.
+  The next return-level gain requires eliminating or deferring the dynamic `current_loc`
+  publication, or shortening the seven-instruction hit path without weakening Signal and SMC
+  invalidation behavior; another Get/SetHost bridge whitelist will not close this pool.
 
 ## Orb loop
 
