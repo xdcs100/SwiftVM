@@ -189,6 +189,38 @@ void JitTranslator::EmitSub(ir::Inst* inst) {
     if (!pseudo_flags.Null()) {
         const bool needs_nzcv = True(pseudo_flags.set & ir::Flags::NZCV);
         if (needs_nzcv && ir::GetValueSizeByte(inst->ReturnType()) <= 2) {
+            const u32 width = ir::GetValueSizeByte(inst->ReturnType());
+            auto is_zero_extended_load = [width](ir::Value value) {
+                return value.Def() &&
+                       value.Def()->GetOp() == ir::OpCode::LoadMemory &&
+                       ir::GetValueSizeByte(value.Def()->ReturnType()) == width;
+            };
+            const bool branch_only_zero_compare = pseudo_flags.branch_only &&
+                    pseudo_flags.set == ir::Flags::Zero &&
+                    !RegionBranchPFAFActive(inst) &&
+                    right.GetLeft().IsValue() && right.GetRight().Null() &&
+                    right_operand.IsPlainRegister();
+            if (branch_only_zero_compare) {
+                const bool left_is_load = is_zero_extended_load(left_input);
+                const bool right_is_load =
+                        is_zero_extended_load(right.GetLeft().value);
+                if (left_is_load || right_is_load) {
+                    const auto right_register = right_operand.GetRegister().W();
+                    const auto extend = width == sizeof(u8) ? UXTB : UXTH;
+                    if (left_is_load && right_is_load) {
+                        __ Cmp(left_register.W(), right_register);
+                    } else if (left_is_load) {
+                        __ Cmp(left_register.W(),
+                               Operand{right_register, extend});
+                    } else {
+                        __ Cmp(right_register,
+                               Operand{left_register.W(), extend});
+                    }
+                    FinishFlagsTokenProducer(
+                            result, inst->ReturnType(), pseudo_flags, inst);
+                    return;
+                }
+            }
             Register af_left = left_register.W();
             if (context.SharesGPR(left_input, ir::Value{inst})) {
                 auto saved = context.GetTmpX();
@@ -201,7 +233,7 @@ void JitTranslator::EmitSub(ir::Inst* inst) {
                 __ Mov(saved.W(), right_operand);
                 right_operand = Operand{saved.W()};
             }
-            const u32 shift = 32 - ir::GetValueSizeByte(inst->ReturnType()) * 8;
+            const u32 shift = 32 - width * 8;
             __ Lsl(result.W(), af_left.W(), shift);
             Operand aligned_right;
             if (right_operand.IsImmediate()) {

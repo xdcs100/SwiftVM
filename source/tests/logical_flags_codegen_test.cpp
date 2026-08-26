@@ -621,6 +621,57 @@ TEST_CASE("dead-edge integer compares branch on raw host flags") {
     }
 }
 
+TEST_CASE("branch-only narrow equality compares extend the register operand") {
+    for (const auto opcode : {swift::u8{0x74}, swift::u8{0x75}}) {
+        const std::array<swift::u8, 14> code{
+                0x66, 0x44, 0x3b, 0x62, 0x02,
+                opcode, 0x04,
+                0x39, 0xc0,
+                0xf4, 0x90,
+                0x39, 0xc9,
+                0xf4,
+        };
+        DirectMemory memory;
+        const auto address = reinterpret_cast<swift::VAddr>(code.data());
+        IntrusivePtr<Block> block{new Block(0, Location{address})};
+        Assembler assembler{block.get()};
+        FeatureSet features{};
+        constexpr auto arm64_features = Arm64Features::FlagM;
+        swift::x86::X64Decoder decoder{
+                address, &memory, &assembler, true, arm64_features, false, false,
+                features};
+        decoder.Decode();
+
+        FlagsEliminationPass::Run(block.get(), nullptr, features);
+        block->ReIdInstr();
+        Config config{
+                .loc_start = 0,
+                .loc_end = 1ull << 48,
+                .enable_jit = true,
+                .has_local_operation = false,
+                .backend_isa = kArm64,
+                .global_opts = Optimizations::All,
+                .arm64_features = arm64_features,
+        };
+        AddressSpace address_space{config};
+        RegAlloc alloc{block->MaxInstrId(),
+                       address_space.GetTrampolines().GetGPRRegs(),
+                       address_space.GetTrampolines().GetFPRRegs(), features};
+        RegisterAllocPass::Run(block.get(), &alloc, false, features);
+        arm64::JitContext context{address_space.GetDefaultModule(), alloc};
+        arm64::JitTranslator translator{context};
+        translator.Translate(block.get());
+        context.Finish();
+
+        const auto instructions = Disassemble(context);
+        CAPTURE(opcode);
+        REQUIRE(Count(instructions, "cmp ") == 1);
+        REQUIRE(Count(instructions, "uxth") == 1);
+        REQUIRE(Count(instructions, "lsl ") == 0);
+        REQUIRE(Count(instructions, "subs") == 0);
+    }
+}
+
 TEST_CASE("dead-edge proof follows one direct call to a dominating flag write") {
     auto decode_marker = [](const std::array<swift::u8, 36>& code) {
         DirectMemory memory;
