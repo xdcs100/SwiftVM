@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`9d299aa`** `perf: load directly into narrow extensions`
+- Code tip: **`53333fc`** `perf: fuse adjacent narrow extensions`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -19,6 +19,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 
 | Commit | What |
 |---|---|
+| `53333fc` | Fold an exact adjacent U8/U16 low extract and `ZeroExtend32` into one `UXTB/UXTH` even when their allocated registers differ |
 | `9d299aa` | Emit a sole adjacent U8/U16 memory-load extension directly into the consumer register even when linear scan assigned distinct registers |
 | `c87a2a1` | Keep an exact narrow load's ordinary saved-flags zero-test alias on its pinned home instead of copying it to a temporary W register |
 | `7194669` | Publish a signed U8/U16 memory load directly into its fixed GPR home and keep audited low-32 SignExtend/Mul consumers on that home |
@@ -802,9 +803,10 @@ peepholes.
    AArch64-unencodable scale; require an exact encoding and wrap proof before extending the gate.
    The truncated short audit attributes only 2.020% of observed `LoadMemory` work to address
    formation, so do not treat the raw opcode total as a removable pool.
-6. **CoreMark remaining truncations** — raw BitExtract is no longer a pool, and adjacent sole-use
-   narrow memory extensions now write their consumer register directly. Only reopen other 8/16-bit
-   cases with a consumer-specific physical-high proof and the U16 helper regression in the gate.
+6. **CoreMark remaining truncations** — raw BitExtract is no longer a pool. Adjacent sole-use
+   narrow memory extensions now write their consumer register directly, and adjacent low
+   U8/U16 extracts plus `ZeroExtend32` emit one instruction. Only reopen other 8/16-bit cases with
+   a consumer-specific physical-high proof and the U16 helper regression in the gate.
 7. **SHA valid workload first** — fix or replace the current OpenSSL guest path that PageFatals before hashing, then redo the boundary census. Do not bypass guest fault semantics.
 8. **PF/AF dedicated GPR is closed** until a new canonical park/recovery carrier yields a nonzero mechanical saving; the current audit is strictly negative.
 9. **Do not** grow the default region window again for coremark (64 == 128). Other benches might still want 128 **after** the lazy fix.
@@ -1584,6 +1586,18 @@ peepholes.
   load/consumer case passes four assertions; pinned-load and address-liveness groups pass 11 and
   six assertions. The promoted 20k run completes in 3.112 seconds; no stress run, full suite,
   diagnostic or new environment switch remains.
+- `53333fc` folds an exact adjacent `BitExtract(0, 8/16) -> ZeroExtend32` pair into one
+  `UXTB/UXTH` at the extension destination. The extract must have one ordinary and raw use; pinned,
+  flags-input, width-chain, low-copy and scalar-identity owners reject the plan. Exact 20k CoreMark
+  raw host work moves `3,552,714,571 -> 3,529,052,310`, and the 100%-covered weighted comparison
+  moves `3,552,714,586 -> 3,529,052,325` (`-23,662,261`, `-0.666033%`) with no growing PC and CRC
+  `0x382f`. The 2k screen moves `355,415,880 -> 353,049,445`. Units/versions remain
+  2,820 / 2,915. `0x402218` shrinks from 45 to 43 host instructions; both main CRC loops and seven
+  related blocks each shrink by one. Smallpt keeps all 2,792 PCs / 3,052 versions and the canonical
+  PPM while moving raw `361,682 -> 361,466` and weighted `361,700 -> 361,484`. The two focused
+  narrow-extension cases pass four and three assertions, and related narrow-flags coverage passes
+  six assertions across two cases. The promoted 20k run completes in 3.236 seconds; no stress run,
+  full suite, diagnostic or new environment switch remains.
 
 ## Orb loop
 
