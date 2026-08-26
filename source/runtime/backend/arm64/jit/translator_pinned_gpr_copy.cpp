@@ -41,10 +41,10 @@ bool IsLowAluAlias(ir::Block* block,
         if (!uses) {
             continue;
         }
-        const bool u32_alu = width == sizeof(u32) && uses == 1 &&
+        const bool low_alu = uses == 1 &&
                 (consumer.GetOp() == ir::OpCode::Add ||
                  consumer.GetOp() == ir::OpCode::Sub) &&
-                ir::GetValueSizeByte(consumer.ReturnType()) == sizeof(u32);
+                ir::GetValueSizeByte(consumer.ReturnType()) == width;
         const bool logical_zero_test = uses == 1 &&
                 consumer.GetOp() == ir::OpCode::Or &&
                 ir::GetValueSizeByte(consumer.ReturnType()) == width &&
@@ -54,7 +54,7 @@ bool IsLowAluAlias(ir::Block* block,
                 (!consumer.GetPseudoOperations(ir::OpCode::BranchOnlyFlags)
                           .empty() ||
                  !consumer.GetPseudoOperations(ir::OpCode::SaveFlags).empty());
-        return u32_alu || logical_zero_test;
+        return low_alu || logical_zero_test;
     }
     return false;
 }

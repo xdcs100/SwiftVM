@@ -1,15 +1,21 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
+#include <bit>
+#include <cstring>
 #include <string>
 #include <string_view>
+#include <sys/mman.h>
 #include <vector>
 
 #include "aarch64/disasm-aarch64.h"
 #include "runtime/backend/address_space.h"
 #include "runtime/backend/arm64/jit/jit_context.h"
 #include "runtime/backend/arm64/jit/translator.h"
+#include "runtime/backend/smc_tracker.h"
 #include "runtime/ir/opts/register_alloc_pass.h"
+#include "translator/x86/translator.h"
 
 namespace {
 
@@ -27,6 +33,7 @@ enum class PinnedReadShape {
     SignedLoadU16,
     LoadU8Flags,
     LoadU8SavedFlags,
+    LoadNarrowSubtract,
     OverwrittenWrite,
     OverwrittenWriteFault,
     MemoryAddress,
@@ -68,7 +75,8 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
     auto value = shape == PinnedReadShape::LoadU16 ||
                          shape == PinnedReadShape::SignedLoadU16 ||
                          shape == PinnedReadShape::LoadU8Flags ||
-                         shape == PinnedReadShape::LoadU8SavedFlags
+                         shape == PinnedReadShape::LoadU8SavedFlags ||
+                         shape == PinnedReadShape::LoadNarrowSubtract
             ? block->LoadMemory(Operand{block->LoadImm(Imm{swift::u64{0x1000}})
                                                 .SetType(ValueType::U64)})
                       .SetType(type)
@@ -86,6 +94,18 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
                                .SetType(ValueType::U32);
         block->StoreUniform(Uniform{64, ValueType::U64}, widened);
         block->StoreUniform(Uniform{72, ValueType::U32}, product);
+    } else if (shape == PinnedReadShape::LoadNarrowSubtract) {
+        auto extended = block->ZeroExtend32(value).SetType(ValueType::U32);
+        auto published = block->ZeroExtend32To64(extended)
+                                 .SetType(ValueType::U64);
+        block->SetHostGPR(published, HostRegIndex(22), Imm{0u});
+        const auto width = ir::GetValueSizeByte(type) * 8;
+        auto alias = block->BitExtract(published, Imm{0u}, Imm{width})
+                             .SetType(type);
+        auto left = block->GetHostGPR(HostRegIndex(7), Imm{0u})
+                            .SetType(type);
+        auto result = block->Sub(left, Operand{alias}).SetType(type);
+        block->SaveFlags(result, Flags::All);
     } else if (shape == PinnedReadShape::LoadU8Flags ||
                shape == PinnedReadShape::LoadU8SavedFlags) {
         auto extended = block->ZeroExtend32To64(value).SetType(ValueType::U64);
@@ -371,6 +391,69 @@ TEST_CASE("callee-saved pinned GPR subtraction reads the fixed W view directly")
             REQUIRE_FALSE(HasShiftPreparation(lines));
         }
     }
+}
+
+TEST_CASE("a published narrow load supplies subtraction from its fixed home") {
+    for (auto type : {ValueType::U8, ValueType::U16}) {
+        CAPTURE(type);
+        const auto lines =
+                EmitPinnedRead(PinnedReadShape::LoadNarrowSubtract, false, type);
+        const auto load = type == ValueType::U8 ? "ldrb w22" : "ldrh w22";
+        REQUIRE(Count(lines, load, "") == 1);
+        REQUIRE(Count(lines, "mov w22", "") == 0);
+        REQUIRE(Count(lines, "subs w", "w22") == 1);
+    }
+}
+
+TEST_CASE("published narrow compare flags execute from the fixed home") {
+#if defined(__aarch64__)
+    const std::array<swift::u8, 28> code{
+            0x48, 0x8b, 0x50, 0x08, 0x0f, 0xb6, 0x12,
+            0x66, 0x41, 0x39, 0xd6, 0x41, 0x0f, 0x94, 0xc0,
+            0x41, 0x0f, 0x92, 0xc1, 0x41, 0x0f, 0x9c, 0xc2,
+            0x41, 0x0f, 0x9a, 0xc3, 0xf4,
+    };
+    void* guest_code = mmap(nullptr, 4096, PROT_READ | PROT_WRITE,
+                            MAP_PRIVATE | MAP_ANON, -1, 0);
+    REQUIRE(guest_code != MAP_FAILED);
+    std::memcpy(guest_code, code.data(), code.size());
+
+    swift::u8 memory_value{};
+    std::array<swift::u64, 2> node{
+            0, reinterpret_cast<swift::u64>(&memory_value)};
+    backend::SmcTracker::SetEnabled(false);
+    auto* instance = swift::translator::x86::X86Instance::Make();
+    bool matched = true;
+    for (swift::u32 index = 0; index < 256 && matched; ++index) {
+        memory_value = static_cast<swift::u8>(index * 73u + 19u);
+        const auto left = static_cast<swift::u16>(index * 997u + 113u);
+        auto* core = swift::translator::x86::X86Core::Make(instance);
+        auto& context = core->GetContext();
+        context.rip.qword = reinterpret_cast<swift::VAddr>(guest_code);
+        context.rax.qword = reinterpret_cast<swift::u64>(node.data());
+        context.r14.qword = left;
+        core->Run();
+        const auto difference = static_cast<swift::u8>(left - memory_value);
+        matched = context.rdx.qword == memory_value &&
+                static_cast<swift::u8>(context.r8.qword) ==
+                        static_cast<swift::u8>(left == memory_value) &&
+                static_cast<swift::u8>(context.r9.qword) ==
+                        static_cast<swift::u8>(left < memory_value) &&
+                static_cast<swift::u8>(context.r10.qword) ==
+                        static_cast<swift::u8>(
+                                static_cast<swift::s16>(left) <
+                                static_cast<swift::s16>(memory_value)) &&
+                static_cast<swift::u8>(context.r11.qword) ==
+                        static_cast<swift::u8>(std::popcount(difference) % 2 == 0);
+        swift::translator::x86::X86Core::Destroy(core);
+    }
+    swift::translator::x86::X86Instance::Destroy(instance);
+    backend::SmcTracker::SetEnabled(true);
+    munmap(guest_code, 4096);
+    REQUIRE(matched);
+#else
+    SUCCEED("fixed-home execution coverage requires an AArch64 host");
+#endif
 }
 
 TEST_CASE("a reused pinned GPR memory value keeps the read move") {
