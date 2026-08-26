@@ -1305,7 +1305,10 @@ void JitTranslator::EmitSetHostGPR(ir::Inst* inst) {
                            reproved->target == copy->second.target &&
                            reproved->width == copy->second.width,
                    "pinned GPR copy proof diverged at IR {}", inst->Id());
-        auto source = XRegister(copy->second.source);
+        if (!copy->second.source) {
+            return;
+        }
+        auto source = XRegister(*copy->second.source);
         auto target = XRegister(copy->second.target);
         if (copy->second.width == sizeof(u8)) {
             __ Uxtb(target.W(), source.W());
@@ -1559,6 +1562,13 @@ void JitTranslator::EmitLoadMemory(ir::Inst* inst) {
     auto operand = inst->GetArg<ir::Operand>(0);
     auto value = ir::Value{inst};
     auto type = inst->ReturnType();
+    const auto pinned_value = ResolvePinnedGPRValue(value);
+    auto value_w = [&] {
+        return pinned_value ? pinned_value->W() : context.W(value);
+    };
+    auto value_x = [&] {
+        return pinned_value ? *pinned_value : context.X(value);
+    };
     ir::Inst* narrow_consumer = nullptr;
     if (mem_narrow_fuse && ir::GetValueSizeByte(type) <= 2 && inst->GetUses() == 1) {
         auto& list = cur_block->GetInstList();
@@ -1624,35 +1634,35 @@ void JitTranslator::EmitLoadMemory(ir::Inst* inst) {
         case ir::ValueType::U8:
             if (narrow_consumer && narrow_consumer->GetOp() == ir::OpCode::SignExtend) {
                 if (ir::GetValueSizeByte(narrow_consumer->ReturnType()) == 8) {
-                    __ Ldrsb(context.X(value), vixl_operand);
+                    __ Ldrsb(value_x(), vixl_operand);
                 } else {
-                    __ Ldrsb(context.W(value), vixl_operand);
+                    __ Ldrsb(value_w(), vixl_operand);
                 }
             } else {
                 // LDRB's W destination already performs ZeroExtend32.
-                __ Ldrb(context.W(value), vixl_operand);
+                __ Ldrb(value_w(), vixl_operand);
             }
             break;
         case ir::ValueType::S16:
         case ir::ValueType::U16:
             if (narrow_consumer && narrow_consumer->GetOp() == ir::OpCode::SignExtend) {
                 if (ir::GetValueSizeByte(narrow_consumer->ReturnType()) == 8) {
-                    __ Ldrsh(context.X(value), vixl_operand);
+                    __ Ldrsh(value_x(), vixl_operand);
                 } else {
-                    __ Ldrsh(context.W(value), vixl_operand);
+                    __ Ldrsh(value_w(), vixl_operand);
                 }
             } else {
                 // LDRH's W destination already performs ZeroExtend32.
-                __ Ldrh(context.W(value), vixl_operand);
+                __ Ldrh(value_w(), vixl_operand);
             }
             break;
         case ir::ValueType::S32:
         case ir::ValueType::U32:
-            __ Ldr(context.W(value), vixl_operand);
+            __ Ldr(value_w(), vixl_operand);
             break;
         case ir::ValueType::S64:
         case ir::ValueType::U64:
-            __ Ldr(context.X(value), vixl_operand);
+            __ Ldr(value_x(), vixl_operand);
             break;
         case ir::ValueType::V8:
             __ Ldr(context.V(value).B(), vixl_operand);

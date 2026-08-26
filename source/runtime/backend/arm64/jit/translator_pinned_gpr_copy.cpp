@@ -39,7 +39,8 @@ std::optional<JitTranslator::PinnedGPRCopy>
 JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
     if (!inst || inst->GetOp() != ir::OpCode::SetHostGPR ||
         inst->GetArg<ir::Imm>(2).Get() != 0 ||
-        context.IsHostWriteCoalesced(inst->Id())) {
+        context.IsHostWriteCoalesced(inst->Id()) ||
+        dead_pinned_gpr_writes.contains(inst)) {
         return std::nullopt;
     }
 
@@ -64,17 +65,24 @@ JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
     }
     auto* read = source.Def();
     const u32 source_width = ir::GetValueSizeByte(source.Type());
-    const u32 source_index = read && read->GetOp() == ir::OpCode::GetHostGPR
-            ? read->GetArg<ir::Imm>(0).Get()
-            : UINT32_MAX;
-    if (!read || read->GetOp() != ir::OpCode::GetHostGPR ||
-        read->GetUses() != 1 ||
+    if (!read || read->GetUses() != 1 ||
         (source_width != sizeof(u8) && source_width != sizeof(u16) &&
-         source_width != sizeof(u32)) ||
-        !IsPinnedGPR(source_index) ||
-        read->GetArg<ir::Imm>(1).Get() != 0 ||
-        context.IsHostReadCoalesced(read->Id())) {
+         source_width != sizeof(u32))) {
         return std::nullopt;
+    }
+    const bool load_source = read->GetOp() == ir::OpCode::LoadMemory;
+    std::optional<u16> source_index;
+    if (!load_source) {
+        if (read->GetOp() != ir::OpCode::GetHostGPR ||
+            read->GetArg<ir::Imm>(1).Get() != 0 ||
+            context.IsHostReadCoalesced(read->Id())) {
+            return std::nullopt;
+        }
+        const u32 index = read->GetArg<ir::Imm>(0).Get();
+        if (!IsPinnedGPR(index)) {
+            return std::nullopt;
+        }
+        source_index = static_cast<u16>(index);
     }
 
     bool saw_publication = false;
@@ -125,7 +133,8 @@ JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
             (MayFaultOrObserve(scan.GetOp()) ||
              (scan.GetOp() == ir::OpCode::SetHostGPR &&
               (scan.GetArg<ir::Imm>(1).Get() == target ||
-               scan.GetArg<ir::Imm>(1).Get() == source_index)))) {
+               (source_index &&
+                scan.GetArg<ir::Imm>(1).Get() == *source_index))))) {
             return std::nullopt;
         }
         if (inst->Id() < scan.Id() && scan.Id() < last_use &&
@@ -140,7 +149,7 @@ JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
             .narrow_extend = narrow_extend,
             .extend = extend,
             .aliases = std::move(aliases),
-            .source = static_cast<u16>(source_index),
+            .source = source_index,
             .target = static_cast<u16>(target),
             .width = static_cast<u8>(source_width),
     };
@@ -168,7 +177,11 @@ void JitTranslator::PreparePinnedGPRCopies(ir::Block* block) {
         if (!plan) {
             continue;
         }
-        fused_pin_gpr_reads.emplace(plan->read, plan->source);
+        if (!plan->source) {
+            pinned_gpr_values.emplace(plan->read, plan->target);
+        } else {
+            fused_pin_gpr_reads.emplace(plan->read, *plan->source);
+        }
         if (plan->narrow_extend) {
             fused_pin_zext32.insert(plan->narrow_extend);
         }

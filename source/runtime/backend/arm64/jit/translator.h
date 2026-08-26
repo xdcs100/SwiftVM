@@ -164,7 +164,7 @@ private:
         ir::Inst* narrow_extend{};
         ir::Inst* extend{};
         std::vector<ir::Inst*> aliases{};
-        u16 source{};
+        std::optional<u16> source{};
         u16 target{};
         u8 width{};
     };
