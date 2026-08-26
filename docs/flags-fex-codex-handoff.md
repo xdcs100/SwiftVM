@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`3f079f9`** `perf: specialize dead narrow immediate branches`
+- Code tip: **`b5936ac`** `perf: keep narrow memory branches in raw flags`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -19,6 +19,10 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 
 | Commit | What |
 |---|---|
+| `b5936ac` | Admit a single adjacent carry inversion on a dead U8/U16 memory-operand `Sub` branch when the condition does not read carry, then discard the irrelevant normalization |
+| `9fb39ef` | Retain an arithmetic result token only when parity is live; NZCV-only narrow producers no longer restore result bits solely for a dead PF token |
+| `f42b7cc` | Fold `BitExtract(SignExtend(v32),0,32)` back to the original 32-bit SSA and remove both signed low-32 round trips through DCE |
+| `a627d94` | Feed an adjacent single-use low U8/U16 extract directly to narrow flags alignment, where the existing left shift already discards high bits |
 | `3f079f9` | Generalize the dead narrow immediate branch plan from exact ZF to the existing ZF/CF/ZF+CF dead-edge conditions using `UXTB/UXTH; CMP imm` |
 | `5922091` | Lower a dead-edge U8/U16 `Sub` with an immediate and exact ZF-only branch into `SUB imm; TST width-mask`, suppressing the single-use immediate materialization |
 | `e2bb2c7` | Omit the final narrow-result `LSR` after branch-only Add/Sub/Neg when the arithmetic value has no ordinary use; observed results keep the truncation |
@@ -1392,6 +1396,44 @@ peepholes.
   `5,811,441,723 -> 5,785,681,642` (`-25,760,081`, `-0.443265%`) with every changed PC smaller.
   Local and Orb flags focuses pass 152 assertions across four cases. This stage ran no stress test
   or full suite.
+- `a627d94` removes an adjacent single-use low U8/U16 extraction before narrow Add/Sub/Neg flag
+  alignment. The alignment `LSL` consumes the original source because it already discards every
+  high bit; source/result aliasing is reproved against the original SSA, and shared or non-adjacent
+  extracts retain materialization. Against `3f079f9`, full-pin smallpt keeps all 2,802 PCs / 3,435
+  versions, 288 dynamic spills and the canonical PPM while moving `379,525 -> 376,993`; the
+  100%-covered weighted comparison is `380,551 -> 378,019` (`-2,532`, `-0.665351%`) with no growing
+  PC. Applying the retained CoreMark 20k entries to the complete short shape gives `-6,482,313`
+  (`-0.112041%`) at 99.999998565% host coverage. Mac and Orb focused checks pass 117 assertions
+  across six cases.
+- `f42b7cc` extends integer width canonicalization through an exact 32-to-64 `SignExtend`. A low-32
+  extract of that value is replaced with the original 32-bit SSA, after which the existing DCE
+  removes both extraction copies. Against `a627d94`, smallpt remains exact and moves `376,993 ->
+  374,499`; weighted host moves `378,019 -> 375,525` (`-2,494`, `-0.659755%`) entirely at
+  `0x41a818`, where `SXTW; LSR #0; LSR #0; ANDS` becomes `SXTW; ANDS`. CoreMark changes only by
+  `-2,194` on the retained-entry join. The width focus passes 68 assertions on Mac and Orb.
+- `9fb39ef` makes the flags result token match its sole deferred responsibility: preserving a low
+  byte for live parity. NZCV-only and AF-only producers no longer capture or publish that token;
+  narrow arithmetic retains its final `LSR` only for an ordinary value use, live PF, or live AF.
+  Against `f42b7cc`, smallpt moves `374,499 -> 368,937`; weighted host moves `375,525 -> 369,963`
+  (`-5,562`, `-1.481126%`) with all 2,802 PCs / 3,435 versions and no growing PC. The retained
+  CoreMark entry join gives `-27,184,518` (`-0.470386%`). The exact promoted 20k candidate, including
+  the preceding two stages, is `5,724,721,561 -> 5,691,052,536` with CRC `0x382f`. FLAGS `0/1` x
+  function/block/interpreter returns the same checksum and output SHA in all six cells. Focused
+  parity, branch and width checks pass 185 assertions on both hosts; the broad `*flags*` filter
+  retains only the two documented incumbent failures.
+- `b5936ac` closes the largest remaining CoreMark mechanism. Function branch-only analysis may
+  now cross one adjacent `InvertCarry` only when a single U8/U16 `Sub` compares against a direct
+  memory RHS, both successors overwrite flags before any read, and the terminal condition does
+  not read carry. The irrelevant normalization is deleted and the producer becomes a raw
+  BranchOnlyFlags source. The `cmp r12w,[rdx+2] + jne` loop stops publishing full flags and stops
+  forming a second hot unit version. Exact CoreMark 20k moves `5,691,052,536 -> 4,206,692,536`
+  (`-1,484,360,000`, `-26.082346%`), versions `3,379 -> 3,378`, and keeps CRC `0x382f`. Current
+  smallpt is byte-for-byte unchanged at `368,937`, with all 2,802 PCs / 3,435 versions, 288 spills
+  and the canonical PPM. The acceptance proof has a dedicated HIR function test; branch-only,
+  dead-edge and narrow-result focuses pass 120 assertions on Mac and Orb, and the FLAGS six-grid
+  remains checksum-identical. A broad `SVM_FLAG_FULL_ELIM=1` retry grew smallpt by 2.376% and made
+  short CoreMark abort; a later memory-left/immediate-right expansion saved only 0.000022% on the
+  common CoreMark shape. Both prototypes were removed completely.
 
 ## Orb loop
 
