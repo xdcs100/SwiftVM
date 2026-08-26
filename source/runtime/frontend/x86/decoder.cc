@@ -1566,6 +1566,41 @@ void X64Decoder::Dst(_DInst& insn, _Operand& operand, const ir::DataClass& data,
     }
 }
 
+X64Decoder::RmwOperand X64Decoder::ReadForWrite(_DInst& insn, _Operand& operand) {
+    const auto type = GetSize(operand.size);
+    const auto structured = GetAddress(insn, operand);
+    const bool tso = TsoOrdered(insn);
+    ir::Operand address;
+    if (tso || PreserveMemoryEA(structured, type)) {
+        address = structured.ToIROperand();
+    } else {
+        auto flat = __ GetOperand(structured.ToIROperand())
+                            .SetType(is_64bit ? ir::ValueType::U64
+                                             : ir::ValueType::U32);
+        address = ir::Operand{flat};
+    }
+    return {MemLoad(address, type, tso), address, tso};
+}
+
+void X64Decoder::WriteBack(_Operand& operand, const ir::DataClass& data,
+                           const RmwOperand& source) {
+    auto value = ToValue(data);
+    if (operand.size) {
+        value = NarrowTo(value, GetSize(operand.size));
+    }
+    MemStore(source.address, value, source.tso);
+}
+
+bool X64Decoder::CanReuseRmwAddress(const _DInst& insn,
+                                    const _Operand& operand) const {
+    return identity_addressing_ && addr_ea_tie_ && operand.type == O_MEM &&
+           operand.size >= 16 && insn.base != R_NONE && insn.base != R_RIP &&
+           operand.index != R_NONE && insn.dispSize && insn.disp &&
+           insn.scale == operand.size / 8 &&
+           (SEGMENT_IS_DEFAULT(insn.segment) ||
+            SEGMENT_GET(insn.segment) == R_NONE);
+}
+
 bool X64Decoder::IsV(_RegisterType reg) { return reg >= R_ST0; }
 
 ir::DataClass X64Decoder::GetOperand(const X64Decoder::Operand& operand) {

@@ -353,6 +353,7 @@ void X64Decoder::DecodeAddSub(_DInst& insn, bool sub, bool save_res, bool exchan
     auto& op1 = insn.ops[1];
 
     ir::Value left;
+    std::optional<RmwOperand> writeback;
     auto right = ToValue(Src(insn, op1));
     const bool locked_rmw =
             save_res && op0.type != O_REG && (insn.flags & FLAG_LOCK) != 0;
@@ -364,6 +365,9 @@ void X64Decoder::DecodeAddSub(_DInst& insn, bool sub, bool save_res, bool exchan
             addend = __ Sub(__ LoadImm(ir::Imm(u64(0))), ir::Operand{addend}).SetType(type);
         }
         left = __ AtomicFetchAdd(address, addend).SetType(type);
+    } else if (save_res && CanReuseRmwAddress(insn, op0)) {
+        writeback = ReadForWrite(insn, op0);
+        left = ToValue(writeback->value);
     } else {
         left = ToValue(Src(insn, op0));
     }
@@ -380,7 +384,11 @@ void X64Decoder::DecodeAddSub(_DInst& insn, bool sub, bool save_res, bool exchan
     }
 
     if (save_res && !locked_rmw) {
-        Dst(insn, op0, result);
+        if (writeback) {
+            WriteBack(op0, result, *writeback);
+        } else {
+            Dst(insn, op0, result);
+        }
     }
 }
 

@@ -342,6 +342,12 @@ private:
         [[nodiscard]] ir::DataClass Left() const { return left; }
     };
 
+    struct RmwOperand {
+        ir::DataClass value{};
+        ir::Operand address{};
+        bool tso{};
+    };
+
     static bool IsV(_RegisterType reg);
 
     ir::DataClass GetOperand(const Operand& operand);
@@ -364,6 +370,14 @@ private:
     ir::DataClass Src(_DInst& insn, _Operand& operand, bool force_tso = false);
 
     void Dst(_DInst& insn, _Operand& operand, const ir::DataClass& value, bool force_tso = false);
+
+    RmwOperand ReadForWrite(_DInst& insn, _Operand& operand);
+
+    void WriteBack(_Operand& operand, const ir::DataClass& value,
+                   const RmwOperand& source);
+
+    [[nodiscard]] bool CanReuseRmwAddress(const _DInst& insn,
+                                          const _Operand& operand) const;
 
     // Memory ordering: AcqRel mode orders every access; a LOCK prefix orders
     // just that instruction's accesses (force_tso covers the implicitly

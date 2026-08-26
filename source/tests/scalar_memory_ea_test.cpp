@@ -27,13 +27,9 @@ public:
     void* GetPointer(void* src) override { return src; }
 };
 
-std::vector<Operand> DecodeScalarMemoryOperands(bool identity) {
-    const std::array<swift::u8, 16> code{
-            0xf2, 0x0f, 0x10, 0x48, 0x08,
-            0xf2, 0x0f, 0x58, 0x48, 0x10,
-            0xf2, 0x0f, 0x11, 0x48, 0x18,
-            0xf4,
-    };
+template <std::size_t Size>
+std::vector<Operand> DecodeMemoryOperands(
+        const std::array<swift::u8, Size>& code, bool identity) {
     const auto address = reinterpret_cast<swift::VAddr>(code.data());
     DirectMemory memory;
     Block block{0, Location{address}};
@@ -55,6 +51,17 @@ std::vector<Operand> DecodeScalarMemoryOperands(bool identity) {
         }
     }
     return operands;
+}
+
+std::vector<Operand> DecodeScalarMemoryOperands(bool identity) {
+    return DecodeMemoryOperands(
+            std::array<swift::u8, 16>{
+                    0xf2, 0x0f, 0x10, 0x48, 0x08,
+                    0xf2, 0x0f, 0x58, 0x48, 0x10,
+                    0xf2, 0x0f, 0x11, 0x48, 0x18,
+                    0xf4,
+            },
+            identity);
 }
 
 }  // namespace
@@ -82,4 +89,24 @@ TEST_CASE("scalar SSE memory operands remain composite in identity mode") {
         REQUIRE(operand.GetLeft().IsValue());
         REQUIRE(operand.GetLeft().value.Def()->GetOp() == OpCode::GetOperand);
     }
+}
+
+TEST_CASE("indexed memory RMW shares its displacement-adjusted address") {
+    const auto indexed = DecodeMemoryOperands(
+            std::array<swift::u8, 6>{0x83, 0x44, 0x84, 0x10, 0x01, 0xf4},
+            true);
+    const auto unindexed = DecodeMemoryOperands(
+            std::array<swift::u8, 6>{0x83, 0x44, 0x24, 0x1c, 0x01, 0xf4},
+            true);
+
+    REQUIRE(indexed.size() == 2);
+    REQUIRE(indexed[0].GetOp() == OperandOp::PlusExt);
+    REQUIRE(indexed[0].GetLeft().value.Def() ==
+            indexed[1].GetLeft().value.Def());
+    REQUIRE(indexed[0].GetRight().value.Def() ==
+            indexed[1].GetRight().value.Def());
+
+    REQUIRE(unindexed.size() == 2);
+    REQUIRE(unindexed[0].GetLeft().value.Def() !=
+            unindexed[1].GetLeft().value.Def());
 }
