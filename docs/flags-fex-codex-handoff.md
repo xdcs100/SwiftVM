@@ -1,6 +1,6 @@
 # Codex handoff: Align SVM flags with FEX
 
-Date: 2026-08-25
+Date: 2026-08-26
 Repo: `/Users/swift/CLionProjects/SwiftVM` (macOS). Linux identity runs on Orb: `ubuntu@orb`, tree `/home/swift/svm-phasec/SwiftVM`, build `/home/swift/svm-phasec/build`.
 Author on git: `swift_gan`. **Do not push** until asked. English commits, no task IDs, no AI trailer.
 
@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`d934979`** `perf: carry FP comparisons across vector moves`
+- Code tip: **`942a63d`** `perf: fuse cross-pinned low-32 GPR copies`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -19,6 +19,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 
 | Commit | What |
 |---|---|
+| `942a63d` | Generalize the pinned low-32 self-write proof into a cross-pin copy: an exact U32 fixed-home read, zero extension and full fixed-home publication become one `mov wTarget, wSource`, while later aliases remain eligible only as proven memory addresses |
 | `121620f` | FLAGS_REGS default ON |
 | `a278d8d` / `5b7857d` / `6009f8f` / `f2b490d` | Region If skip: both successors cover incoming NZCV; transparent `mov/ret`; `ClearFlags` covers C/V; **`BranchOnlyFlags` covers full PSTATE NZCV** (IR mask is Jcc live subset, not the ALU write) |
 | `73f6719` | Copy PSTATE at dispatcher **only if `region_edges_active`**; HostExit always |
@@ -721,6 +722,7 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 | `SVM_FLAG_FULL_ELIM=1` after condition-specific liveness | Exact oracle and unit/version sets, but bounded smallpt grows `399,467 -> 408,275` (`+2.204938%`), dominated by partial-NZCV publication at `0x419287`; remains OFF. |
 | Global inverted-carry ABI default | Re-tested after the scalar-FPR proof fix. The oracle stays exact, but bounded smallpt changes 2,802/3,435 units/versions to 3,207/3,493 and grows the strict common subset `370,990 -> 394,889` (`+6.441953%`). Hot `TEST`/logical producers make Direct carry dominant in execution even though the emitted producer census favors subtraction. Fully reverted; any remaining carry work needs explicit edge polarity. |
 | IR-rewriting integer `Sub` branch-only carry normalization | the non-carry-only form still changed the bounded unit/version set from 2,755/3,621 to 2,785/3,056; strict coverage was 99.648660% with two growing PCs, below the 99.9% gate despite `-0.908475%` on the comparable subset, fully reverted. `86aaac4` is a separate backend-only EQ/NE proof and does not revive this rewrite. |
+| Generic live `ZeroExtend32To64` result remap into the publication home | the residual `live_ok` census classified stores before conflict and observer checks, so its weighted total overstated the opportunity. The broad remap made many required moves merely change location, added low-view preservation copies, and halted the 1,000-iteration CoreMark screen at `0x402e60`. The RA module, logs and temporary restrictions were removed; retain only backend copy fusions that prove a net one-instruction form. |
 
 ## Next ready (pick one, measure, revert on 124/134)
 
@@ -1302,6 +1304,20 @@ peepholes.
   A broader fixed-home publication remap grew smallpt `+4.736618%`; a generic x12 result-placement
   pass did not improve the dominant regions. Both implementations and every diagnostic path were
   removed. This stage ran no long benchmark, stress test or full suite.
+- `942a63d` generalizes the pinned low-32 self-write planner into a cross-pin copy planner. An exact
+  `GetHostGPR(U32) -> ZeroExtend32To64 -> SetHostGPR(U64)` chain now reads directly from the source
+  home and emits one `mov wTarget, wSource`; any later alias must be a post-publication `BitCast`
+  used only as a memory address. Source or target rewrites before publication, target rewrites while
+  an alias is live, caller-saved helper clobbers, faults and observers reject the plan. The focused
+  module was renamed to `translator_pinned_gpr_copy.cpp`; no compatibility path or diagnostic gate
+  remains. Against `3e47a16`, bounded smallpt keeps 2,802 PCs / 3,435 versions, 288 dynamic spills
+  and the canonical PPM while moving `385,479 -> 385,025`; the 100%-covered weighted comparison is
+  `386,505 -> 386,051` (`-454`, `-0.117463%`) with no growing PC. CoreMark keeps 2,846 PCs / 3,379
+  versions and `crcfinal=0x382f` while moving `5,813,471,244 -> 5,799,708,766`; the 100%-covered
+  weighted comparison is `5,874,431,325 -> 5,860,668,847` (`-13,762,478`, `-0.234278%`). Local and
+  Orb pinned/page-fault focuses pass 79 assertions across 14 cases. The rejected generic RA carrier
+  was removed after its short correctness and code-shape screen; this stage ran no stress test or
+  full suite.
 
 ## Orb loop
 
