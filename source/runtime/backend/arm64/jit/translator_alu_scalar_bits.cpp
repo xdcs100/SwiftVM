@@ -535,6 +535,9 @@ void JitTranslator::EmitZeroExtend32(ir::Inst* inst) {
                    "narrow extract extension proof diverged at IR {}", inst->Id());
         auto result = context.W(ir::Value{inst});
         auto source = context.W(fused->second.source);
+        if (fused->second.source_high_zero && result == source) {
+            return;
+        }
         if (fused->second.width == sizeof(u8)) {
             __ Uxtb(result, source);
         } else {

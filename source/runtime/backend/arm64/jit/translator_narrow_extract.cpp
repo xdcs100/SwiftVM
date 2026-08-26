@@ -4,6 +4,33 @@
 
 namespace swift::runtime::backend::arm64 {
 
+namespace {
+
+bool IsNarrowLoadZeroExtended(ir::Value value, u32 width) {
+    for (u32 depth = 0; depth != 8 && value.Defined(); ++depth) {
+        auto* definition = value.Def();
+        while (definition && definition->IsBitCastOperation()) {
+            value = definition->GetArg<ir::Value>(0);
+            definition = value.Def();
+        }
+        if (!definition) {
+            return false;
+        }
+        if (definition->GetOp() == ir::OpCode::LoadMemory ||
+            definition->GetOp() == ir::OpCode::LoadUniform) {
+            return ir::GetValueSizeByte(definition->ReturnType()) <= width;
+        }
+        if (definition->GetOp() != ir::OpCode::ZeroExtend32 &&
+            definition->GetOp() != ir::OpCode::ZeroExtend32To64) {
+            return false;
+        }
+        value = definition->GetArg<ir::Value>(0);
+    }
+    return false;
+}
+
+}  // namespace
+
 std::optional<JitTranslator::NarrowExtractExtension>
 JitTranslator::MatchNarrowExtractExtension(ir::Inst* wrapper) const {
     if (!wrapper || wrapper->GetOp() != ir::OpCode::ZeroExtend32) {
@@ -38,6 +65,8 @@ JitTranslator::MatchNarrowExtractExtension(ir::Inst* wrapper) const {
             .extract = extract,
             .source = extract->GetArg<ir::Value>(0),
             .width = static_cast<u8>(width),
+            .source_high_zero = IsNarrowLoadZeroExtended(
+                    extract->GetArg<ir::Value>(0), width),
     };
 }
 

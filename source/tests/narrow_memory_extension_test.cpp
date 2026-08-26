@@ -128,4 +128,49 @@ TEST_CASE("an adjacent narrow extract extends in one instruction") {
     REQUIRE(direct == 1);
 }
 
+TEST_CASE("a zero-extended narrow load needs no self extension") {
+    Config config{
+            .loc_start = 0,
+            .loc_end = 1ull << 48,
+            .enable_jit = true,
+            .has_local_operation = false,
+            .backend_isa = kArm64,
+    };
+    AddressSpace address_space{config};
+    IntrusivePtr<Block> block{new Block(0, Location{0x8a40})};
+    auto loaded = block->LoadMemory(Operand{Imm{swift::u64{0x1000}}})
+                          .SetType(ValueType::U16);
+    auto extract = block->BitExtract(loaded, Imm{0u}, Imm{16u})
+                           .SetType(ValueType::U16);
+    auto extended = block->ZeroExtend32(extract).SetType(ValueType::U16);
+    block->StoreUniform(Uniform{64, ValueType::U16}, extended);
+    block->SetTerminal(terminal::ReturnToDispatch{});
+    block->ReIdInstr();
+
+    RegAlloc alloc{block->MaxInstrId(),
+                   address_space.GetTrampolines().GetGPRRegs(),
+                   address_space.GetTrampolines().GetFPRRegs(), FeatureSet{}};
+    RegisterAllocPass::Run(block.get(), &alloc, false, FeatureSet{});
+    alloc.MapRegister(loaded.Id(), HostGPR{8});
+    alloc.MapRegister(extract.Id(), HostGPR{9});
+    alloc.MapRegister(extended.Id(), HostGPR{8});
+    REQUIRE(alloc.ValueGPR(loaded).id == alloc.ValueGPR(extended).id);
+    REQUIRE(alloc.ValueGPR(loaded).id != alloc.ValueGPR(extract).id);
+
+    arm64::JitContext context{address_space.GetDefaultModule(), alloc};
+    arm64::JitTranslator translator{context};
+    translator.Translate(block.get());
+    context.Finish();
+
+    const auto lines = Disassemble(context);
+    const auto loads = std::ranges::count_if(lines, [](const auto& line) {
+        return line.find("ldrh w8") != std::string::npos;
+    });
+    const auto extensions = std::ranges::count_if(lines, [](const auto& line) {
+        return line.find("uxth ") != std::string::npos;
+    });
+    REQUIRE(loads == 1);
+    REQUIRE(extensions == 0);
+}
+
 }  // namespace

@@ -177,6 +177,7 @@ private:
         ir::Inst* extract{};
         ir::Value source{};
         u8 width{};
+        bool source_high_zero{};
 
         bool operator==(const NarrowExtractExtension&) const = default;
     };
