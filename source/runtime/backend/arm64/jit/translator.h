@@ -183,6 +183,12 @@ private:
     ResolvePinnedGPRValue(ir::Value value) const;
     [[nodiscard]] std::optional<u16>
     MatchPinnedMemoryAddress(ir::Inst* address) const;
+    struct PinnedMemorySource {
+        u16 target{};
+        u32 live_begin{};
+    };
+    [[nodiscard]] std::optional<PinnedMemorySource>
+    MatchPinnedMemorySource(ir::Value source) const;
 
     enum class BoundarySubsequence : size_t {
         Prologue,
