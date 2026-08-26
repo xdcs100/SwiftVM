@@ -400,6 +400,13 @@ bool JitTranslator::ReproveLow32Copy(ir::Inst* inst) const {
 }
 
 void JitTranslator::EmitBitExtract(ir::Inst* inst) {
+    if (auto value = pinned_memory_values.find(inst);
+        value != pinned_memory_values.end()) {
+        ASSERT_MSG(MatchPinnedMemoryValue(inst) == value->second,
+                   "pinned memory value proof drifted before emission at IR {}",
+                   inst->Id());
+        return;
+    }
     if (auto fused = fused_narrow_extracts.find(inst);
         fused != fused_narrow_extracts.end()) {
         const auto plan = narrow_extract_extensions.find(fused->second);

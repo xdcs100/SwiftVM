@@ -124,4 +124,77 @@ std::optional<u16> JitTranslator::MatchPinnedMemoryAddress(ir::Inst* address) co
     return source->target;
 }
 
+std::optional<u16> JitTranslator::MatchPinnedMemoryValue(ir::Inst* extract) const {
+    if (!extract || extract->GetOp() != ir::OpCode::BitExtract ||
+        extract->GetUses(false) != 1) {
+        return std::nullopt;
+    }
+    const auto source = extract->GetArg<ir::Value>(0);
+    const u32 width = ir::GetValueSizeByte(extract->ReturnType());
+    if (!source.Def() || (width != sizeof(u8) && width != sizeof(u16)) ||
+        extract->GetArg<ir::Imm>(1).Get() != 0 ||
+        extract->GetArg<ir::Imm>(2).Get() != width * 8 ||
+        ir::GetValueSizeByte(source.Type()) < width || context.IsSpilled(source)) {
+        return std::nullopt;
+    }
+
+    ir::Inst* store = nullptr;
+    ir::Inst* publication = nullptr;
+    for (auto& scan : cur_block->GetInstList()) {
+        if (scan.GetOp() == ir::OpCode::SetHostGPR &&
+            scan.GetArg<ir::Value>(0).Def() == source.Def()) {
+            if (publication) {
+                return std::nullopt;
+            }
+            publication = &scan;
+        }
+        const bool uses_extract = std::ranges::any_of(
+                scan.GetValues(), [&](ir::Value value) {
+                    return value.Def() == extract;
+                });
+        if (!uses_extract) {
+            continue;
+        }
+        if (store || scan.GetOp() != ir::OpCode::StoreMemory ||
+            scan.GetArg<ir::Value>(1).Def() != extract ||
+            ir::GetValueSizeByte(scan.GetArg<ir::Value>(1).Type()) != width) {
+            return std::nullopt;
+        }
+        store = &scan;
+    }
+    if (!store || !publication || publication->Id() >= extract->Id() ||
+        extract->Id() >= store->Id() ||
+        publication->GetArg<ir::Imm>(2).Get() != 0 ||
+        !context.IsHostWriteCoalesced(publication->Id()) ||
+        !ReproveCoalescedHostWrite(publication)) {
+        return std::nullopt;
+    }
+
+    const u32 target = publication->GetArg<ir::Imm>(1).Get();
+    if (!IsPinnedMemoryTarget(target) || context.R(source).GetCode() != target) {
+        return std::nullopt;
+    }
+    for (auto& scan : cur_block->GetInstList()) {
+        if (scan.Id() <= publication->Id() || scan.Id() >= store->Id()) {
+            continue;
+        }
+        if ((scan.GetOp() == ir::OpCode::SetHostGPR &&
+             scan.GetArg<ir::Imm>(1).Get() == target) ||
+            (target <= 9 && IsCallerSavedAddressBarrier(scan.GetOp()))) {
+            return std::nullopt;
+        }
+    }
+    return static_cast<u16>(target);
+}
+
+void JitTranslator::PreparePinnedMemoryValues(ir::Block* block) {
+    pinned_memory_values.clear();
+    for (auto& inst : block->GetInstList()) {
+        if (auto target = MatchPinnedMemoryValue(&inst)) {
+            pinned_memory_values.emplace(&inst, *target);
+            fused_pin_gpr_reads.emplace(&inst, *target);
+        }
+    }
+}
+
 }  // namespace swift::runtime::backend::arm64

@@ -32,6 +32,7 @@ enum class PinnedReadShape {
     MemoryAddress,
     SignExtend,
     StoreMemory,
+    NarrowStoreMemory,
     Subtract,
 };
 
@@ -52,7 +53,8 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
                                    shape == PinnedReadShape::OverwrittenWriteFault;
     const bool copy = shape == PinnedReadShape::Copy ||
                       shape == PinnedReadShape::CopyU16 ||
-                      shape == PinnedReadShape::LoadU16;
+                      shape == PinnedReadShape::LoadU16 ||
+                      shape == PinnedReadShape::NarrowStoreMemory;
     const auto source_index = overwritten_write
             ? 1u
             : (copy ? 20u : 22u);
@@ -144,6 +146,16 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
     } else if (shape == PinnedReadShape::SelfAnd) {
         auto result = block->And(value, Operand{value}).SetType(ValueType::U32);
         block->SaveFlags(result, Flags::Negate | Flags::Zero | Flags::Parity);
+    } else if (shape == PinnedReadShape::NarrowStoreMemory) {
+        auto right = block->GetHostGPR(HostRegIndex(29), Imm{0u})
+                             .SetType(type);
+        auto result = block->Or(value, Operand{right}).SetType(type);
+        block->SetHostGPR(result, HostRegIndex(22), Imm{0u});
+        auto low = block->BitExtract(result, Imm{0u}, Imm{16u})
+                           .SetType(ValueType::U16);
+        auto address = block->LoadImm(Imm{swift::u64{0x1000}})
+                               .SetType(ValueType::U64);
+        block->StoreMemory(Operand{address}, low);
     } else if (shape == PinnedReadShape::SignExtend) {
         auto result = block->SignExtend(value).SetType(ValueType::U64);
         block->StoreUniform(Uniform{8, ValueType::U64}, result);
@@ -168,6 +180,18 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
                    address_space.GetTrampolines().GetFPRRegs(),
                    features};
     RegisterAllocPass::Run(block.get(), &alloc, false, features);
+    if (shape == PinnedReadShape::NarrowStoreMemory) {
+        for (auto& inst : block->GetInstList()) {
+            if (inst.GetOp() != OpCode::SetHostGPR ||
+                inst.GetArg<Imm>(1).Get() != 22) {
+                continue;
+            }
+            const auto published = inst.GetArg<Value>(0);
+            alloc.MapRegister(published.Id(), HostGPR{22});
+            alloc.MarkHostWriteCoalesced(inst.Id());
+            break;
+        }
+    }
     arm64::JitContext context{module, alloc};
     arm64::JitTranslator translator{context};
     translator.Translate(block.get());
@@ -326,6 +350,13 @@ TEST_CASE("pinned GPR memory store reads the fixed W view directly") {
     const auto lines = EmitPinnedRead(PinnedReadShape::StoreMemory, false);
     REQUIRE(Count(lines, "ubfx ", "x22") == 0);
     REQUIRE(Count(lines, "str w22", "[") == 1);
+}
+
+TEST_CASE("a narrow store reads a published pinned value directly") {
+    const auto lines = EmitPinnedRead(PinnedReadShape::NarrowStoreMemory, false,
+                                      ValueType::U32);
+    REQUIRE(Count(lines, "strh w22", "[") == 1);
+    REQUIRE(Count(lines, "uxth ", "") == 0);
 }
 
 TEST_CASE("callee-saved pinned GPR subtraction reads the fixed W view directly") {

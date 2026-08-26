@@ -201,6 +201,9 @@ private:
     };
     [[nodiscard]] std::optional<PinnedMemorySource>
     MatchPinnedMemorySource(ir::Value source) const;
+    [[nodiscard]] std::optional<u16>
+    MatchPinnedMemoryValue(ir::Inst* extract) const;
+    void PreparePinnedMemoryValues(ir::Block* block);
 
     enum class BoundarySubsequence : size_t {
         Prologue,
@@ -619,6 +622,7 @@ private:
     // Narrow mapped values whose audited consumers can read the pinned W
     // register directly.
     std::map<ir::Inst*, u16> fused_pin_gpr_reads{};
+    std::map<ir::Inst*, u16> pinned_memory_values{};
     std::map<ir::Inst*, ir::Value> narrow_flags_inputs{};
     std::map<ir::Inst*, u16> pinned_gpr_values{};
     std::map<ir::Inst*, PinnedGPRCopy> pinned_gpr_copies{};

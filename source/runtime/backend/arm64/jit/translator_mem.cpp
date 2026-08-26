@@ -1755,6 +1755,13 @@ void JitTranslator::EmitStoreMemory(ir::Inst* inst) {
             return wzr;
         }
         if (value.Def()) {
+            if (auto it = pinned_memory_values.find(value.Def());
+                it != pinned_memory_values.end()) {
+                ASSERT_MSG(MatchPinnedMemoryValue(value.Def()) == it->second,
+                           "pinned memory value proof drifted before store at IR {}",
+                           inst->Id());
+                return WRegister(it->second);
+            }
             if (auto it = fused_pin_gpr_reads.find(value.Def());
                 it != fused_pin_gpr_reads.end()) {
                 return WRegister(it->second);
