@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`e2bb2c7`** `perf: omit dead narrow branch result truncation`
+- Code tip: **`5922091`** `perf: specialize dead narrow zero branches`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -19,6 +19,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 
 | Commit | What |
 |---|---|
+| `5922091` | Lower a dead-edge U8/U16 `Sub` with an immediate and exact ZF-only branch into `SUB imm; TST width-mask`, suppressing the single-use immediate materialization |
 | `e2bb2c7` | Omit the final narrow-result `LSR` after branch-only Add/Sub/Neg when the arithmetic value has no ordinary use; observed results keep the truncation |
 | `4cc2c1e` | Publish an exact U8/U16/U32 memory load directly into its pinned GPR home and omit the redundant zero-extension and host-register publication instructions |
 | `14e48c1` | Extend the fixed-home copy planner through exact U8/U16 `ZeroExtend32` chains and emit one `UXTB`/`UXTH` from the source home to the target home |
@@ -1363,6 +1364,20 @@ peepholes.
   Local and Orb flags focuses pass 122 assertions across four cases. Direct U64-load publication
   and signed-load publication prototypes had zero shared-shape delta on bounded full-pin smallpt
   and CoreMark and were removed completely. This stage ran no stress test or full suite.
+- `5922091` specializes the existing dead-edge integer branch proof when its producer is a dead
+  U8/U16 `Sub`, its right operand is a single-use encodable `LoadImm`, and the branch needs exactly
+  ZF. The block plan suppresses the immediate materialization before emission, then emits
+  `SUB wResult, wLeft, #imm; TST wResult, #width-mask`; carry, signed and observed-result shapes
+  retain the existing aligned `SUBS` path. The emitter replays the complete plan and direct pinned
+  source proof. Against `e2bb2c7` with `SVM_X86_PIN_EXT=3`, bounded smallpt keeps 2,802 PCs / 3,435
+  versions, 288 dynamic spills and the canonical PPM while moving `382,069 -> 379,546`; the
+  100%-covered weighted comparison is `383,095 -> 380,572` (`-2,523`, `-0.658583%`) with every
+  changed PC smaller. CoreMark keeps 2,846 PCs / 3,379 versions and `crcfinal=0x382f` while moving
+  `5,750,483,860 -> 5,750,481,642`; its 100%-covered weighted comparison is
+  `5,811,443,941 -> 5,811,441,723` (`-2,218`, `-0.000038%`) with every changed PC smaller. Local
+  and Orb flags focuses pass 144 assertions across four cases. An earlier emitter-only ZF
+  prototype had zero net code-shape change because it could not suppress the pre-emitted
+  `LoadImm`; it was removed before this block plan. This stage ran no stress test or full suite.
 
 ## Orb loop
 
