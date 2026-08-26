@@ -531,15 +531,12 @@ TEST_CASE("dead-edge integer compares branch on raw host flags") {
         context.Finish();
 
         const auto instructions = Disassemble(context);
-        const bool zero_only = test.opcode == 0x74 || test.opcode == 0x75;
-        REQUIRE(Count(instructions, "subs") == (zero_only ? 0 : 1));
-        REQUIRE(Count(instructions, "sub ") == (zero_only ? 1 : 0));
-        REQUIRE(Count(instructions, "tst ") == (zero_only ? 1 : 0));
-        if (zero_only) {
-            REQUIRE(Count(instructions, "lsl ") == 0);
-            REQUIRE(Count(instructions, "#0x50") == 1);
-        }
+        REQUIRE(Count(instructions, "subs") == 0);
+        REQUIRE(Count(instructions, "uxtb ") == 1);
+        REQUIRE(Count(instructions, "cmp ") == 1);
+        REQUIRE(Count(instructions, "lsl ") == 0);
         REQUIRE(Count(instructions, "lsr ") == 0);
+        REQUIRE(Count(instructions, "#0x50") == 1);
         REQUIRE(Count(instructions, "cfinv") == 0);
         REQUIRE(Count(instructions, "cset") == 0);
         REQUIRE(Count(instructions, "mrs") == 0);

@@ -133,28 +133,32 @@ void JitTranslator::EmitSub(ir::Inst* inst) {
         }
         return std::nullopt;
     };
-    if (dead_narrow_zero_branch &&
-        dead_narrow_zero_branch->producer == inst) {
-        const auto reproved = MatchDeadNarrowZeroBranch(inst);
+    if (dead_narrow_immediate_branch &&
+        dead_narrow_immediate_branch->producer == inst) {
+        const auto reproved = MatchDeadNarrowImmediateBranch(inst);
         ASSERT_MSG(reproved &&
                            reproved->producer ==
-                                   dead_narrow_zero_branch->producer &&
+                                   dead_narrow_immediate_branch->producer &&
                            reproved->immediate_load ==
-                                   dead_narrow_zero_branch->immediate_load &&
+                                   dead_narrow_immediate_branch->immediate_load &&
                            reproved->immediate ==
-                                   dead_narrow_zero_branch->immediate &&
+                                   dead_narrow_immediate_branch->immediate &&
+                           reproved->required ==
+                                   dead_narrow_immediate_branch->required &&
                            reproved->width ==
-                                   dead_narrow_zero_branch->width,
-                   "dead narrow zero branch proof diverged at IR {}", inst->Id());
+                                   dead_narrow_immediate_branch->width,
+                   "dead narrow immediate branch proof diverged at IR {}",
+                   inst->Id());
         const auto left = inst->GetArg<ir::Value>(0);
         const auto result = context.W(ir::Value{inst});
         const auto pinned = pinned_w(left);
-        __ Sub(result,
-               pinned ? *pinned : context.W(left),
-               dead_narrow_zero_branch->immediate);
-        __ Tst(result,
-               dead_narrow_zero_branch->width == sizeof(u8) ? UINT8_MAX
-                                                             : UINT16_MAX);
+        const auto source = pinned ? *pinned : context.W(left);
+        if (dead_narrow_immediate_branch->width == sizeof(u8)) {
+            __ Uxtb(result, source);
+        } else {
+            __ Uxth(result, source);
+        }
+        __ Cmp(result, dead_narrow_immediate_branch->immediate);
         return;
     }
     auto left = inst->GetArg<ir::Value>(0);

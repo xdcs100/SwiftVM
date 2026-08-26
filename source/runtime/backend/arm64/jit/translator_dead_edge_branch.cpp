@@ -245,11 +245,15 @@ std::optional<ir::Cond> JitTranslator::DeadEdgeIntegerBranchCondition(
     return dead_edge_integer_branch->raw_condition;
 }
 
-std::optional<JitTranslator::DeadNarrowZeroBranchPlan>
-JitTranslator::MatchDeadNarrowZeroBranch(ir::Inst* inst) const {
+std::optional<JitTranslator::DeadNarrowImmediateBranchPlan>
+JitTranslator::MatchDeadNarrowImmediateBranch(ir::Inst* inst) const {
     if (!inst || inst->GetOp() != ir::OpCode::Sub || inst->GetUses() != 0 ||
-        !IsDeadEdgeIntegerBranchProducer(inst) ||
-        dead_edge_integer_branch->required != ir::Flags::Zero) {
+        !IsDeadEdgeIntegerBranchProducer(inst)) {
+        return std::nullopt;
+    }
+    const auto required = dead_edge_integer_branch->required;
+    if (required != ir::Flags::Zero && required != ir::Flags::Carry &&
+        required != (ir::Flags::Carry | ir::Flags::Zero)) {
         return std::nullopt;
     }
     const u32 width = ir::GetValueSizeByte(inst->ReturnType());
@@ -271,24 +275,25 @@ JitTranslator::MatchDeadNarrowZeroBranch(ir::Inst* inst) const {
     if (!masm.IsImmAddSub(immediate)) {
         return std::nullopt;
     }
-    return DeadNarrowZeroBranchPlan{
+    return DeadNarrowImmediateBranchPlan{
             .producer = inst,
             .immediate_load = load,
             .immediate = immediate,
+            .required = required,
             .width = static_cast<u8>(width),
     };
 }
 
-void JitTranslator::PrepareDeadNarrowZeroBranch() {
-    dead_narrow_zero_branch.reset();
+void JitTranslator::PrepareDeadNarrowImmediateBranch() {
+    dead_narrow_immediate_branch.reset();
     if (!dead_edge_integer_branch) {
         return;
     }
-    dead_narrow_zero_branch =
-            MatchDeadNarrowZeroBranch(dead_edge_integer_branch->producer);
-    if (dead_narrow_zero_branch) {
+    dead_narrow_immediate_branch =
+            MatchDeadNarrowImmediateBranch(dead_edge_integer_branch->producer);
+    if (dead_narrow_immediate_branch) {
         disable_instructions.set(
-                dead_narrow_zero_branch->immediate_load->Id());
+                dead_narrow_immediate_branch->immediate_load->Id());
     }
 }
 

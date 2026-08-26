@@ -403,15 +403,16 @@ private:
     [[nodiscard]] std::optional<ir::Cond>
     DeadEdgeIntegerBranchCondition(ir::Inst* inst) const;
 
-    struct DeadNarrowZeroBranchPlan {
+    struct DeadNarrowImmediateBranchPlan {
         ir::Inst* producer{};
         ir::Inst* immediate_load{};
         u64 immediate{};
+        ir::Flags required{};
         u8 width{};
     };
-    void PrepareDeadNarrowZeroBranch();
-    [[nodiscard]] std::optional<DeadNarrowZeroBranchPlan>
-    MatchDeadNarrowZeroBranch(ir::Inst* inst) const;
+    void PrepareDeadNarrowImmediateBranch();
+    [[nodiscard]] std::optional<DeadNarrowImmediateBranchPlan>
+    MatchDeadNarrowImmediateBranch(ir::Inst* inst) const;
 
     // Merge pending guest flags kept in host NZCV into the flags register.
     // B0 tags the existing sequence only; the tags never affect emission.
@@ -594,7 +595,8 @@ private:
     std::map<ir::Inst*, ScalarFPRPublication> scalar_load_fpr_fusions{};
     std::map<ir::Inst*, ScalarFPRPublication> scalar_value_fpr_fusions{};
     std::optional<DeadEdgeIntegerBranchPlan> dead_edge_integer_branch{};
-    std::optional<DeadNarrowZeroBranchPlan> dead_narrow_zero_branch{};
+    std::optional<DeadNarrowImmediateBranchPlan>
+            dead_narrow_immediate_branch{};
     ResidentScalarFPRAnalysis resident_scalar_fpr_analysis{};
     ScalarFPRLiveness scalar_fpr_liveness{};
     ScalarIdentityAnalysis scalar_identity_analysis{};
