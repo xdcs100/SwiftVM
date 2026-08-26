@@ -1684,17 +1684,30 @@ peepholes.
   both builds, so it was used only as a candidate-delta audit. The promoted CoreMark and smallpt
   runs complete in 3.289 and 2.386 seconds; no stress run, diagnostic or new environment switch
   remains.
+- `1c24adb` extends the narrow-extract analysis to the strict unique-use chain
+  `BitExtract(0,width) -> ZeroExtend32 -> LsrImm`. When the three nodes are adjacent and the shift
+  remains within U8/U16 width, the extract and extension emit nothing and `LsrImm` emits one `UBFX`
+  from the original value. CoreMark's CRC inner loops therefore lose both `UXTB/UXTH + LSR` pairs.
+  The exact 20k comparison keeps all 2,761 PCs / 2,864 versions and moves
+  `3,508,879,677 -> 3,485,519,660` (`-23,360,017`, `-0.665740%`) with no growing PC and CRC
+  `0x382f`. The `0x403980/0x403990`, `0x4038d0/0x4038e0/0x403908/0x403930` and
+  `0x403870/0x403880` pairs each shrink by two instructions. Smallpt keeps all 2,730 PCs / 2,998
+  versions and the canonical PPM while moving weighted `226,354 -> 226,348`. The focused U8/U16
+  shape passes four assertions, and the narrow group passes 286 assertions on Mac and Orb. The
+  promoted CoreMark and smallpt runs complete in 4.211 and 3.027 seconds; no stress run, diagnostic
+  or new environment switch remains.
 - Current default-region CoreMark, joined against the retained W67 guest-instruction/entry table,
-  covers `99.999694457%` of entries and measures `2.041986` SVM host instructions per guest
-  instruction. Reusing the unchanged FEX `f2e35f3` value `1.807` gives **`1.130042x`**, down from
+  covers `99.999694457%` of entries and measures `2.014377` SVM host instructions per guest
+  instruction. Reusing the unchanged FEX `f2e35f3` value `1.807` gives **`1.114763x`**, down from
   W67's `2.305x` and the later RE=0 refresh's `2.000x`. Dynamic return dispatch remains the largest
   concentrated boundary pool. The W67-weighted top is now `0x402808` at nine host instructions for
-  three guest instructions across 416.7M retained entries, but it has no move transport. The next
-  broad mechanism is the move-heavy `0x4039b8`, `0x403990`, `0x403958`, `0x403930`, `0x403908` and
-  `0x4038e0` family, each emitting 11-12 moves in 26-27 instructions. `0x402668` is down to eight
-  for three and `0x402814` to eight for four. Audit the shared move mechanism before another narrow
-  flags whitelist. Return-level work remains the dynamic `current_loc` publication or a shorter
-  invalidation-safe seven-instruction L1 hit path.
+  three guest instructions across 416.7M retained entries, but it has no move transport. `0x402668`
+  is second at eight for three. The next broad removable mechanism remains the CRC family: after
+  the shift fusion, `0x4039b8/0x403958` emit 25 instructions and 12 moves, while
+  `0x403990/0x403930/0x403908/0x4038e0` emit 24 and 11. Their shared next candidate is the redundant
+  U16 cleanup before an AND mask that already clears every high bit; do not retry the failed
+  multi-use fixed-home snapshot reuse. Return-level work remains the dynamic `current_loc`
+  publication or a shorter invalidation-safe seven-instruction L1 hit path.
 
 ## Orb loop
 
