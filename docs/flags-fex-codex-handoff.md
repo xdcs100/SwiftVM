@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`14e48c1`** `perf: fuse narrow cross-pinned GPR copies`
+- Code tip: **`4cc2c1e`** `perf: publish narrow loads directly to pinned GPRs`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -19,6 +19,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 
 | Commit | What |
 |---|---|
+| `4cc2c1e` | Publish an exact U8/U16/U32 memory load directly into its pinned GPR home and omit the redundant zero-extension and host-register publication instructions |
 | `14e48c1` | Extend the fixed-home copy planner through exact U8/U16 `ZeroExtend32` chains and emit one `UXTB`/`UXTH` from the source home to the target home |
 | `942a63d` | Generalize the pinned low-32 self-write proof into a cross-pin copy: an exact U32 fixed-home read, zero extension and full fixed-home publication become one `mov wTarget, wSource`, while later aliases remain eligible only as proven memory addresses |
 | `121620f` | FLAGS_REGS default ON |
@@ -1332,6 +1333,21 @@ peepholes.
   PC smaller. Local and Orb pinned/page-fault focuses pass 83 assertions across 15 cases. The
   zero-reach low-32 address-alias extension was removed before this stage; no stress test or full
   suite ran.
+- `4cc2c1e` extends the fixed-home publication proof to an exact
+  `LoadMemory(U8/U16/U32) -> optional ZeroExtend32 -> ZeroExtend32To64 -> SetHostGPR(U64)` chain.
+  The faulting load writes the final pinned W home directly, while the redundant extensions and
+  publication emit nothing. The load remains the only instruction that can change the target
+  before publication, and the existing alias, observer, target-rewrite and helper-clobber checks
+  remain fail-closed. The plan represents a memory producer by the absence of a source GPR rather
+  than a sentinel register or compatibility path. Against `14e48c1` with
+  `SVM_X86_PIN_EXT=3`, bounded smallpt keeps 2,802 PCs / 3,435 versions, 288 dynamic spills and the
+  canonical PPM while moving `385,023 -> 384,618`; the 100%-covered weighted comparison is
+  `386,049 -> 385,644` (`-405`, `-0.104909%`). CoreMark keeps 2,846 PCs / 3,379 versions and
+  `crcfinal=0x382f` while moving `5,793,328,760 -> 5,788,086,168`; the 100%-covered weighted
+  comparison is `5,854,288,841 -> 5,849,046,249` (`-5,242,592`, `-0.089551%`). Local and Orb
+  pinned/page-fault focuses pass 69 assertions across 15 cases. A signed narrow-copy extension was
+  byte-identical on bounded smallpt and CoreMark and was removed. This stage ran no stress test or
+  full suite.
 
 ## Orb loop
 
