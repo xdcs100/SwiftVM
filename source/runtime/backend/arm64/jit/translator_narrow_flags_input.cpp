@@ -24,9 +24,7 @@ JitTranslator::MatchNarrowFlagsInput(ir::Inst* extract) {
          consumer->GetOp() != ir::OpCode::Neg) ||
         consumer->GetArg<ir::Value>(0).Def() != extract ||
         ir::GetValueSizeByte(consumer->ReturnType()) != width ||
-        !True(GetPseudoFlags(&*consumer).set & ir::Flags::NZCV) ||
-        (dead_narrow_immediate_branch &&
-         dead_narrow_immediate_branch->producer == &*consumer)) {
+        !True(GetPseudoFlags(&*consumer).set & ir::Flags::NZCV)) {
         return std::nullopt;
     }
 

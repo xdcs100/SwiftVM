@@ -8,6 +8,7 @@
 #include "aarch64/disasm-aarch64.h"
 #include "runtime/backend/address_space.h"
 #include "runtime/backend/arm64/jit/translator.h"
+#include "runtime/ir/opts/flags_elimination_pass.h"
 #include "runtime/ir/opts/register_alloc_pass.h"
 
 namespace {
@@ -16,7 +17,9 @@ using namespace swift::runtime;
 using namespace swift::runtime::backend;
 using namespace swift::runtime::ir;
 
-std::vector<std::string> EmitNarrowSub(ValueType type, bool reuse_extract) {
+std::vector<std::string> EmitNarrowSub(ValueType type,
+                                       bool reuse_extract,
+                                       bool branch_only = false) {
     Config config{
             .loc_start = 0,
             .loc_end = 1ull << 48,
@@ -30,16 +33,37 @@ std::vector<std::string> EmitNarrowSub(ValueType type, bool reuse_extract) {
     auto source = block->GetHostGPR(HostRegIndex(22), Imm{0u})
                           .SetType(ValueType::U64);
     const auto bits = ir::GetValueSizeByte(type) * 8;
+    auto right = Operand{Imm{3u}};
+    if (branch_only) {
+        right = Operand{block->LoadImm(Imm{3u}).SetType(type)};
+    }
     auto extract = block->BitExtract(source, Imm{0u}, Imm{bits}).SetType(type);
-    auto result = block->Sub(extract, Operand{Imm{3u}}).SetType(type);
+    auto result = block->Sub(extract, right).SetType(type);
     block->SaveFlags(result, Flags::All);
+    if (branch_only) {
+        block->InvertCarry();
+        block->AdvancePC(Imm{2u});
+        block->BranchOnlyEdges();
+        const auto condition = block->LocalCondSet(Cond::EQ)
+                                       .SetType(ValueType::U8);
+        block->SetTerminal(terminal::If{
+                condition,
+                terminal::LinkBlock{Location{0x8b10}},
+                terminal::LinkBlock{Location{0x8b20}},
+        });
+    }
     if (reuse_extract) {
         block->StoreUniform(Uniform{8, type}, extract);
     }
-    block->SetTerminal(terminal::ReturnToDispatch{});
+    if (!branch_only) {
+        block->SetTerminal(terminal::ReturnToDispatch{});
+    }
+    FeatureSet features{};
+    if (branch_only) {
+        FlagsEliminationPass::Run(block.get(), nullptr, features);
+    }
     block->ReIdInstr();
 
-    FeatureSet features{};
     RegAlloc alloc{block->MaxInstrId(),
                    address_space.GetTrampolines().GetGPRRegs(),
                    address_space.GetTrampolines().GetFPRRegs(), features};
@@ -89,4 +113,11 @@ TEST_CASE("narrow flag input keeps shared extracts materialized") {
     const auto instructions = EmitNarrowSub(ValueType::U8, true);
     REQUIRE(Count(instructions, "uxtb ") == 1);
     REQUIRE(Count(instructions, "subs ") == 1);
+}
+
+TEST_CASE("dead narrow immediate branches consume low extracts directly") {
+    const auto instructions = EmitNarrowSub(ValueType::U8, false, true);
+    REQUIRE(Count(instructions, "uxtb ") == 1);
+    REQUIRE(Count(instructions, "cmp ") == 1);
+    REQUIRE(Count(instructions, "lsl ") == 0);
 }

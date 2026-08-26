@@ -153,9 +153,10 @@ void JitTranslator::EmitSub(ir::Inst* inst) {
                    "dead narrow immediate branch proof diverged at IR {}",
                    inst->Id());
         const auto left = inst->GetArg<ir::Value>(0);
+        const auto left_input = ResolveNarrowFlagsInput(left, inst);
         const auto result = context.W(ir::Value{inst});
-        const auto pinned = pinned_w(left);
-        const auto source = pinned ? *pinned : context.W(left);
+        const auto pinned = pinned_w(left_input);
+        const auto source = pinned ? *pinned : context.W(left_input);
         if (dead_narrow_immediate_branch->width == sizeof(u8)) {
             __ Uxtb(result, source);
         } else {
