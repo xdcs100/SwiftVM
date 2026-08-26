@@ -26,6 +26,7 @@ enum class PinnedReadShape {
     LoadU16,
     SignedLoadU16,
     LoadU8Flags,
+    LoadU8SavedFlags,
     OverwrittenWrite,
     OverwrittenWriteFault,
     MemoryAddress,
@@ -58,12 +59,14 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
     if (shape == PinnedReadShape::CopyU16 || shape == PinnedReadShape::LoadU16 ||
         shape == PinnedReadShape::SignedLoadU16) {
         type = ValueType::U16;
-    } else if (shape == PinnedReadShape::LoadU8Flags) {
+    } else if (shape == PinnedReadShape::LoadU8Flags ||
+               shape == PinnedReadShape::LoadU8SavedFlags) {
         type = ValueType::U8;
     }
     auto value = shape == PinnedReadShape::LoadU16 ||
                          shape == PinnedReadShape::SignedLoadU16 ||
-                         shape == PinnedReadShape::LoadU8Flags
+                         shape == PinnedReadShape::LoadU8Flags ||
+                         shape == PinnedReadShape::LoadU8SavedFlags
             ? block->LoadMemory(Operand{block->LoadImm(Imm{swift::u64{0x1000}})
                                                 .SetType(ValueType::U64)})
                       .SetType(type)
@@ -81,14 +84,19 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
                                .SetType(ValueType::U32);
         block->StoreUniform(Uniform{64, ValueType::U64}, widened);
         block->StoreUniform(Uniform{72, ValueType::U32}, product);
-    } else if (shape == PinnedReadShape::LoadU8Flags) {
+    } else if (shape == PinnedReadShape::LoadU8Flags ||
+               shape == PinnedReadShape::LoadU8SavedFlags) {
         auto extended = block->ZeroExtend32To64(value).SetType(ValueType::U64);
         block->SetHostGPR(extended, HostRegIndex(23), Imm{0u});
         auto alias = block->BitExtract(extended, Imm{0u}, Imm{8u})
                              .SetType(ValueType::U8);
         auto result = block->Or(alias, Operand{Imm{0u}})
-                              .SetType(ValueType::U8);
-        block->AppendInst(OpCode::BranchOnlyFlags, result, Flags::Zero);
+                               .SetType(ValueType::U8);
+        if (shape == PinnedReadShape::LoadU8Flags) {
+            block->AppendInst(OpCode::BranchOnlyFlags, result, Flags::Zero);
+        } else {
+            block->SaveFlags(result, Flags::Zero | Flags::Parity);
+        }
     } else if (shape == PinnedReadShape::Or) {
         auto right = block->GetHostGPR(HostRegIndex(29), Imm{0u})
                              .SetType(type);
@@ -272,6 +280,14 @@ TEST_CASE("a pinned narrow load keeps a branch flag alias in its fixed home") {
     const auto lines = EmitPinnedRead(PinnedReadShape::LoadU8Flags, false);
     REQUIRE(Count(lines, "ldrb w23", "") == 1);
     REQUIRE(Count(lines, "mov w23", "") == 0);
+    REQUIRE(Count(lines, "w23, lsl #24", "") == 1);
+}
+
+TEST_CASE("a pinned narrow load keeps a saved flag alias in its fixed home") {
+    const auto lines = EmitPinnedRead(PinnedReadShape::LoadU8SavedFlags, false);
+    REQUIRE(Count(lines, "ldrb w23", "") == 1);
+    REQUIRE(Count(lines, "mov w23", "") == 0);
+    REQUIRE(Count(lines, "uxtb ", "") == 0);
     REQUIRE(Count(lines, "w23, lsl #24", "") == 1);
 }
 

@@ -51,9 +51,9 @@ bool IsLowAluAlias(ir::Block* block,
                 consumer.GetUses() == 0 &&
                 consumer.GetArg<ir::Operand>(1).IsImm() &&
                 consumer.GetArg<ir::Operand>(1).GetLeft().imm.Get() == 0 &&
-                !consumer.GetPseudoOperations(
-                                 ir::OpCode::BranchOnlyFlags)
-                         .empty();
+                (!consumer.GetPseudoOperations(ir::OpCode::BranchOnlyFlags)
+                          .empty() ||
+                 !consumer.GetPseudoOperations(ir::OpCode::SaveFlags).empty());
         return u32_alu || logical_zero_test;
     }
     return false;
