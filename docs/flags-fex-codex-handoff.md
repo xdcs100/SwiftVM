@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`a548ece`** `perf: remove clean narrow self extensions`
+- Code tip: **`4661866`** `perf: store narrow pinned values directly`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -19,6 +19,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 
 | Commit | What |
 |---|---|
+| `4661866` | Feed an exact low U8/U16 store extract from an allocator-coalesced fixed-home publication directly to `STRB/STRH` |
 | `a548ece` | Omit an adjacent narrow self-extension when the shared register is already proven zero above the width by a load/zero-extension chain |
 | `53333fc` | Fold an exact adjacent U8/U16 low extract and `ZeroExtend32` into one `UXTB/UXTH` even when their allocated registers differ |
 | `9d299aa` | Emit a sole adjacent U8/U16 memory-load extension directly into the consumer register even when linear scan assigned distinct registers |
@@ -1611,6 +1612,19 @@ peepholes.
   3,052 versions, raw `361,466`, weighted `361,484` and the canonical PPM. The clean-load
   self-extension case passes four assertions. The promoted 20k run completes in 3.183 seconds; no
   stress run, full suite, diagnostic or new environment switch remains.
+- `4661866` keeps an exact `BitExtract(0, 8/16)` store payload on the fixed GPR home of an existing
+  allocator-coalesced `SetHostGPR` publication. The extract must have one exact `StoreMemory` use,
+  the publication must precede it and independently reprove, and a same-home rewrite or
+  caller-saved helper clobber before the store rejects the plan. `STRB/STRH` therefore reads the
+  published W register directly without materializing `UXTB/UXTH`. Exact 20k CoreMark raw host work
+  moves `3,520,730,080 -> 3,512,247,843`, and the 100%-covered weighted comparison moves
+  `3,520,730,095 -> 3,512,247,858` (`-8,482,237`, `-0.240923%`) with no growing PC and CRC
+  `0x382f`. The 2k screen moves `352,217,041 -> 351,368,630`; `0x402218` shrinks from 41 to 39
+  host instructions, and two related hot blocks each shrink by one. Units/versions remain
+  2,820 / 2,915. Smallpt keeps all 2,792 PCs / 3,052 versions and the canonical PPM while moving raw
+  `361,466 -> 361,457` and weighted `361,484 -> 361,475`. Narrow and pinned-load coverage passes
+  270 and 11 assertions on Mac and Orb. The promoted 20k and smallpt runs complete in 3.264 and
+  2.431 seconds; no stress run, full suite, diagnostic or new environment switch remains.
 
 ## Orb loop
 
