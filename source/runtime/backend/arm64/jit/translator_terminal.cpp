@@ -134,6 +134,7 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
                         ? std::optional{context.X(*dynamic_next_loc)}
                         : std::nullopt;
                 dynamic_next_loc.reset();
+                dynamic_location_miss = nullptr;
                 context.EmitRSBPop(actual_target);
                 RecordBoundaryRange(BoundarySubsequence::LinkTail, link_before,
                                     context.CurrentBufferSize());
@@ -410,8 +411,10 @@ bool JitTranslator::EmitIndirectForward() {
     }
     const auto location = context.X(*dynamic_next_loc);
     dynamic_next_loc.reset();
+    auto* miss = dynamic_location_miss;
+    dynamic_location_miss = nullptr;
     const u32 link_before = context.CurrentBufferSize();
-    context.ForwardIndirectL1(location);
+    context.ForwardIndirectL1(location, miss);
     RecordBoundaryRange(BoundarySubsequence::LinkTail, link_before,
                         context.CurrentBufferSize());
     return true;

@@ -684,8 +684,15 @@ void JitTranslator::EmitSetLocation(ir::Inst* inst) {
     // into the middle of the same block.
     static_next_loc.reset();
     dynamic_next_loc.reset();
+    dynamic_location_miss = nullptr;
     if (location.IsValue()) {
-        __ Str(context.X(location.GetValue()), MemOperand(state, state_offset_current_loc));
+        const auto target = context.X(location.GetValue());
+        if (!terminal_location_publication.Defers(inst)) {
+            __ Str(target, MemOperand(state, state_offset_current_loc));
+        } else {
+            dynamic_location_miss = terminal_location_publication.MissLabel(target);
+            ASSERT(dynamic_location_miss);
+        }
         dynamic_next_loc = location.GetValue();
     } else {
         static_next_loc = location.GetImm().Get();

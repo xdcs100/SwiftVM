@@ -96,7 +96,10 @@ bool IsReusablePinnedLowAlias(ir::Block* block,
 
 bool IsU32AluUse(ir::Inst& consumer, ir::Inst* definition) {
     if (consumer.GetOp() != ir::OpCode::Add &&
-        consumer.GetOp() != ir::OpCode::Sub) {
+        consumer.GetOp() != ir::OpCode::Sub &&
+        consumer.GetOp() != ir::OpCode::And &&
+        consumer.GetOp() != ir::OpCode::Or &&
+        consumer.GetOp() != ir::OpCode::Xor) {
         return false;
     }
     u32 uses = 0;
@@ -187,6 +190,7 @@ JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
     }
 
     std::vector<ir::Inst*> aliases;
+    std::vector<ir::Inst*> transferred_uses;
     u32 producer_last_use = inst->Id();
     if (add_source) {
         bool saw_extend = false;
@@ -217,7 +221,31 @@ JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
             return std::nullopt;
         }
     } else if (read->GetUses() != 1) {
-        return std::nullopt;
+        if (!source_index || source_width != sizeof(u32)) {
+            return std::nullopt;
+        }
+        bool saw_extend = false;
+        u32 source_uses = 0;
+        for (auto& scan : cur_block->GetInstList()) {
+            for (auto used : scan.GetValues()) {
+                if (used.Def() != read) {
+                    continue;
+                }
+                ++source_uses;
+                if (&scan == extend) {
+                    saw_extend = true;
+                    continue;
+                }
+                if (scan.Id() <= inst->Id() || !IsU32AluUse(scan, read)) {
+                    return std::nullopt;
+                }
+                transferred_uses.push_back(&scan);
+                producer_last_use = std::max<u32>(producer_last_use, scan.Id());
+            }
+        }
+        if (!saw_extend || source_uses != read->GetUses()) {
+            return std::nullopt;
+        }
     }
 
     bool saw_publication = false;
@@ -295,6 +323,7 @@ JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
             .extend = extend,
             .signed_load = signed_load,
             .aliases = std::move(aliases),
+            .transferred_uses = std::move(transferred_uses),
             .source = source_index,
             .target = static_cast<u16>(target),
             .width = static_cast<u8>(source_width),
@@ -314,11 +343,28 @@ JitTranslator::ResolvePinnedGPRValue(ir::Value value) const {
     return XRegister(pinned->second);
 }
 
+std::optional<WRegister>
+JitTranslator::ResolvePinnedGPRWUse(ir::Value value,
+                                    const ir::Inst* consumer) const {
+    if (!value.Def() || !consumer) {
+        return std::nullopt;
+    }
+    const auto use = pinned_gpr_use_homes.find({value.Def(), consumer});
+    if (use != pinned_gpr_use_homes.end()) {
+        return WRegister(use->second);
+    }
+    const auto pinned = fused_pin_gpr_reads.find(value.Def());
+    return pinned == fused_pin_gpr_reads.end()
+            ? std::nullopt
+            : std::optional<WRegister>{WRegister(pinned->second)};
+}
+
 void JitTranslator::PreparePinnedGPRCopies(ir::Block* block) {
     fused_pin_zext32.clear();
     fused_pin_sign_extends.clear();
     fused_pin_gpr_reads.clear();
     pinned_gpr_values.clear();
+    pinned_gpr_use_homes.clear();
     pinned_gpr_copies.clear();
     for (auto& inst : block->GetInstList()) {
         auto plan = MatchPinnedGPRCopy(&inst);
@@ -347,6 +393,10 @@ void JitTranslator::PreparePinnedGPRCopies(ir::Block* block) {
             } else {
                 pinned_gpr_values.emplace(alias, plan->target);
             }
+        }
+        for (auto* consumer : plan->transferred_uses) {
+            pinned_gpr_use_homes.emplace(
+                    std::make_pair(plan->read, consumer), plan->target);
         }
         pinned_gpr_copies.emplace(&inst, *plan);
     }

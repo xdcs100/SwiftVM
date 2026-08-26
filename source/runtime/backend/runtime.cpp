@@ -170,8 +170,6 @@ struct Runtime::Impl final {
         if (True(address_space->GetConfig().global_opts & Optimizations::ReturnStackBuffer)) {
             return_stack.emplace();
             state->rsb_pointer = return_stack->Empty();
-            state->rsb_bottom = return_stack->Bottom();
-            state->rsb_top = return_stack->Empty();
         }
         jit_entry = address_space->GetTrampolines().GetRuntimeEntry();
         // Claim this thread for host-side SMC fault recovery (see OwnerSlot).

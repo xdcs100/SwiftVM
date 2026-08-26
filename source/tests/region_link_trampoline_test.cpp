@@ -92,9 +92,7 @@ struct TestState {
         state->l1_code_cache = l1.Data();
         state->l2_code_cache = l2.Data();
         state->interface = &profile;
-        state->rsb_bottom = &rsb.rsb_frames.front();
-        state->rsb_top = &rsb.rsb_frames[rsb_stack_size];
-        state->rsb_pointer = state->rsb_top;
+        state->rsb_pointer = &rsb.rsb_frames[rsb_stack_size];
     }
 
     std::span<u8> Uniform(size_t size) {

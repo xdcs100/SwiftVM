@@ -25,13 +25,7 @@ void JitTranslator::EmitAdd(ir::Inst* inst) {
     auto left_input = ResolveNarrowFlagsInput(left, inst);
     auto right = inst->GetArg<ir::Operand>(1);
     auto pinned_w = [&](ir::Value value) -> std::optional<WRegister> {
-        if (value.Def()) {
-            if (auto it = fused_pin_gpr_reads.find(value.Def());
-                it != fused_pin_gpr_reads.end()) {
-                return WRegister(it->second);
-            }
-        }
-        return std::nullopt;
+        return ResolvePinnedGPRWUse(value, inst);
     };
     auto right_pinned = right.GetLeft().IsValue()
             ? pinned_w(right.GetLeft().value)
@@ -136,13 +130,7 @@ void JitTranslator::EmitSub(ir::Inst* inst) {
         return;
     }
     auto pinned_w = [&](ir::Value value) -> std::optional<WRegister> {
-        if (value.Def()) {
-            if (auto it = fused_pin_gpr_reads.find(value.Def());
-                it != fused_pin_gpr_reads.end()) {
-                return WRegister(it->second);
-            }
-        }
-        return std::nullopt;
+        return ResolvePinnedGPRWUse(value, inst);
     };
     if (dead_narrow_immediate_branch &&
         dead_narrow_immediate_branch->producer == inst) {
@@ -484,13 +472,7 @@ void JitTranslator::EmitAnd(ir::Inst* inst) {
     }
     auto right = inst->GetArg<ir::Operand>(1);
     auto pinned_w = [&](ir::Value value) -> std::optional<WRegister> {
-        if (value.Def()) {
-            if (auto it = fused_pin_gpr_reads.find(value.Def());
-                it != fused_pin_gpr_reads.end()) {
-                return WRegister(it->second);
-            }
-        }
-        return std::nullopt;
+        return ResolvePinnedGPRWUse(value, inst);
     };
     auto right_pinned = right.GetLeft().IsValue()
             ? pinned_w(right.GetLeft().value)
@@ -574,13 +556,7 @@ void JitTranslator::EmitOr(ir::Inst* inst) {
     auto left = inst->GetArg<ir::Value>(0);
     auto right = inst->GetArg<ir::Operand>(1);
     auto pinned_w = [&](ir::Value value) -> std::optional<WRegister> {
-        if (value.Def()) {
-            if (auto it = fused_pin_gpr_reads.find(value.Def());
-                it != fused_pin_gpr_reads.end()) {
-                return WRegister(it->second);
-            }
-        }
-        return std::nullopt;
+        return ResolvePinnedGPRWUse(value, inst);
     };
     auto pseudo_flags = GetPseudoFlags(inst);
     if (!pseudo_flags.Null() && inst->GetUses() == 0 && right.IsImm() &&
@@ -641,13 +617,7 @@ void JitTranslator::EmitXor(ir::Inst* inst) {
     auto left = inst->GetArg<ir::Value>(0);
     auto right = inst->GetArg<ir::Operand>(1);
     auto pinned_w = [&](ir::Value value) -> std::optional<WRegister> {
-        if (value.Def()) {
-            if (auto it = fused_pin_gpr_reads.find(value.Def());
-                it != fused_pin_gpr_reads.end()) {
-                return WRegister(it->second);
-            }
-        }
-        return std::nullopt;
+        return ResolvePinnedGPRWUse(value, inst);
     };
     auto right_pinned = right.GetLeft().IsValue()
             ? pinned_w(right.GetLeft().value)

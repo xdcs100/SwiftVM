@@ -132,7 +132,7 @@ public:
     // existing per-Runtime L1 table. A key mismatch or cleared value returns
     // through the unchanged dispatcher, which performs the complete L1
     // collision-chain and L2 lookup.
-    void ForwardIndirectL1(const Register& location);
+    void ForwardIndirectL1(const Register& location, Label* miss = nullptr);
     void ReturnToDispatcher(const Register& location);
 
     // --- Return Stack Buffer (RSB) emission --------------------------------
@@ -147,13 +147,8 @@ public:
     //   hit branches through the L2 value.
     //   A miss, empty slot, or underflow uses the normal dispatcher path.
     //
-    // Bounds guards (State::rsb_bottom / rsb_top, wired in runtime.cpp):
-    //   Push skips when rsb_ptr has reached the buffer bottom (stack full) so
-    //   the pre-decrement store never writes out of bounds.
-    //   Pop falls back to the dispatcher when rsb_ptr has reached the empty
-    //   top (more guest rets than calls) so the speculative load never reads
-    //   past the buffer. Both convert an RSB imbalance into a safe dispatcher
-    //   round-trip instead of a SIGSEGV.
+    // The guarded Runtime mapping resets rsb_ptr in the host fault context if
+    // either direction leaves the usable stack.
     void EmitRSBPush(u64 guest_return_addr, u32 dispatch_index);
     void EmitRSBPop(std::optional<XRegister> actual_target = std::nullopt);
 

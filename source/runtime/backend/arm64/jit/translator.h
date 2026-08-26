@@ -14,6 +14,7 @@
 #include "resident_scalar_fpr_analysis.h"
 #include "scalar_fpr_liveness.h"
 #include "scalar_identity_analysis.h"
+#include "terminal_location_publication.h"
 #include "runtime/backend/code_cache.h"
 #include "runtime/common/types.h"
 #include "runtime/include/config.h"
@@ -178,6 +179,7 @@ private:
         ir::Inst* extend{};
         bool signed_load{};
         std::vector<ir::Inst*> aliases{};
+        std::vector<ir::Inst*> transferred_uses{};
         std::optional<u16> source{};
         u16 target{};
         u8 width{};
@@ -216,6 +218,8 @@ private:
     MatchPinnedGPRCopy(ir::Inst* inst) const;
     [[nodiscard]] std::optional<XRegister>
     ResolvePinnedGPRValue(ir::Value value) const;
+    [[nodiscard]] std::optional<WRegister>
+    ResolvePinnedGPRWUse(ir::Value value, const ir::Inst* consumer) const;
     [[nodiscard]] std::optional<u16>
     MatchPinnedMemoryAddress(ir::Inst* address) const;
     struct PinnedMemorySource {
@@ -639,6 +643,8 @@ private:
     ir::Block *cur_block{};
     ir::Inst *cur_instr{};
     ir::Inst *terminal_body_inst{};
+    TerminalLocationPublication terminal_location_publication{};
+    Label* dynamic_location_miss{};
     BitVector disable_instructions{};
     std::map<ir::Inst *, Label> local_labels{};
     std::map<ir::Inst *, Condition> local_conditions{};
@@ -652,6 +658,7 @@ private:
     std::map<ir::Inst*, u16> pinned_memory_values{};
     std::map<ir::Inst*, ir::Value> narrow_flags_inputs{};
     std::map<ir::Inst*, u16> pinned_gpr_values{};
+    std::map<std::pair<ir::Inst*, const ir::Inst*>, u16> pinned_gpr_use_homes{};
     std::map<ir::Inst*, PinnedGPRCopy> pinned_gpr_copies{};
     std::map<ir::Inst*, PinnedLoadUpdate> pinned_load_updates{};
     std::map<ir::Inst*, PinnedLoadUpdate> pinned_load_update_instructions{};

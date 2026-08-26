@@ -28,6 +28,7 @@ enum class PinnedReadShape {
     SelfAnd,
     SelfWrite,
     Copy,
+    TransferredCopy,
     CopyU16,
     LoadU16,
     SignedLoadU16,
@@ -60,6 +61,7 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
     const bool overwritten_write = shape == PinnedReadShape::OverwrittenWrite ||
                                    shape == PinnedReadShape::OverwrittenWriteFault;
     const bool copy = shape == PinnedReadShape::Copy ||
+                      shape == PinnedReadShape::TransferredCopy ||
                       shape == PinnedReadShape::CopyU16 ||
                       shape == PinnedReadShape::LoadU16 ||
                       shape == PinnedReadShape::NarrowStoreMemory;
@@ -127,8 +129,18 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
                              .SetType(type);
         auto result = block->Or(value, Operand{right}).SetType(type);
         block->SaveFlags(result, Flags::Negate | Flags::Zero | Flags::Parity);
+    } else if (shape == PinnedReadShape::TransferredCopy) {
+        auto published = block->ZeroExtend32To64(value).SetType(ValueType::U64);
+        block->SetHostGPR(published, HostRegIndex(22), Imm{0u});
+        auto replacement = block->LoadImm(Imm{swift::u64{0x1234}})
+                                   .SetType(ValueType::U64);
+        block->SetHostGPR(replacement, HostRegIndex(source_index), Imm{0u});
+        auto right = block->GetHostGPR(HostRegIndex(29), Imm{0u})
+                             .SetType(ValueType::U32);
+        auto result = block->Xor(value, Operand{right}).SetType(ValueType::U32);
+        block->StoreUniform(Uniform{64, ValueType::U32}, result);
     } else if (shape == PinnedReadShape::SelfWrite ||
-               shape == PinnedReadShape::Copy ||
+                shape == PinnedReadShape::Copy ||
                shape == PinnedReadShape::CopyU16 ||
                shape == PinnedReadShape::LoadU16) {
         auto extended = shape == PinnedReadShape::CopyU16 ||
@@ -296,6 +308,13 @@ TEST_CASE("a pinned low-32 copy publishes directly between fixed homes") {
     REQUIRE(Count(lines, "mov w22, w20", "") == 1);
     REQUIRE(Count(lines, "mov w", "w20") == 1);
     REQUIRE(Count(lines, "ldrb ", "[x22") == 1);
+}
+
+TEST_CASE("a published fixed home owns later uses after the source is overwritten") {
+    const auto lines = EmitPinnedRead(PinnedReadShape::TransferredCopy, false);
+    REQUIRE(Count(lines, "mov w22, w20", "") == 1);
+    REQUIRE(Count(lines, "eor w", "w22, w29") == 1);
+    REQUIRE(Count(lines, "eor w", "w20, w29") == 0);
 }
 
 TEST_CASE("a pinned narrow copy zero-extends directly between fixed homes") {

@@ -763,7 +763,7 @@ void JitContext::ReturnToDispatcher(const Register& location) {
     __ Ret();
 }
 
-void JitContext::ForwardIndirectL1(const Register& location) {
+void JitContext::ForwardIndirectL1(const Register& location, Label* miss) {
     const auto index = GetTmpX();
     const auto entry = GetTmpX();
 
@@ -794,7 +794,11 @@ void JitContext::ForwardIndirectL1(const Register& location) {
     }
 
     __ Ccmp(index, location, NoFlag, eq);
-    __ Csel(entry, entry, x30, eq);
+    if (miss) {
+        __ B(miss, ne);
+    } else {
+        __ Csel(entry, entry, x30, eq);
+    }
     __ Br(entry);
 }
 
@@ -814,51 +818,33 @@ void JitContext::ForwardIndirectL1(const Register& location) {
 
 void JitContext::EmitRSBPush(u64 guest_return_addr, u32 dispatch_index) {
     if (features.shadow_lean) {
-        Label rsb_full;
-        const auto bound = backend::ScratchXPoolEnabled(features) ? GetTmpX() : ip0;
         const auto slot = backend::ScratchXPoolEnabled(features) ? GetTmpX() : ip1;
-        __ Ldr(bound, MemOperand(state, state_offset_rsb_bottom));
-        __ Cmp(rsb_ptr, bound);
-        __ B(&rsb_full, ls);
         // Keep the 16-byte frame ABI. Both words carry the stable L2 value-slot
         // index; an OFF pop seeing this frame merely fails its guest-PC compare
         // and takes the safe dispatcher path.
         __ Mov(slot, static_cast<u64>(dispatch_index));
         __ Stp(slot, slot, MemOperand(rsb_ptr, -16, PreIndex));
-        __ Bind(&rsb_full);
         return;
     }
-    Label rsb_full;
-    const auto bound = backend::ScratchXPoolEnabled(features) ? GetTmpX() : ip0;
     const auto guest = backend::ScratchXPoolEnabled(features) ? GetTmpX() : ip0;
     const auto slot = backend::ScratchXPoolEnabled(features) ? GetTmpX() : ip1;
-    // Overflow guard: if rsb_ptr has already reached the bottom of the buffer
-    // (state->rsb_bottom == &rsb_frames[0], stack full), a pre-decrement push
-    // would store out of bounds — skip the push and let the ret take the slow
-    // dispatcher path instead. Unsigned compare: skip when rsb_ptr <= bottom.
-    __ Ldr(bound, MemOperand(state, state_offset_rsb_bottom));
-    __ Cmp(rsb_ptr, bound);
-    __ B(&rsb_full, ls);
     // ip0 (x16) = guest return address, ip1 (x17) = dispatch table slot.
     __ Mov(guest, guest_return_addr);
     __ Mov(slot, static_cast<u64>(dispatch_index));
     // Pre-decrement push: rsb_ptr -= 16, then store the pair.
     __ Stp(guest, slot, MemOperand(rsb_ptr, -16, PreIndex));
-    __ Bind(&rsb_full);
 }
 
 void JitContext::EmitRSBPop(std::optional<XRegister> actual_target) {
     if (features.shadow_lean) {
-        Label rsb_miss, rsb_empty;
+        Label rsb_miss;
         const auto predicted = backend::ScratchXPoolEnabled(features) ? GetTmpX() : ip0;
         const auto slot = backend::ScratchXPoolEnabled(features) ? GetTmpX() : ip1;
-        __ Ldr(predicted, MemOperand(state, state_offset_rsb_top));
-        __ Cmp(rsb_ptr, predicted);
-        __ B(&rsb_empty, hs);
         // Pop first: a mismatched prediction is consumed exactly like the old
         // path. The slot points at the L2 value word; the preceding word is
         // its immutable guest key. SMC clears the value word before reclaim.
         __ Ldp(predicted, slot, MemOperand(rsb_ptr, 16, PostIndex));
+        __ Cbz(slot, &rsb_miss);
         RecordFlagsRegsAudit(FlagsRegsAuditMergeCause::TerminalInternal,
                              FlagsRegsAuditEdgeKind::RSBHit,
                              FlagsRegsAuditCost::CacheBaseReloadInstructions,
@@ -877,23 +863,14 @@ void JitContext::EmitRSBPop(std::optional<XRegister> actual_target) {
         RecordExecCounter(exec_offset_rsb_hit);
         __ Br(slot);
         __ Bind(&rsb_miss);
-        __ Bind(&rsb_empty);
         RecordExecCounter(exec_offset_rsb_miss);
         __ Ret();
         return;
     }
-    Label rsb_miss, rsb_empty;
+    Label rsb_miss;
     const auto predicted = backend::ScratchXPoolEnabled(features) ? GetTmpX() : ip0;
-    // Underflow guard: if rsb_ptr has reached the empty top of the stack
-    // (state->rsb_top == &rsb_frames[rsb_stack_size]), there are more guest
-    // rets than recorded calls, so no valid prediction exists — fall back to
-    // the dispatcher without reading the buffer (avoids an out-of-bounds load
-    // and a wild branch). Unsigned compare: fall back when rsb_ptr >= top.
-    __ Ldr(predicted, MemOperand(state, state_offset_rsb_top));
-    __ Cmp(rsb_ptr, predicted);
-    __ B(&rsb_empty, hs);
-    // Load the predicted guest return address from the top RSB frame.
-    __ Ldr(predicted, MemOperand(rsb_ptr, 0));
+    __ Ldp(predicted, ip, MemOperand(rsb_ptr));
+    __ Cbz(ip, &rsb_miss);
     if (actual_target) {
         __ Cmp(predicted, *actual_target);
     } else {
@@ -906,7 +883,6 @@ void JitContext::EmitRSBPop(std::optional<XRegister> actual_target) {
     // compiled code pointer.  cache (x27) holds the L2 table base at all
     // times (loaded once at runtime entry).  dispatch_index == 2*entry+1
     // points straight at the entry's value word (an 8-byte code pointer).
-    __ Ldr(ip, MemOperand(rsb_ptr, 8));   // ip (x11) = dispatch_index
     RecordFlagsRegsAudit(FlagsRegsAuditMergeCause::TerminalInternal,
                          FlagsRegsAuditEdgeKind::RSBHit,
                          FlagsRegsAuditCost::CacheBaseReloadInstructions,
@@ -918,28 +894,8 @@ void JitContext::EmitRSBPop(std::optional<XRegister> actual_target) {
     __ Add(rsb_ptr, rsb_ptr, 16);
     RecordExecCounter(exec_offset_rsb_hit);
     __ Br(ip2);
-    // Miss with a frame present: DISCARD that frame before falling back.
-    //
-    // This ret consumes a return address either way, so leaving the frame in
-    // place desynchronises the buffer permanently: the very next ret compares
-    // against the same stale entry and misses again, while pushes keep
-    // stacking until rsb_ptr reaches rsb_bottom and every later push is
-    // skipped by the overflow guard.  Measured on HEAD (SVM_RSB_STATS
-    // instrumentation, docs/perf-baseline.md 6b): func_tests 3587 pops /
-    // 65 hits (1.81%), of which 3469 were address mismatches and *3463 of
-    // 3592 pushes were skipped because the buffer was full* — one unmatched
-    // guest call early in glibc startup wedged the buffer for the whole run.
-    // Popping here makes the buffer self-healing: an unmatched call costs at
-    // most the predictions of the rets that drain it.
-    //
-    // Discarding is unconditionally safe: the RSB is a prediction only.  The
-    // architectural return target lives in state->current_loc and the fallback
-    // below returns to the trampoline dispatcher, which uses it.  A wrong or
-    // missing prediction can only cost a dispatcher round-trip.
     __ Bind(&rsb_miss);
     __ Add(rsb_ptr, rsb_ptr, 16);
-    // Underflow: no frame was read, so there is nothing to discard.
-    __ Bind(&rsb_empty);
     RecordExecCounter(exec_offset_rsb_miss);
     __ Ret();
 }

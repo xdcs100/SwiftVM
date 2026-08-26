@@ -1322,6 +1322,8 @@ void JitTranslator::EmitSetHostGPR(ir::Inst* inst) {
                            reproved->extend == copy->second.extend &&
                            reproved->signed_load == copy->second.signed_load &&
                            reproved->aliases == copy->second.aliases &&
+                           reproved->transferred_uses ==
+                                   copy->second.transferred_uses &&
                            reproved->source == copy->second.source &&
                            reproved->target == copy->second.target &&
                            reproved->width == copy->second.width &&

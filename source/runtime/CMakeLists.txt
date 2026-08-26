@@ -139,6 +139,8 @@ add_library(swift_runtime STATIC
         backend/arm64/jit/jit_context.cpp
         backend/arm64/jit/jit_context.h
         backend/arm64/jit/translator.cpp
+        backend/arm64/jit/terminal_location_publication.cpp
+        backend/arm64/jit/terminal_location_publication.h
         backend/arm64/jit/translator_operand.cpp
         backend/arm64/jit/translator_region.cpp
         backend/arm64/jit/translator_terminal.cpp

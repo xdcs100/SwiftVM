@@ -747,6 +747,7 @@ JitTranslator::PrepareBlockState(ir::Block* block) {
     }
     static_next_loc.reset();
     dynamic_next_loc.reset();
+    dynamic_location_miss = nullptr;
     compound_logical_clear_pending = false;
     // Function mode keeps one function-sized suppression bitmap. Grow it
     // before the per-block backedge proof marks the two sunk IR instructions.
@@ -1349,6 +1350,7 @@ void JitTranslator::Translate(ir::HIRFunction* function) {
         }
         emitted_blocks.push_back(block);
     }
+    terminal_location_publication.Prepare(emitted_blocks, context);
     translating_function = true;
     InvalidateFlagsToken();
     flags_token_keep = false;
@@ -1374,6 +1376,9 @@ void JitTranslator::Translate(ir::HIRFunction* function) {
             EmitFlagsPublishedVeneer(block);
         }
     }
+    context.BeginColdScratch();
+    terminal_location_publication.EmitColdPaths(masm);
+    context.EndColdScratch();
     translating_function = false;
     PlacementPoint("unit", placement_unit_pc);
     next_region_block.reset();
@@ -1417,6 +1422,7 @@ void JitTranslator::Translate(ir::Inst* inst) {
         static_next_loc.reset();
         if (inst->GetOp() != ir::OpCode::PopRSB) {
             dynamic_next_loc.reset();
+            dynamic_location_miss = nullptr;
         }
     }
 
