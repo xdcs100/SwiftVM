@@ -23,6 +23,7 @@ public:
 private:
     void AnalyzeConversions(ir::Block* block);
     void AnalyzeMemoryStores(ir::Block* block);
+    void AnalyzeExtractStores(ir::Block* block);
     bool TryMapConversionStore(ir::Block* block,
                                ir::Inst* conversion,
                                ir::Inst* publication,

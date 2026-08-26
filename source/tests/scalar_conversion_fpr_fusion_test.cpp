@@ -74,6 +74,22 @@ IntrusivePtr<Block> MakeNarrowResidentStore(bool overwrite) {
     return block;
 }
 
+IntrusivePtr<Block> MakePublishedExtractStore(bool overwrite) {
+    IntrusivePtr<Block> block{new Block(0, Location{0x8b80})};
+    auto source = block->LoadUniform(Uniform{16, ValueType::V128});
+    auto extracted = block->VecExtract64(source, Imm{0u}).SetType(ValueType::U64);
+    block->SetHostFPR(source, HostRegIndex(kTarget), Imm{0u});
+    if (overwrite) {
+        auto replacement = block->LoadUniform(Uniform{32, ValueType::V128});
+        block->SetHostFPR(replacement, HostRegIndex(kTarget), Imm{0u});
+    }
+    auto address = block->LoadUniform(Uniform{0, ValueType::U64});
+    block->StoreMemory(Operand{address}, extracted);
+    block->SetTerminal(terminal::ReturnToDispatch{});
+    block->ReIdInstr();
+    return block;
+}
+
 IntrusivePtr<Block> MakeConversionStore(bool overwrite) {
     IntrusivePtr<Block> block{new Block(0, Location{0x8b80})};
     auto current = block->GetHostFPR(HostRegIndex(kTarget), Imm{0u}).SetType(ValueType::V128);
@@ -173,6 +189,20 @@ TEST_CASE("resident narrow FPR reads store to memory without a GPR bridge") {
     REQUIRE(Count(overwritten, "mov x") == 1);
     REQUIRE(Count(overwritten, "mov w") == 1);
     REQUIRE(Count(overwritten, "str w") == 1);
+}
+
+TEST_CASE("published low64 extracts store from the resident FPR home") {
+    SECTION("direct") {
+        const auto emitted = Emit(MakePublishedExtractStore(false));
+        REQUIRE(Count(emitted, "str d17") == 1);
+        REQUIRE(Count(emitted, "mov x") == 0);
+    }
+    SECTION("overwritten") {
+        const auto emitted = Emit(MakePublishedExtractStore(true));
+        REQUIRE(Count(emitted, "str d17") == 0);
+        REQUIRE(Count(emitted, "mov x") == 1);
+        REQUIRE(Count(emitted, "str x") == 1);
+    }
 }
 
 TEST_CASE("resident scalar conversions store to memory without a GPR bridge") {

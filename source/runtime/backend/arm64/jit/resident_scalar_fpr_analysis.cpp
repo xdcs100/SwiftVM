@@ -59,6 +59,7 @@ void ResidentScalarFPRAnalysis::Analyze(ir::Block* block) {
     discarded.clear();
     AnalyzeConversions(block);
     AnalyzeMemoryStores(block);
+    AnalyzeExtractStores(block);
 }
 
 void ResidentScalarFPRAnalysis::AnalyzeConversions(ir::Block* block) {
@@ -149,6 +150,58 @@ void ResidentScalarFPRAnalysis::AnalyzeMemoryStores(ir::Block* block) {
                 if (extension) {
                     discarded.insert(extension);
                 }
+            }
+            break;
+        }
+    }
+}
+
+void ResidentScalarFPRAnalysis::AnalyzeExtractStores(ir::Block* block) {
+    auto& list = block->GetInstList();
+    for (auto& extract : list) {
+        if (extract.GetOp() != ir::OpCode::VecExtract64 ||
+            extract.ReturnType() != ir::ValueType::U64 ||
+            extract.GetArg<ir::Imm>(1).Get() != 0 || extract.GetUses(false) != 1) {
+            continue;
+        }
+        const auto source = ResolveBitCast(extract.GetArg<ir::Value>(0));
+        if (!source.Defined() || source.Type() != ir::ValueType::V128) {
+            continue;
+        }
+
+        std::optional<u16> target;
+        for (auto& scan : list) {
+            if (scan.Id() <= extract.Id()) {
+                continue;
+            }
+            if (IsOpaqueBarrier(scan.GetOp())) {
+                break;
+            }
+            if (scan.GetOp() == ir::OpCode::SetHostFPR) {
+                const auto written_target = static_cast<u16>(scan.GetArg<ir::Imm>(1).Get());
+                const auto published = ResolveBitCast(scan.GetArg<ir::Value>(0));
+                const bool exact_publication = scan.GetArg<ir::Imm>(2).Get() == 0 &&
+                        published.Type() == ir::ValueType::V128 &&
+                        published.Def() == source.Def();
+                if (target && written_target == *target && !exact_publication) {
+                    break;
+                }
+                if (exact_publication && written_target >= 16 && written_target <= 31) {
+                    target = written_target;
+                }
+                continue;
+            }
+
+            const bool uses_extract = std::ranges::any_of(
+                    scan.GetValues(), [&](const ir::Value value) { return value.Def() == &extract; });
+            if (!uses_extract) {
+                continue;
+            }
+            if (target && scan.GetOp() == ir::OpCode::StoreMemory &&
+                scan.GetArg<ir::Value>(1).Def() == &extract &&
+                ir::GetValueSizeByte(scan.GetArg<ir::Value>(1).Type()) == sizeof(u64)) {
+                memory_stores.emplace(&scan, *target);
+                discarded.insert(&extract);
             }
             break;
         }
