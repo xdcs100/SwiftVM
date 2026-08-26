@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`f8cc6ed`** `perf: keep narrow load flag aliases pinned`
+- Code tip: **`ea82571`** `perf: reuse indexed RMW effective addresses`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -19,6 +19,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 
 | Commit | What |
 |---|---|
+| `ea82571` | Reuse one displacement-adjusted indexed effective address across the load and store halves of a plain integer memory RMW |
 | `f8cc6ed` | Keep an exact narrow load's branch-only zero-test alias on the pinned publication home and remove the intervening W move |
 | `e959074` | Compose low-extract input forwarding with dead narrow immediate branches so the specialized compare reads the original source |
 | `162a4d8` | Emit a spilled U32 Add directly into its pinned publication home and keep proven post-publication low-32 ALU uses on that home |
@@ -1474,6 +1475,21 @@ peepholes.
   `-0.004866%`) with all 2,802 PCs / 3,435 versions, 288 spills and the canonical PPM unchanged.
   Pinned-read, spilled-add and dead-narrow-branch focuses pass on Mac and Orb; no diagnostic or
   compatibility path was added.
+- `ea82571` keeps one structured effective address across the load and store halves of a plain
+  integer Add/Sub memory RMW when the address is `base + index * access_size + displacement` in
+  identity mode. The single instruction therefore emits the displacement adjustment once while
+  preserving the existing composite register-offset load/store encoding. LOCK/atomic operations,
+  segment overrides, unindexed addresses, mismatched scales and biased memory retain their exact
+  paths. CoreMark's mirrored units at `0x403630` and `0x403688` each shrink from 23 to 22 host
+  instructions; no other PC changes. An exact same-build 20k A/B moves raw host work
+  `4,035,105,879 -> 4,014,625,879` (`-20,480,000`, `-0.507546%`) and the 100%-covered weighted
+  comparison moves `4,096,065,960 -> 4,075,585,960` (`-0.499992%`) with CRC `0x382f`. The 2k
+  screen is `403,663,362 -> 401,615,362`; its weighted comparison is
+  `409,759,443 -> 407,711,443` (`-0.499805%`). Smallpt remains exact at 2,802 PCs / 3,435 versions,
+  `374,896` raw and `374,914` weighted host instructions with the canonical PPM. Mac and Orb
+  effective-address focuses pass 29 assertions across two cases. A broad all-RMW prototype was
+  rejected after it reshaped hot function allocation and introduced growing PCs; it was fully
+  removed before delivery, and no diagnostic or feature switch remains.
 
 ## Orb loop
 
