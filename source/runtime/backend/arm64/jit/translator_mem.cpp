@@ -1202,6 +1202,16 @@ void JitTranslator::EmitGetHostGPR(ir::Inst* inst) {
                     (it->GetOp() == ir::OpCode::Add || it->GetOp() == ir::OpCode::Sub) &&
                     ir::GetValueSizeByte(it->ReturnType()) <= sizeof(u32) &&
                     (reg_index <= 5 || value_size == sizeof(u32));
+            const auto pseudo_flags = GetPseudoFlags(&*it);
+            const bool direct_adjacent_narrow_flags =
+                    reg_index >= 6 && reg_index <= 9 &&
+                    (value_size == sizeof(u8) || value_size == sizeof(u16)) &&
+                    it->Id() == inst->Id() + 1 &&
+                    (it->GetOp() == ir::OpCode::Add ||
+                     it->GetOp() == ir::OpCode::Sub) &&
+                    ir::GetValueSizeByte(it->ReturnType()) == value_size &&
+                    !pseudo_flags.Null() &&
+                    True(pseudo_flags.set & ir::Flags::NZCV);
             const bool direct_callee_pin_sub =
                     reg_index >= 19 && it->GetOp() == ir::OpCode::Sub &&
                     ir::GetValueSizeByte(it->ReturnType()) <= sizeof(u32);
@@ -1216,6 +1226,7 @@ void JitTranslator::EmitGetHostGPR(ir::Inst* inst) {
                     named_uses == 1 && it->GetOp() == ir::OpCode::StoreMemory &&
                     it->GetArg<ir::Value>(1).Def() == inst;
             if (direct_alu || direct_u32_or || direct_caller_pin_alu ||
+                direct_adjacent_narrow_flags ||
                 direct_callee_pin_sub ||
                 direct_extend || direct_sign_extend || direct_store) {
                 fused_pin_gpr_reads.emplace(inst, static_cast<u16>(reg_index));

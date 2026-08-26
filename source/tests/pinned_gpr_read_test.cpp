@@ -41,6 +41,7 @@ enum class PinnedReadShape {
     StoreMemory,
     NarrowStoreMemory,
     Subtract,
+    CallerNarrowSubtract,
 };
 
 std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
@@ -64,7 +65,9 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
                       shape == PinnedReadShape::NarrowStoreMemory;
     const auto source_index = overwritten_write
             ? 1u
-            : (copy ? 20u : 22u);
+            : (shape == PinnedReadShape::CallerNarrowSubtract
+                       ? 7u
+                       : (copy ? 20u : 22u));
     if (shape == PinnedReadShape::CopyU16 || shape == PinnedReadShape::LoadU16 ||
         shape == PinnedReadShape::SignedLoadU16) {
         type = ValueType::U16;
@@ -179,7 +182,8 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
     } else if (shape == PinnedReadShape::SignExtend) {
         auto result = block->SignExtend(value).SetType(ValueType::U64);
         block->StoreUniform(Uniform{8, ValueType::U64}, result);
-    } else if (shape == PinnedReadShape::Subtract) {
+    } else if (shape == PinnedReadShape::Subtract ||
+               shape == PinnedReadShape::CallerNarrowSubtract) {
         auto right = block->LoadImm(Imm{swift::u32{1}}).SetType(type);
         auto result = block->Sub(value, Operand{right}).SetType(type);
         block->SaveFlags(result, Flags::All);
@@ -390,6 +394,18 @@ TEST_CASE("callee-saved pinned GPR subtraction reads the fixed W view directly")
         if (type != ValueType::U32) {
             REQUIRE_FALSE(HasShiftPreparation(lines));
         }
+    }
+}
+
+TEST_CASE("caller-saved pinned narrow flags read the fixed W view directly") {
+    for (auto type : {ValueType::U8, ValueType::U16}) {
+        CAPTURE(type);
+        const auto lines = EmitPinnedRead(
+                PinnedReadShape::CallerNarrowSubtract, false, type);
+        REQUIRE(Count(lines, "ubfx ", "x7") == 0);
+        REQUIRE(std::ranges::any_of(lines, [](const auto& line) {
+            return line.find("w7") != std::string::npos;
+        }));
     }
 }
 
