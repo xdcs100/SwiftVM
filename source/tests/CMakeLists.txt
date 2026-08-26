@@ -10,6 +10,7 @@ add_executable(swift_test
         branch_only_flags_test.cpp
         logical_flags_codegen_test.cpp
         narrow_flags_input_test.cpp
+        narrow_memory_extension_test.cpp
         pinned_gpr_read_test.cpp
         pinned_spill_publication_test.cpp
         register_alloc_copy_test.cpp

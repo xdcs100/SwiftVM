@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
 #include "runtime/backend/atomic_fallback.h"
 #include "runtime/backend/context.h"
 #include "runtime/backend/arm64/defines.h"
@@ -1572,9 +1573,11 @@ void JitTranslator::EmitLoadMemory(ir::Inst* inst) {
         return pinned_value ? *pinned_value : context.X(value);
     };
     ir::Inst* narrow_consumer = nullptr;
+    bool direct_narrow_consumer = false;
     if (mem_narrow_fuse && ir::GetValueSizeByte(type) <= 2 && inst->GetUses() == 1) {
         auto& list = cur_block->GetInstList();
         auto it = list.iterator_to(*inst);
+        const auto adjacent = std::next(it);
         for (++it; it != list.end(); ++it) {
             bool uses_load = false;
             for (auto used : it->GetValues()) {
@@ -1587,10 +1590,15 @@ void JitTranslator::EmitLoadMemory(ir::Inst* inst) {
                     (it->GetOp() == ir::OpCode::SignExtend ||
                      it->GetOp() == ir::OpCode::ZeroExtend32) &&
                     it->GetArg<ir::Value>(0).Def() == inst;
-            if (extending &&
-                (context.SharesGPR(value, ir::Value{it.operator->()}) ||
-                 fused_pin_sign_extends.contains(it.operator->()))) {
+            const bool shared = extending &&
+                    context.SharesGPR(value, ir::Value{it.operator->()});
+            const bool pinned_extension = extending &&
+                    fused_pin_sign_extends.contains(it.operator->());
+            const bool direct = extending && it == adjacent && !pinned_value &&
+                    !context.IsSpilled(ir::Value{it.operator->()});
+            if (shared || pinned_extension || direct) {
                 narrow_consumer = it.operator->();
+                direct_narrow_consumer = direct && !shared && !pinned_extension;
             }
             break;
         }
@@ -1621,6 +1629,20 @@ void JitTranslator::EmitLoadMemory(ir::Inst* inst) {
                            !q_access,
                            structured_guest_ea,
                            inst);
+    if (direct_narrow_consumer && vixl_operand.GetAddrMode() != Offset &&
+        vixl_operand.GetBaseRegister().GetCode() ==
+                context.R(ir::Value{narrow_consumer}).GetCode()) {
+        narrow_consumer = nullptr;
+        direct_narrow_consumer = false;
+    }
+    auto narrow_value_w = [&] {
+        return direct_narrow_consumer ? context.W(ir::Value{narrow_consumer})
+                                      : value_w();
+    };
+    auto narrow_value_x = [&] {
+        return direct_narrow_consumer ? context.X(ir::Value{narrow_consumer})
+                                      : value_x();
+    };
     auto scalar_fpr = scalar_load_fpr_fusions.find(inst);
     if (scalar_fpr != scalar_load_fpr_fusions.end()) {
         ASSERT_MSG(ReproveScalarLoadFPRFusion(inst, scalar_fpr->second),
@@ -1638,26 +1660,26 @@ void JitTranslator::EmitLoadMemory(ir::Inst* inst) {
         case ir::ValueType::U8:
             if (narrow_consumer && narrow_consumer->GetOp() == ir::OpCode::SignExtend) {
                 if (ir::GetValueSizeByte(narrow_consumer->ReturnType()) == 8) {
-                    __ Ldrsb(value_x(), vixl_operand);
+                    __ Ldrsb(narrow_value_x(), vixl_operand);
                 } else {
-                    __ Ldrsb(value_w(), vixl_operand);
+                    __ Ldrsb(narrow_value_w(), vixl_operand);
                 }
             } else {
                 // LDRB's W destination already performs ZeroExtend32.
-                __ Ldrb(value_w(), vixl_operand);
+                __ Ldrb(narrow_value_w(), vixl_operand);
             }
             break;
         case ir::ValueType::S16:
         case ir::ValueType::U16:
             if (narrow_consumer && narrow_consumer->GetOp() == ir::OpCode::SignExtend) {
                 if (ir::GetValueSizeByte(narrow_consumer->ReturnType()) == 8) {
-                    __ Ldrsh(value_x(), vixl_operand);
+                    __ Ldrsh(narrow_value_x(), vixl_operand);
                 } else {
-                    __ Ldrsh(value_w(), vixl_operand);
+                    __ Ldrsh(narrow_value_w(), vixl_operand);
                 }
             } else {
                 // LDRH's W destination already performs ZeroExtend32.
-                __ Ldrh(value_w(), vixl_operand);
+                __ Ldrh(narrow_value_w(), vixl_operand);
             }
             break;
         case ir::ValueType::S32:
