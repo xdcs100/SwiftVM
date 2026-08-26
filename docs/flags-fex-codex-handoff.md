@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`e959074`** `perf: fuse low extracts into immediate branches`
+- Code tip: **`f8cc6ed`** `perf: keep narrow load flag aliases pinned`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -19,6 +19,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 
 | Commit | What |
 |---|---|
+| `f8cc6ed` | Keep an exact narrow load's branch-only zero-test alias on the pinned publication home and remove the intervening W move |
 | `e959074` | Compose low-extract input forwarding with dead narrow immediate branches so the specialized compare reads the original source |
 | `162a4d8` | Emit a spilled U32 Add directly into its pinned publication home and keep proven post-publication low-32 ALU uses on that home |
 | `b5936ac` | Admit a single adjacent carry inversion on a dead U8/U16 memory-operand `Sub` branch when the condition does not read carry, then discard the irrelevant normalization |
@@ -1461,6 +1462,18 @@ peepholes.
   growing PC. Smallpt moves `368,937 -> 368,902`, and its weighted join moves `369,963 -> 369,928`
   (`-35`, `-0.009460%`) with all shape, spill and PPM gates exact. A dedicated branch/extract test
   and the existing dead-edge matrix pass on Mac and Orb.
+- `f8cc6ed` extends the same fixed-home publication transaction through an exact low U8/U16/U32
+  alias used only by a branch-only `Or(alias, 0)` zero test. The load still writes the pinned W
+  home directly, and the logical-flags emitter reads that home instead of materializing an
+  intervening W copy. The existing complete-use, publication-order, target-rewrite and helper-
+  clobber proofs remain fail-closed. CoreMark's byte-load zero-test unit at `0x403320` shrinks by
+  one instruction. Exact 20k host work moves `4,077,892,443 -> 4,057,412,434` (`-20,480,009`,
+  `-0.502220%`) with 2,846 PCs / 3,378 versions, 38,880,030 dynamic spills and CRC `0x382f`; the
+  100%-covered 2k join is `414,034,026 -> 411,986,017` (`-0.494648%`) with no growing PC.
+  Smallpt moves `368,902 -> 368,884`, and its weighted join moves `369,928 -> 369,910` (`-18`,
+  `-0.004866%`) with all 2,802 PCs / 3,435 versions, 288 spills and the canonical PPM unchanged.
+  Pinned-read, spilled-add and dead-narrow-branch focuses pass on Mac and Orb; no diagnostic or
+  compatibility path was added.
 
 ## Orb loop
 
