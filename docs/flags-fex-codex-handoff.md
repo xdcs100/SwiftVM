@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`4cc2c1e`** `perf: publish narrow loads directly to pinned GPRs`
+- Code tip: **`e2bb2c7`** `perf: omit dead narrow branch result truncation`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -19,6 +19,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 
 | Commit | What |
 |---|---|
+| `e2bb2c7` | Omit the final narrow-result `LSR` after branch-only Add/Sub/Neg when the arithmetic value has no ordinary use; observed results keep the truncation |
 | `4cc2c1e` | Publish an exact U8/U16/U32 memory load directly into its pinned GPR home and omit the redundant zero-extension and host-register publication instructions |
 | `14e48c1` | Extend the fixed-home copy planner through exact U8/U16 `ZeroExtend32` chains and emit one `UXTB`/`UXTH` from the source home to the target home |
 | `942a63d` | Generalize the pinned low-32 self-write proof into a cross-pin copy: an exact U32 fixed-home read, zero extension and full fixed-home publication become one `mov wTarget, wSource`, while later aliases remain eligible only as proven memory addresses |
@@ -1348,6 +1349,20 @@ peepholes.
   pinned/page-fault focuses pass 69 assertions across 15 cases. A signed narrow-copy extension was
   byte-identical on bounded smallpt and CoreMark and was removed. This stage ran no stress test or
   full suite.
+- `e2bb2c7` removes the final narrow-result `LSR` from U8/U16 Add, Sub and Neg when their pseudo
+  flags are branch-only and `GetUses()` proves that the arithmetic value has no ordinary consumer.
+  The aligned `ADDS` or `SUBS` has already produced the exact requested NZCV, and `LSR` does not
+  change those flags; any SetHost, memory or other value use keeps the existing truncation. No IR
+  rewrite, feature switch or fallback path was added. Against `4cc2c1e` with
+  `SVM_X86_PIN_EXT=3`, bounded smallpt keeps 2,802 PCs / 3,435 versions, 288 dynamic spills and the
+  canonical PPM while moving `384,618 -> 382,069`; the 100%-covered weighted comparison is
+  `385,644 -> 383,095` (`-2,549`, `-0.660972%`) with every changed PC smaller. CoreMark keeps
+  2,846 PCs / 3,379 versions and `crcfinal=0x382f` while moving
+  `5,788,086,168 -> 5,750,483,860`; the 100%-covered weighted comparison is
+  `5,849,046,249 -> 5,811,443,941` (`-37,602,308`, `-0.642879%`) with every changed PC smaller.
+  Local and Orb flags focuses pass 122 assertions across four cases. Direct U64-load publication
+  and signed-load publication prototypes had zero shared-shape delta on bounded full-pin smallpt
+  and CoreMark and were removed completely. This stage ran no stress test or full suite.
 
 ## Orb loop
 
