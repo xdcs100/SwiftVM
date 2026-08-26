@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`942a63d`** `perf: fuse cross-pinned low-32 GPR copies`
+- Code tip: **`14e48c1`** `perf: fuse narrow cross-pinned GPR copies`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -19,6 +19,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 
 | Commit | What |
 |---|---|
+| `14e48c1` | Extend the fixed-home copy planner through exact U8/U16 `ZeroExtend32` chains and emit one `UXTB`/`UXTH` from the source home to the target home |
 | `942a63d` | Generalize the pinned low-32 self-write proof into a cross-pin copy: an exact U32 fixed-home read, zero extension and full fixed-home publication become one `mov wTarget, wSource`, while later aliases remain eligible only as proven memory addresses |
 | `121620f` | FLAGS_REGS default ON |
 | `a278d8d` / `5b7857d` / `6009f8f` / `f2b490d` | Region If skip: both successors cover incoming NZCV; transparent `mov/ret`; `ClearFlags` covers C/V; **`BranchOnlyFlags` covers full PSTATE NZCV** (IR mask is Jcc live subset, not the ALU write) |
@@ -723,6 +724,7 @@ Validation for `7110d20` / `7045d3b` / `431be30` / `fa1768a` / `729b826` / `24f9
 | Global inverted-carry ABI default | Re-tested after the scalar-FPR proof fix. The oracle stays exact, but bounded smallpt changes 2,802/3,435 units/versions to 3,207/3,493 and grows the strict common subset `370,990 -> 394,889` (`+6.441953%`). Hot `TEST`/logical producers make Direct carry dominant in execution even though the emitted producer census favors subtraction. Fully reverted; any remaining carry work needs explicit edge polarity. |
 | IR-rewriting integer `Sub` branch-only carry normalization | the non-carry-only form still changed the bounded unit/version set from 2,755/3,621 to 2,785/3,056; strict coverage was 99.648660% with two growing PCs, below the 99.9% gate despite `-0.908475%` on the comparable subset, fully reverted. `86aaac4` is a separate backend-only EQ/NE proof and does not revive this rewrite. |
 | Generic live `ZeroExtend32To64` result remap into the publication home | the residual `live_ok` census classified stores before conflict and observer checks, so its weighted total overstated the opportunity. The broad remap made many required moves merely change location, added low-view preservation copies, and halted the 1,000-iteration CoreMark screen at `0x402e60`. The RA module, logs and temporary restrictions were removed; retain only backend copy fusions that prove a net one-instruction form. |
+| Pinned-copy low-32 `BitExtract` address aliases | the focused local/Orb case passed, but bounded smallpt and 1,000-iteration CoreMark were both byte-identical with 100% weighted coverage. The emitter hook, matcher extension and test were removed. |
 
 ## Next ready (pick one, measure, revert on 124/134)
 
@@ -1318,6 +1320,18 @@ peepholes.
   Orb pinned/page-fault focuses pass 79 assertions across 14 cases. The rejected generic RA carrier
   was removed after its short correctness and code-shape screen; this stage ran no stress test or
   full suite.
+- `14e48c1` extends the same copy transaction through an optional single-use `ZeroExtend32` fed by
+  a pinned U8/U16 read. The inner and outer extensions emit nothing; the publication emits exactly
+  one `UXTB` or `UXTH` from the source home to the target home. The existing source/target rewrite,
+  alias, fault and caller-saved-helper proofs are unchanged and the emitter replays the source
+  width. Against `942a63d`, bounded smallpt keeps 2,802 PCs / 3,435 versions, 288 dynamic spills and
+  the canonical PPM while moving `385,025 -> 385,023`; the 100%-covered weighted comparison is
+  `386,051 -> 386,049` (`-2`, `-0.000518%`). CoreMark keeps 2,846 PCs / 3,379 versions and
+  `crcfinal=0x382f` while moving `5,799,708,766 -> 5,793,328,760`; the 100%-covered weighted
+  comparison is `5,860,668,847 -> 5,854,288,841` (`-6,380,006`, `-0.108861%`) with every changed
+  PC smaller. Local and Orb pinned/page-fault focuses pass 83 assertions across 15 cases. The
+  zero-reach low-32 address-alias extension was removed before this stage; no stress test or full
+  suite ran.
 
 ## Orb loop
 
