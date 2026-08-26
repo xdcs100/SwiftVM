@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`38cea6e`** `perf: compare loaded narrow values directly`
+- Code tip: **`d5e45c7`** `perf: reuse pinned load addresses`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -19,6 +19,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 
 | Commit | What |
 |---|---|
+| `d5e45c7` | Keep a post-publication full-width load alias on its pinned home when its sole later role is a memory address |
 | `38cea6e` | Feed the known zero-extended W result of LDRB/LDRH directly to a dead narrow immediate branch compare |
 | `b734438` | Follow one static direct call in the dead-successor flags proof when the callee overwrites every incoming flag before control flow, and track the inspected callee prefix for SMC |
 | `ea82571` | Reuse one displacement-adjusted indexed effective address across the load and store halves of a plain integer memory RMW |
@@ -1524,6 +1525,20 @@ peepholes.
   2,792 PCs / 3,052 versions and the canonical PPM while moving raw `361,960 -> 361,711` and
   weighted `361,978 -> 361,729` (`-0.068792%`). Narrow-immediate and dead-edge integer focuses
   pass 105 assertions across three cases on Mac and Orb; no new switch or fallback was added.
+- `d5e45c7` extends the pinned memory-address proof through an already coalesced full-width
+  `LoadMemory(U64) -> SetHostGPR(pin)` publication and one exact post-publication `BitCast` alias.
+  The producer use graph must close over that publication and alias, the publication must already
+  be allocator-proven on the target fixed home, the address must have one memory use, and target
+  rewrites or caller-saved helper barriers before that use reject the plan. The later GetOperand
+  therefore names the pinned home directly instead of emitting `mov xTmp,xPin`; the original
+  faulting load and publication ordering are unchanged. Exact 20k CoreMark raw host work moves
+  `3,714,756,826 -> 3,666,996,824`, and the 100%-covered weighted comparison moves
+  `3,714,756,841 -> 3,666,996,839` (`-47,760,002`, `-1.285683%`) with no growing PC and CRC
+  `0x382f`. The 2k screen moves `371,620,309 -> 366,844,307` (`-4,776,002`, `-1.285183%`).
+  Units/versions remain 2,820 / 2,915. Smallpt remains exact at 2,792 PCs / 3,052 versions and the
+  canonical PPM while moving raw `361,711 -> 361,709` and weighted `361,729 -> 361,727`.
+  Existing pinned-GPR publication/address coverage passes 30 assertions across ten cases on Mac
+  and Orb; no temporary diagnostic, feature switch or compatibility path remains.
 
 ## Orb loop
 
