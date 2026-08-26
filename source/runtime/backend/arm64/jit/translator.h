@@ -176,6 +176,7 @@ private:
     struct NarrowExtractExtension {
         ir::Inst* extract{};
         ir::Value source{};
+        ir::Inst* shift{};
         u8 width{};
         bool source_high_zero{};
 
@@ -628,6 +629,7 @@ private:
     std::map<ir::Inst*, PinnedGPRCopy> pinned_gpr_copies{};
     std::map<ir::Inst*, NarrowExtractExtension> narrow_extract_extensions{};
     std::map<ir::Inst*, ir::Inst*> fused_narrow_extracts{};
+    std::map<ir::Inst*, ir::Inst*> fused_narrow_extract_shifts{};
     std::unordered_set<ir::Inst*> dead_pinned_gpr_writes{};
     std::map<ir::Inst*, ScalarFPRPublication> scalar_load_fpr_fusions{};
     std::map<ir::Inst*, ScalarFPRPublication> scalar_value_fpr_fusions{};

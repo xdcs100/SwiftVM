@@ -61,9 +61,21 @@ JitTranslator::MatchNarrowExtractExtension(ir::Inst* wrapper) const {
     if (next == list.end() || next.operator->() != wrapper) {
         return std::nullopt;
     }
+    ir::Inst* shift{};
+    auto after_wrapper = std::next(list.iterator_to(*wrapper));
+    if (wrapper->GetUses() == 1 && wrapper->GetUses(false) == 1 &&
+        after_wrapper != list.end() &&
+        after_wrapper->GetOp() == ir::OpCode::LsrImm &&
+        after_wrapper->GetArg<ir::Value>(0).Def() == wrapper) {
+        const u64 amount = after_wrapper->GetArg<ir::Imm>(1).Get();
+        if (amount > 0 && amount < width * 8) {
+            shift = after_wrapper.operator->();
+        }
+    }
     return NarrowExtractExtension{
             .extract = extract,
             .source = extract->GetArg<ir::Value>(0),
+            .shift = shift,
             .width = static_cast<u8>(width),
             .source_high_zero = IsNarrowLoadZeroExtended(
                     extract->GetArg<ir::Value>(0), width),
@@ -73,6 +85,7 @@ JitTranslator::MatchNarrowExtractExtension(ir::Inst* wrapper) const {
 void JitTranslator::PrepareNarrowExtractExtensions(ir::Block* block) {
     narrow_extract_extensions.clear();
     fused_narrow_extracts.clear();
+    fused_narrow_extract_shifts.clear();
     for (auto& inst : block->GetInstList()) {
         auto plan = MatchNarrowExtractExtension(&inst);
         if (!plan) {
@@ -80,6 +93,9 @@ void JitTranslator::PrepareNarrowExtractExtensions(ir::Block* block) {
         }
         fused_narrow_extracts.emplace(plan->extract, &inst);
         narrow_extract_extensions.emplace(&inst, *plan);
+        if (plan->shift) {
+            fused_narrow_extract_shifts.emplace(plan->shift, &inst);
+        }
     }
 }
 

@@ -651,6 +651,18 @@ void JitTranslator::EmitLslImm(ir::Inst* inst) {
 }
 
 void JitTranslator::EmitLsrImm(ir::Inst* inst) {
+    if (auto fused = fused_narrow_extract_shifts.find(inst);
+        fused != fused_narrow_extract_shifts.end()) {
+        const auto plan = narrow_extract_extensions.find(fused->second);
+        const auto reproved = MatchNarrowExtractExtension(fused->second);
+        ASSERT_MSG(plan != narrow_extract_extensions.end() && reproved &&
+                           *reproved == plan->second && reproved->shift == inst,
+                   "narrow extract shift proof diverged at IR {}", inst->Id());
+        const u32 lsr = inst->GetArg<ir::Imm>(1).Get();
+        __ Ubfx(context.W(ir::Value{inst}), context.W(reproved->source), lsr,
+                reproved->width * 8 - lsr);
+        return;
+    }
     auto value = inst->GetArg<ir::Value>(0);
     auto lsr = inst->GetArg<ir::Imm>(1).Get();
     auto result = context.R(ir::Value{inst});

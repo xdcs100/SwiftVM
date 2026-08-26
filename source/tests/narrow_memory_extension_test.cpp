@@ -128,6 +128,55 @@ TEST_CASE("an adjacent narrow extract extends in one instruction") {
     REQUIRE(direct == 1);
 }
 
+TEST_CASE("an adjacent narrow extract and right shift emit one bitfield extract") {
+    for (auto type : {ValueType::U8, ValueType::U16}) {
+        CAPTURE(type);
+        Config config{
+                .loc_start = 0,
+                .loc_end = 1ull << 48,
+                .enable_jit = true,
+                .has_local_operation = false,
+                .backend_isa = kArm64,
+        };
+        AddressSpace address_space{config};
+        IntrusivePtr<Block> block{new Block(0, Location{0x8a30})};
+        auto source = block->LoadImm(Imm{swift::u32{0x12345678}})
+                              .SetType(ValueType::U32);
+        const auto bits = ir::GetValueSizeByte(type) * 8;
+        auto extract = block->BitExtract(source, Imm{0u}, Imm{bits})
+                               .SetType(type);
+        auto extended = block->ZeroExtend32(extract).SetType(type);
+        auto shifted = block->LsrImm(extended, Imm{1u})
+                               .SetType(ValueType::U32);
+        block->StoreUniform(Uniform{64, ValueType::U32}, shifted);
+        block->SetTerminal(terminal::ReturnToDispatch{});
+        block->ReIdInstr();
+
+        FeatureSet features{};
+        RegAlloc alloc{block->MaxInstrId(),
+                       address_space.GetTrampolines().GetGPRRegs(),
+                       address_space.GetTrampolines().GetFPRRegs(), features};
+        RegisterAllocPass::Run(block.get(), &alloc, false, features);
+        arm64::JitContext context{address_space.GetDefaultModule(), alloc};
+        arm64::JitTranslator translator{context};
+        translator.Translate(block.get());
+        context.Finish();
+
+        const auto lines = Disassemble(context);
+        const auto width = type == ValueType::U8 ? "#7" : "#15";
+        REQUIRE(std::ranges::count_if(lines, [&](const auto& line) {
+            return line.find("ubfx w") != std::string::npos &&
+                   line.find("#1") != std::string::npos &&
+                   line.find(width) != std::string::npos;
+        }) == 1);
+        REQUIRE(std::ranges::none_of(lines, [](const auto& line) {
+            return line.find("uxtb ") != std::string::npos ||
+                   line.find("uxth ") != std::string::npos ||
+                   line.find("lsr ") != std::string::npos;
+        }));
+    }
+}
+
 TEST_CASE("a zero-extended narrow load needs no self extension") {
     Config config{
             .loc_start = 0,

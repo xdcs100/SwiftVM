@@ -540,6 +540,9 @@ void JitTranslator::EmitZeroExtend32(ir::Inst* inst) {
         const auto reproved = MatchNarrowExtractExtension(inst);
         ASSERT_MSG(reproved && *reproved == fused->second,
                    "narrow extract extension proof diverged at IR {}", inst->Id());
+        if (fused->second.shift) {
+            return;
+        }
         auto result = context.W(ir::Value{inst});
         auto source = context.W(fused->second.source);
         if (fused->second.source_high_zero && result == source) {
