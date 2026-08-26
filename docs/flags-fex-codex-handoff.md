@@ -1772,17 +1772,32 @@ peepholes.
   Calibrated smallpt remains byte-identical at 2,730 PCs / 2,998 versions, zero spills and
   `226,048` weighted host instructions. Mac and Orb pinned-GPR, guarded-return and direct-link
   focuses pass; no stress run, diagnostic or environment switch remains.
-- Current default-region CoreMark, joined against the retained W67 guest-instruction/entry table,
-  gives a conservative estimate of `1.901504` SVM host instructions per guest instruction. Reusing
-  the unchanged FEX `f2e35f3` value `1.807` gives approximately **`1.052299x`**, down from W67's
-  `2.305x` and the later RE=0 refresh's `2.000x`. The pre-index stage above is not folded into this
-  estimate, so the quoted ratio remains a conservative upper bound until the FEX/SVM join is
-  refreshed from the same current run.
-  `0x402668` now emits seven host instructions for three guest instructions; `0x402808` emits eight
-  for three.
-  The dominant matrix units at `0x402d58` and `0x402df8` now emit 15 and 23 instructions, down from
-  17 and 24. Do not broaden per-consumer fixed-home ownership beyond consumers with an explicit
-  version-preservation proof.
+- `46a2a23` adds a fail-closed narrow carry-chain fusion and lowers the shared terminal-publisher
+  threshold from three same-register sites to two. The carry proof accepts only adjacent
+  `TestFlags(C) -> Add(0,C) -> Add(value,carry)` chains whose final flags are dead, whose result is
+  published only at U8/U16 width, and whose carry is still live in host PSTATE. It emits one `ADC`
+  and removes the materialized zero/carry value chain; all other users, flag observers and
+  clobbers reject the plan. Two deferred terminal sites exactly replace their two eager stores with
+  one two-instruction cold publisher, so total code size does not grow. Exact CoreMark 20k moves
+  `3,416,879,675 -> 3,397,918,414` (`-18,961,261`, `-0.554929%`) with all 2,761 PCs / 2,864
+  versions, 100% coverage, top-20 20/20, no growing PC and `crcfinal=0x382f`. `0x4026ca` shrinks
+  `25 -> 21`, contributing `-14,640,000`; `0x402218` shrinks `38 -> 37`, contributing
+  `-4,161,115`. Calibrated smallpt stays byte-identical and moves `226,048 -> 225,561`
+  (`-0.215441%`). Mac and Orb narrow/carry, pinned-GPR and direct-link focuses pass 297 / 45 / 90 /
+  about 900k assertions. No long run, stress run, diagnostic or environment switch remains.
+- The current FEX gap is now refreshed from a live same-input 2k run rather than extrapolated from
+  the earlier retained denominator. `/usr/local/fex-measure/FEX` is the `f2e35f3` measurement build;
+  both engines use the same CoreMark ELF, arguments and CRC `0x4983`, with FEX
+  `FEX_HOSTFEATURES=disableavx`, multiblock enabled and code caching disabled. The join covers
+  99.999934% of entries and 99.999902% of SVM host weight. Before this stage it measured SVM
+  `2.004542` versus FEX `1.860013` host instructions per guest instruction, or `1.077703x`.
+  `46a2a23` moves SVM to `1.993418`, or **`1.071723x`**, leaving a current same-input gap of about
+  **7.17%**. This supersedes the earlier optimistic retained-table `1.052299x` estimate.
+  The next concentrated weighted gaps are dynamic return continuation at `0x403383` (~9.78M),
+  indirect-call boundary work at `0x402580` (~7.53M), cross-call flags publication at
+  `0x403680/0x403552` (~5.80M/~5.30M), and the remaining narrow compare/ADC work at `0x4026ca`
+  (~4.49M). The first three require continuation or cross-unit flags ABI work; do not replace them
+  with per-site cold growth or ABI assumptions about guest code.
 
 ## Orb loop
 
