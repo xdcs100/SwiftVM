@@ -77,6 +77,11 @@ struct UniformSnapshotPlan {
     u32 size{};
 };
 
+struct GuestCodeDependency {
+    Location start{};
+    Location end{};
+};
+
 // 单元内单块自环的瞬态发码计划。普通入口执行到 prefix_end，自回边落到
 // 其后；引用由编译期 plan 持有，不序列化也不跨单元共享。
 struct LoopHoistMetadata {
@@ -192,6 +197,22 @@ public:
         return uniform_snapshot_plans;
     }
 
+    void AddGuestCodeDependency(Location start, Location end) {
+        if (end.Value() <= start.Value()) {
+            return;
+        }
+        for (const auto& dependency : guest_code_dependencies) {
+            if (dependency.start == start && dependency.end == end) {
+                return;
+            }
+        }
+        guest_code_dependencies.push_back({start, end});
+    }
+    [[nodiscard]] const std::vector<GuestCodeDependency>&
+    GetGuestCodeDependencies() const {
+        return guest_code_dependencies;
+    }
+
     [[nodiscard]] const LoopHoistMetadata& GetLoopHoistMetadata() const {
         return loop_hoist_metadata;
     }
@@ -244,6 +265,7 @@ private:
     u16 v_stack{};
     backend::JitCache jit_cache{};
     std::vector<UniformSnapshotPlan> uniform_snapshot_plans{};
+    std::vector<GuestCodeDependency> guest_code_dependencies{};
     LoopHoistMetadata loop_hoist_metadata{};
     bool dead_edge_integer_branch_proven{};
 };

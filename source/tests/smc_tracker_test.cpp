@@ -71,6 +71,10 @@ public:
         return block;
     }
 
+    void Track(Block* block, std::uintptr_t guest, std::size_t size = 1) {
+        Tracker().RegisterNode(module_, block, guest, guest + size);
+    }
+
     [[nodiscard]] bool HasNode(std::uintptr_t guest) const {
         return !IsEmpty(module_->GetNode(Location{guest}));
     }
@@ -94,6 +98,24 @@ private:
 };
 
 }  // namespace
+
+TEST_CASE("SMC dependent code range invalidates its owning translation",
+          "[smc][dependency]") {
+    SmcFixture fixture{2};
+    TranslateTable l1{8};
+    constexpr std::uintptr_t kGuest = 0x100;
+    const std::uintptr_t dependency = fixture.PageSize() + 0x100;
+
+    auto* block = fixture.Publish(kGuest);
+    fixture.Track(block, dependency);
+    REQUIRE(fixture.HasNode(kGuest));
+    REQUIRE(fixture.Tracker().HandleWriteFault(
+            fixture.Space(), l1,
+            reinterpret_cast<std::uintptr_t>(fixture.Host(dependency))));
+    *fixture.Host(dependency) = 0x90;
+    fixture.Tracker().CloseWriteWindow(fixture.Space(), l1);
+    REQUIRE_FALSE(fixture.HasNode(kGuest));
+}
 
 TEST_CASE("SMC empty closes preserve the next real write fault", "[smc][dirty-hint]") {
     SmcFixture fixture{1};

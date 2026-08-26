@@ -404,6 +404,13 @@ private:
         bool parity_inverted{};
     };
 
+    struct SuccessorFlagsProof {
+        bool dead{};
+        bool has_dependency{};
+        VAddr dependency_start{};
+        VAddr covered_end{};
+    };
+
     // A local condition is available only for the guest instruction
     // immediately following its producer or an audited scalar/vector move.
     // The returned ARM condition reads the still-current host NZCV; fcmp is
@@ -417,7 +424,8 @@ private:
     [[nodiscard]] bool FlagsTerminalJccEnabled() const;
     [[nodiscard]] bool FlagsBranchOnlyEnabled() const;
     [[nodiscard]] bool FlagsFcmpFuseEnabled() const;
-    [[nodiscard]] bool SuccessorFlagsDead(VAddr successor) const;
+    [[nodiscard]] SuccessorFlagsProof ProveSuccessorFlagsDead(
+            VAddr successor, u32 direct_call_depth = 0) const;
     [[nodiscard]] bool FlagsFcmpCompactEnabled() const {
         return flags_fcmp_compact_;
     }

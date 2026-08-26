@@ -623,6 +623,12 @@ public:
 
     void SetLocation(Location location);
 
+    void AddGuestCodeDependency(Location start, Location end) {
+        ASSERT(current_function && current_function->GetCurrentBlock());
+        current_function->GetCurrentBlock()->GetBlock()->AddGuestCodeDependency(
+                start, end);
+    }
+
     void SetCurBlock(HIRBlock* block);
 
     void SetCurBlock(Location location);

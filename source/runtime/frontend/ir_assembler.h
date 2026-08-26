@@ -102,6 +102,15 @@ public:
     bool EndCommit() const;
     [[nodiscard]] bool IsFunctionMode() const { return hir_builder != nullptr; }
 
+    void AddGuestCodeDependency(Location start, Location end) {
+        if (hir_builder) {
+            hir_builder->AddGuestCodeDependency(start, end);
+        } else {
+            ASSERT(ir_block);
+            ir_block->AddGuestCodeDependency(start, end);
+        }
+    }
+
 private:
     HIRBuilder* hir_builder;
     ir::Block* ir_block;

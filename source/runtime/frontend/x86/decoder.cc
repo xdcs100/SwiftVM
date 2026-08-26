@@ -1148,13 +1148,12 @@ bool X64Decoder::FlagsBranchOnlyEnabled() const {
     return features_.flags_branch_only;
 }
 
-bool X64Decoder::SuccessorFlagsDead(VAddr successor) const {
+X64Decoder::SuccessorFlagsProof X64Decoder::ProveSuccessorFlagsDead(
+        VAddr successor, u32 direct_call_depth) const {
     // This is the block/lazy-function counterpart of the HIR CFG fixed point:
-    // prove only a very small straight-line prefix. Any mapping boundary,
-    // helper/control instruction, unknown opcode, or flag read is an immediate
-    // conservative failure. MOV/LEA/NOP may precede the first full flag kill;
-    // this matches the existing flags pass, where ordinary direct memory IR
-    // is not a flags observer or helper boundary.
+    // prove only a very small straight-line prefix. One direct call may redirect
+    // the proof to a callee prefix whose bytes become an SMC dependency. Other
+    // control instructions, unknown opcodes, or flag reads fail conservatively.
     constexpr u16 kArithmeticFlags = D_CF | D_PF | D_AF | D_ZF | D_SF | D_OF;
     u16 incoming = kArithmeticFlags;
     VAddr cursor = successor;
@@ -1170,26 +1169,59 @@ bool X64Decoder::SuccessorFlagsDead(VAddr successor) const {
             bytes[available] = *byte;
         }
         if (available == 0) {
-            return false;
+            return {};
+        }
+        if (available >= 4 && bytes[0] == 0xf3 && bytes[1] == 0x0f &&
+            bytes[2] == 0x1e && (bytes[3] == 0xfa || bytes[3] == 0xfb)) {
+            cursor += 4;
+            continue;
         }
         auto insn = DisDecode(bytes.data(), bytes.size(), is_64bit);
         if (insn.opcode == UINT16_MAX || insn.size == 0 ||
-            insn.size > available || META_GET_FC(insn.meta) != FC_NONE ||
+            insn.size > available ||
             (insn.flags & (FLAG_LOCK | FLAG_REP | FLAG_REPNZ |
                            FLAG_PRIVILEGED_INSTRUCTION)) != 0) {
-            return false;
+            return {};
         }
         if ((insn.testedFlagsMask & incoming) != 0) {
-            return false;
+            return {};
         }
-        incoming &= ~(insn.modifiedFlagsMask | insn.undefinedFlagsMask);
+        u16 written = insn.modifiedFlagsMask | insn.undefinedFlagsMask;
+        if (insn.opcode == I_TEST || insn.opcode == I_AND ||
+            insn.opcode == I_OR || insn.opcode == I_XOR) {
+            written |= D_CF | D_OF;
+        }
+        incoming &= ~written;
         if (incoming == 0) {
-            return true;
+            return {.dead = true,
+                    .covered_end = (cursor + insn.size) & addr_mask};
         }
-        if (insn.modifiedFlagsMask != 0 || insn.undefinedFlagsMask != 0) {
+        if (written != 0) {
             // Partial writers such as INC preserve some incoming bits. Do not
             // reason through their frontend-specific carry handling.
-            return false;
+            return {};
+        }
+        const auto flow = META_GET_FC(insn.meta);
+        if (flow == FC_CALL) {
+            if (direct_call_depth != 0 || insn.opcode != I_CALL ||
+                insn.ops[0].type != O_PC ||
+                !runtime::GetSvmConfig().jit_cache.empty()) {
+                return {};
+            }
+            const auto next = (cursor + insn.size) & addr_mask;
+            const auto target = (next + insn.imm.sqword) & addr_mask;
+            const auto callee = ProveSuccessorFlagsDead(
+                    target, direct_call_depth + 1);
+            if (!callee.dead) {
+                return {};
+            }
+            return {.dead = true,
+                    .has_dependency = true,
+                    .dependency_start = target,
+                    .covered_end = callee.covered_end};
+        }
+        if (flow != FC_NONE) {
+            return {};
         }
         switch (insn.opcode) {
             case I_MOV:
@@ -1200,11 +1232,11 @@ bool X64Decoder::SuccessorFlagsDead(VAddr successor) const {
             case I_NOP:
                 break;
             default:
-                return false;
+                return {};
         }
         cursor += insn.size;
     }
-    return false;
+    return {};
 }
 
 bool X64Decoder::FlagsFcmpFuseEnabled() const {

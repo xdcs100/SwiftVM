@@ -18,13 +18,29 @@ void X64Decoder::DecodeCondJump(_DInst& insn, Cond cond) {
         __ ReturnToDispatcher();
     } else {
         if (!address.IsValue()) {
-            const bool dead_edges =
-                    FlagsBranchOnlyEnabled() &&
-                    SuccessorFlagsDead(address.GetImm().Get()) &&
-                    SuccessorFlagsDead(pc);
+            SuccessorFlagsProof target_proof{};
+            SuccessorFlagsProof fallthrough_proof{};
+            bool dead_edges = false;
+            if (FlagsBranchOnlyEnabled()) {
+                target_proof = ProveSuccessorFlagsDead(address.GetImm().Get());
+                if (target_proof.dead) {
+                    fallthrough_proof = ProveSuccessorFlagsDead(pc);
+                    dead_edges = fallthrough_proof.dead;
+                }
+            }
+            auto mark_dead_edges = [&] {
+                __ BranchOnlyEdges();
+                for (const auto& proof : {target_proof, fallthrough_proof}) {
+                    if (proof.has_dependency) {
+                        assembler->AddGuestCodeDependency(
+                                ir::Location{proof.dependency_start},
+                                ir::Location{proof.covered_end});
+                    }
+                }
+            };
             if (auto local = TryLocalCondition(cond)) {
                 if (dead_edges) {
-                    __ BranchOnlyEdges();
+                    mark_dead_edges();
                 }
                 ir::BOOL check_result =
                         local->fcmp.Def()
@@ -45,7 +61,7 @@ void X64Decoder::DecodeCondJump(_DInst& insn, Cond cond) {
                 True(local_nzcv_valid_ & ir::Flags::Zero) &&
                 (cond == Cond::HI || cond == Cond::AT ||
                  cond == Cond::LS || cond == Cond::BE)) {
-                __ BranchOnlyEdges();
+                mark_dead_edges();
             }
         }
         auto check_result = CheckCond(cond);

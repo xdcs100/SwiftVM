@@ -566,3 +566,44 @@ TEST_CASE("dead-edge integer compares branch on raw host flags") {
                  Contains(instructions, test.inverse)));
     }
 }
+
+TEST_CASE("dead-edge proof follows one direct call to a dominating flag write") {
+    auto decode_marker = [](const std::array<swift::u8, 36>& code) {
+        DirectMemory memory;
+        const auto address = reinterpret_cast<swift::VAddr>(code.data());
+        IntrusivePtr<Block> block{new Block(0, Location{address})};
+        Assembler assembler{block.get()};
+        FeatureSet features{};
+        swift::x86::X64Decoder decoder{
+                address, &memory, &assembler, true, Arm64Features::FlagM,
+                false, false, features};
+        decoder.Decode();
+        const auto markers = std::count_if(
+                block->GetInstList().begin(), block->GetInstList().end(),
+                [](const Inst& inst) {
+                    return inst.GetOp() == OpCode::BranchOnlyEdges;
+                });
+        return std::pair{markers, block->GetGuestCodeDependencies()};
+    };
+
+    std::array<swift::u8, 36> code{
+            0x3c, 0x50, 0x75, 0x04, 0x39, 0xc0, 0xf4, 0x90,
+            0x48, 0x89, 0xee, 0xe8, 0x04, 0x00, 0x00, 0x00,
+            0xf4, 0x90, 0x90, 0x90, 0xf3, 0x0f, 0x1e, 0xfa,
+            0x48, 0x8b, 0x17, 0x48, 0x89, 0xf0, 0x0f, 0xb6,
+            0x0a, 0x84, 0xc9, 0xf4,
+    };
+    const auto [markers, dependencies] = decode_marker(code);
+    REQUIRE(markers == 1);
+    REQUIRE(dependencies.size() == 1);
+    REQUIRE(dependencies[0].start.Value() ==
+            reinterpret_cast<swift::VAddr>(code.data()) + 20);
+    REQUIRE(dependencies[0].end.Value() ==
+            reinterpret_cast<swift::VAddr>(code.data()) + 35);
+
+    code[33] = 0x74;
+    code[34] = 0x00;
+    const auto [rejected_markers, rejected_dependencies] = decode_marker(code);
+    REQUIRE(rejected_markers == 0);
+    REQUIRE(rejected_dependencies.empty());
+}

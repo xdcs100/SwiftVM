@@ -1020,6 +1020,11 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
                         ir_function,
                         block->GetStartLocation().Value(),
                         block->GetEndLocation().Value());
+                for (const auto& dependency : block->GetGuestCodeDependencies()) {
+                    mutable_address_space.GetSmcTracker().RegisterNode(
+                            module, ir_function, dependency.start.Value(),
+                            dependency.end.Value());
+                }
             }
         }
         {
@@ -1277,6 +1282,11 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module,
             PerfScope2 perf_pub_smc{GetPerfStats2().publish_smc};
             address_space.GetSmcTracker().RegisterNode(
                     module, block.get(), block_start, block->GetEndLocation().Value());
+            for (const auto& dependency : block->GetGuestCodeDependencies()) {
+                address_space.GetSmcTracker().RegisterNode(
+                        module, block.get(), dependency.start.Value(),
+                        dependency.end.Value());
+            }
         }
         {
             PerfScope2 perf_pub_disk{GetPerfStats2().publish_disk};
