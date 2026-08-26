@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`5922091`** `perf: specialize dead narrow zero branches`
+- Code tip: **`3f079f9`** `perf: specialize dead narrow immediate branches`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -19,6 +19,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 
 | Commit | What |
 |---|---|
+| `3f079f9` | Generalize the dead narrow immediate branch plan from exact ZF to the existing ZF/CF/ZF+CF dead-edge conditions using `UXTB/UXTH; CMP imm` |
 | `5922091` | Lower a dead-edge U8/U16 `Sub` with an immediate and exact ZF-only branch into `SUB imm; TST width-mask`, suppressing the single-use immediate materialization |
 | `e2bb2c7` | Omit the final narrow-result `LSR` after branch-only Add/Sub/Neg when the arithmetic value has no ordinary use; observed results keep the truncation |
 | `4cc2c1e` | Publish an exact U8/U16/U32 memory load directly into its pinned GPR home and omit the redundant zero-extension and host-register publication instructions |
@@ -1378,6 +1379,19 @@ peepholes.
   and Orb flags focuses pass 144 assertions across four cases. An earlier emitter-only ZF
   prototype had zero net code-shape change because it could not suppress the pre-emitted
   `LoadImm`; it was removed before this block plan. This stage ran no stress test or full suite.
+- `3f079f9` generalizes the same block plan across every condition currently accepted by the
+  dead-edge proof: exact ZF, CF, or ZF+CF. The result-free U8/U16 compare now emits
+  `UXTB/UXTH wResult, wLeft; CMP wResult, #imm`; this preserves the host-C inverse-borrow
+  convention used by the existing raw EQ/NE/CC/CS/HI/LS branches and still suppresses the
+  single-use `LoadImm`. Other flag sets and unencodable immediates remain on the aligned `SUBS`
+  path. Against `5922091` with `SVM_X86_PIN_EXT=3`, bounded smallpt keeps 2,802 PCs / 3,435
+  versions, 288 dynamic spills and the canonical PPM while moving `379,546 -> 379,525`; the
+  100%-covered weighted comparison is `380,572 -> 380,551` (`-21`, `-0.005518%`) with no growing
+  PC. CoreMark keeps 2,846 PCs / 3,379 versions and `crcfinal=0x382f` while moving
+  `5,750,481,642 -> 5,724,721,561`; its 100%-covered weighted comparison is
+  `5,811,441,723 -> 5,785,681,642` (`-25,760,081`, `-0.443265%`) with every changed PC smaller.
+  Local and Orb flags focuses pass 152 assertions across four cases. This stage ran no stress test
+  or full suite.
 
 ## Orb loop
 
