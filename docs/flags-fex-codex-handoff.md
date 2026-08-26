@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`b734438`** `perf: prove flags dead through direct calls`
+- Code tip: **`38cea6e`** `perf: compare loaded narrow values directly`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -19,6 +19,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 
 | Commit | What |
 |---|---|
+| `38cea6e` | Feed the known zero-extended W result of LDRB/LDRH directly to a dead narrow immediate branch compare |
 | `b734438` | Follow one static direct call in the dead-successor flags proof when the callee overwrites every incoming flag before control flow, and track the inspected callee prefix for SMC |
 | `ea82571` | Reuse one displacement-adjusted indexed effective address across the load and store halves of a plain integer memory RMW |
 | `f8cc6ed` | Keep an exact narrow load's branch-only zero-test alias on the pinned publication home and remove the intervening W move |
@@ -1511,6 +1512,18 @@ peepholes.
   FLAGS `0/1` x function/block/interpreter returns rc 101, checksum `9f52b7d59285dbe5` and one
   identical output SHA in all six cells. No temporary diagnostic, new environment switch, stress
   run or full suite remains in this stage.
+- `38cea6e` carries the architectural zero-extension guarantee of an exact U8/U16 `LoadMemory`
+  into the existing dead narrow immediate branch lowering. `LDRB/LDRH` already defines a clean W
+  value, so its terminal compare now reads that register directly instead of repeating
+  `UXTB/UXTH`; non-load inputs retain the explicit truncation. CoreMark's `0x403630` and
+  `0x403688` units each shrink by one instruction with no unit/version change. Exact 20k raw and
+  weighted host work both fall by `20,480,048`: raw
+  `3,735,236,874 -> 3,714,756,826` and weighted
+  `3,735,236,889 -> 3,714,756,841` (`-0.548293%`), with 100% coverage, no growing PC and CRC
+  `0x382f`. The 2k screen moves `373,668,357 -> 371,620,309` (`-0.548092%`). Smallpt keeps all
+  2,792 PCs / 3,052 versions and the canonical PPM while moving raw `361,960 -> 361,711` and
+  weighted `361,978 -> 361,729` (`-0.068792%`). Narrow-immediate and dead-edge integer focuses
+  pass 105 assertions across three cases on Mac and Orb; no new switch or fallback was added.
 
 ## Orb loop
 
