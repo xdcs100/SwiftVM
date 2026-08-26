@@ -75,7 +75,9 @@ void JitTranslator::EmitAdd(ir::Inst* inst) {
                 BeginFlagsTokenProducer(pseudo_flags);
             }
             __ Adds(result.W(), result.W(), aligned_right);
-            __ Lsr(result.W(), result.W(), shift);
+            if (!pseudo_flags.branch_only || inst->GetUses() != 0) {
+                __ Lsr(result.W(), result.W(), shift);
+            }
             auto guest_nzcv = pseudo_flags.set & ir::Flags::NZCV;
             if (!pseudo_flags.branch_only) {
                 SaveHostFlags(GuestNZCVToHost(guest_nzcv), guest_nzcv);
@@ -185,7 +187,9 @@ void JitTranslator::EmitSub(ir::Inst* inst) {
                 }
             }
             __ Subs(result.W(), result.W(), aligned_right);
-            __ Lsr(result.W(), result.W(), shift);
+            if (!pseudo_flags.branch_only || inst->GetUses() != 0) {
+                __ Lsr(result.W(), result.W(), shift);
+            }
             auto guest_nzcv = pseudo_flags.set & ir::Flags::NZCV;
             if (region_branch_pfaf) {
                 nzcv_requested = GuestNZCVToHost(guest_nzcv);
@@ -260,7 +264,9 @@ void JitTranslator::EmitNeg(ir::Inst* inst) {
             }
         }
         __ Subs(result.W(), wzr, result.W());
-        __ Lsr(result.W(), result.W(), shift);
+        if (!pseudo_flags.branch_only || inst->GetUses() != 0) {
+            __ Lsr(result.W(), result.W(), shift);
+        }
         const auto guest_nzcv = pseudo_flags.set & ir::Flags::NZCV;
         if (region_branch_pfaf) {
             nzcv_requested = GuestNZCVToHost(guest_nzcv);

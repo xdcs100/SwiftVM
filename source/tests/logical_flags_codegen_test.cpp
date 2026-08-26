@@ -123,6 +123,48 @@ std::vector<std::string> Disassemble(arm64::JitContext& context) {
     return instructions;
 }
 
+std::vector<std::string> EmitNarrowBranchOnlyArithmetic(OpCode op,
+                                                        bool observe_result) {
+    Config config{
+            .loc_start = 0,
+            .loc_end = 1ull << 48,
+            .enable_jit = true,
+            .has_local_operation = false,
+            .backend_isa = kArm64,
+    };
+    AddressSpace address_space{config};
+    auto module = address_space.GetDefaultModule();
+
+    IntrusivePtr<Block> block{new Block(0, Location{0x8a00})};
+    auto source = block->LoadUniform<TypedValue<ValueType::U8>>(
+            Uniform{0, ValueType::U8});
+    Value result;
+    if (op == OpCode::Add) {
+        result = block->Add(source, Operand{Imm{3u}}).SetType(ValueType::U8);
+    } else if (op == OpCode::Sub) {
+        result = block->Sub(source, Operand{Imm{3u}}).SetType(ValueType::U8);
+    } else {
+        result = block->Neg(source).SetType(ValueType::U8);
+    }
+    block->AppendInst(OpCode::BranchOnlyFlags, result, Flags::NZCV);
+    if (observe_result) {
+        block->StoreUniform(Uniform{8, ValueType::U8}, result);
+    }
+    block->SetTerminal(terminal::ReturnToDispatch{});
+    block->ReIdInstr();
+
+    FeatureSet features{};
+    RegAlloc alloc{block->MaxInstrId(),
+                   address_space.GetTrampolines().GetGPRRegs(),
+                   address_space.GetTrampolines().GetFPRRegs(), features};
+    RegisterAllocPass::Run(block.get(), &alloc, false, features);
+    arm64::JitContext context{module, alloc};
+    arm64::JitTranslator translator{context};
+    translator.Translate(block.get());
+    context.Finish();
+    return Disassemble(context);
+}
+
 std::vector<std::string> EmitCompoundLogicalClear(bool exact_clear) {
     Config config{
             .loc_start = 0,
@@ -209,6 +251,17 @@ TEST_CASE("dead narrow logical identities publish NZ in one instruction") {
 TEST_CASE("observed narrow logical identities keep their result") {
     const auto emission = EmitLogicalFlagIdentity(true);
     REQUIRE_FALSE(emission.extract_tied);
+}
+
+TEST_CASE("dead narrow branch-only arithmetic omits result truncation") {
+    for (const auto op : {OpCode::Add, OpCode::Sub, OpCode::Neg}) {
+        CAPTURE(op);
+        const auto dead = EmitNarrowBranchOnlyArithmetic(op, false);
+        REQUIRE(Count(dead, "lsr ") == 0);
+
+        const auto observed = EmitNarrowBranchOnlyArithmetic(op, true);
+        REQUIRE(Count(observed, "lsr ") == 1);
+    }
 }
 
 TEST_CASE("parity-only logical publication leaves NZCV clean") {
