@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Product code tip: **`e0f9d58`** `perf: fault invalid indirect call targets`
+- Product code tip: **`30c85c7`** `perf: lower bit scans to native instructions`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -19,6 +19,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 
 | Commit | What |
 |---|---|
+| `30c85c7` | Replace BSF/BSR preserve-all helpers with U64 count-zero IR lowered to native AArch64 `CLZ` and `RBIT + CLZ` |
 | `4661866` | Feed an exact low U8/U16 store extract from an allocator-coalesced fixed-home publication directly to `STRB/STRH` |
 | `a548ece` | Omit an adjacent narrow self-extension when the shared register is already proven zero above the width by a load/zero-extension chain |
 | `53333fc` | Fold an exact adjacent U8/U16 low extract and `ZeroExtend32` into one `UXTB/UXTH` even when their allocated registers differ |
@@ -2106,6 +2107,21 @@ peepholes.
   those runs or add a profiler exit mechanism. Use a bounded representative testset or inspect the
   remaining multiblock/dispatch formation directly. No new profiler, probe, environment switch or
   source path was retained.
+- `30c85c7` removes the preserve-all helper ABI from BSF/BSR. The frontend now emits U64
+  count-zero IR, AArch64 lowers BSF to `RBIT + CLZ` and BSR to `CLZ + EOR #63`, and the
+  interpreter provides the same zero-count semantics. The old `Bsf64`/`Bsr64` helpers and their
+  fallback path are deleted. In SQLite `__memcmp_sse2` this removes the repeated complete register
+  snapshots: STP/LDP fall from 122/137 to 2/17, while the unit shrinks `1,349 -> 1,017` host
+  instructions. The bounded `main/10` static set retains all 1,995 units and moves
+  `497,244 -> 495,370` (`-1,874`, `-0.3769%`); 16 units shrink and one grows. Two interleaved full
+  SQLite pairs are consistently but modestly faster: internal totals `1.182/1.177s ->
+  1.173/1.169s`, with wall `1.452/1.442s -> 1.437/1.434s`. The exact CoreMark 2k screen retains all
+  3,695 PCs/versions and 100% coverage with no growth, moving `291,701,260 -> 291,700,688`
+  (`-572`). Bounded smallpt keeps SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. Mac/Orb directed bit-scan
+  cases pass; fixed-seed 424242 bit fuzz records zero BSF mismatches and the same unrelated ROL
+  divergence family. No stress run, full suite, probe, diagnostic path or new environment switch
+  remains.
 
 ## Orb loop
 
