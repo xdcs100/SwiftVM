@@ -778,6 +778,8 @@ private:
     bool execution_trace_enabled{false};
     int execution_trace_rsp_reg{-1};
     bool cur_block_is_call{};
+    std::optional<ir::Value> call_return_value{};
+    std::optional<u64> call_return_pc{};
     // Set by EmitSetLocation when the next guest location is a compile-time
     // constant, cleared by every other instruction (Translate(ir::Inst*)).
     // A trailing SetLocation remains pending until its terminal needs a
@@ -795,6 +797,11 @@ private:
     // register without extending an SSA lifetime or reloading State::current_loc.
     std::optional<ir::Value> dynamic_next_loc{};
     bool EmitIndirectForward();
+    bool EmitContinuationForward();
+    [[nodiscard]] bool CanUseCallContinuation() const;
+    [[nodiscard]] bool CanUseIndirectCallContinuation() const;
+    bool EmitIndirectCallForward();
+    void EmitIndirectExitColdPaths();
     std::unique_ptr<Label> backedge_exit_label{};
     bool backedge_exit_referenced{};
     std::map<u64, std::unique_ptr<Label>> direct_cycle_exits{};
@@ -805,6 +812,11 @@ private:
     u32 backedge_host_end{};
     std::vector<BackedgeBlockMetadata> backedge_block_metadata{};
     std::vector<IndirectL1FaultMetadata> indirect_l1_fault_metadata{};
+    struct IndirectExitMissSite {
+        std::unique_ptr<Label> label{};
+        u64 guest_start{};
+    };
+    std::array<IndirectExitMissSite, 32> indirect_exit_miss_sites{};
     std::vector<std::unique_ptr<VecNaNColdSite>> vec_nan_cold_sites{};
     bool boundary_density_enabled{};
     bool boundary_terminal_open{};

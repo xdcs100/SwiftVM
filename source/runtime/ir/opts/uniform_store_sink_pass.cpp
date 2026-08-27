@@ -164,6 +164,7 @@ struct SnapshotByte {
         case OpCode::NotGoto:
         case OpCode::BindLabel:
         case OpCode::PushRSB:
+        case OpCode::CallReturn:
         case OpCode::PopRSB:
             return true;
         default:

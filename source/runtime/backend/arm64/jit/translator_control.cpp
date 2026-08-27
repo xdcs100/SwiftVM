@@ -162,6 +162,11 @@ void JitTranslator::EmitPushRSB(ir::Inst* inst) {
     context.EmitRSBPush(ret_addr, context.GetDispatchIndex(ret_addr));
 }
 
+void JitTranslator::EmitCallReturn(ir::Inst* inst) {
+    call_return_value = inst->GetArg<ir::Value>(0);
+    call_return_pc = inst->GetArg<ir::Imm>(1).Get();
+}
+
 void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
                                  const std::vector<ir::DataClass>& args,
                                  bool has_result,
@@ -716,7 +721,7 @@ void JitTranslator::EmitCheckMemoryAlignment(ir::Inst* inst) {
     __ B(&aligned, eq);
     __ Mov(ipw, static_cast<u32>(HaltReason::PageFatal));
     __ Str(ipw, MemOperand(state, state_offset_halt_reason));
-    __ Ret();
+    context.ReturnHost();
     __ Bind(&aligned);
 }
 

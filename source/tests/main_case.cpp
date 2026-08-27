@@ -8895,10 +8895,10 @@ TEST_CASE("indirect L1 and lean shadow stack select compatible return paths") {
     REQUIRE(ret_l1.bytes ==
             ret_off.bytes - 4 * vixl::aarch64::kInstructionSize);
     REQUIRE(ret_shadow.bytes ==
-            ret_off.bytes - 2 * vixl::aarch64::kInstructionSize);
+            ret_off.bytes - vixl::aarch64::kInstructionSize);
     REQUIRE(ret_both.bytes == ret_l1.bytes);
-    REQUIRE(count(ret_l1, "ldp") == count(ret_off, "ldp") + 1);
-    REQUIRE(count(ret_l1, "cmp") == count(ret_off, "cmp") + 1);
+    REQUIRE(count(ret_l1, "ldp") == count(ret_off, "ldp"));
+    REQUIRE(count(ret_l1, "cmp") == count(ret_off, "cmp"));
 
     const auto ret_trailing = run(false, true, Shape::Return, true, false);
     REQUIRE(ret_trailing.bytes ==

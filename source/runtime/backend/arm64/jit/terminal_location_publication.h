@@ -19,7 +19,7 @@ public:
 
     [[nodiscard]] bool Defers(const ir::Inst* inst) const;
     [[nodiscard]] Label* MissLabel(const XRegister& target) const;
-    [[nodiscard]] RecoveryOffsets EmitColdPaths(MacroAssembler& masm);
+    [[nodiscard]] RecoveryOffsets EmitColdPaths(JitContext& context);
 
 private:
     std::unordered_set<const ir::Inst*> deferred;

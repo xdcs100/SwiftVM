@@ -29,6 +29,12 @@ namespace {
     return context.dispatcher;
 }
 
+[[nodiscard]] void* TraversalTarget(void* target, bool call) {
+    const auto value = reinterpret_cast<uintptr_t>(target);
+    ASSERT((value & 1u) == 0);
+    return reinterpret_cast<void*>(value | static_cast<uintptr_t>(call));
+}
+
 }  // namespace
 
 extern "C" void* RegionLinkTrampolineSlow(RegionLinkContext* context,
@@ -46,25 +52,31 @@ extern "C" void* RegionLinkTrampolineSlow(RegionLinkContext* context,
             return ReturnToDispatcher(*context, state, site);
         }
         const auto target = context->manager->QueryTarget(site->guest_target);
-        if (!target || !target->host_pc) {
+        const bool call = site->kind == LinkSiteKind::Call;
+        if (!target || !target->host_pc || (call && !target->call_host_pc)) {
             return ReturnToDispatcher(*context, state, site);
         }
-        auto* direct_host_pc =
-                site->flags_bypass_offset != UINT32_MAX &&
-                                target->pending_flags_host_pc
-                        ? target->pending_flags_host_pc
-                        : (target->direct_host_pc ? target->direct_host_pc
-                                                  : target->host_pc);
+        auto* direct_host_pc = call
+                ? (site->flags_bypass_offset != UINT32_MAX &&
+                                   target->call_pending_flags_host_pc
+                           ? target->call_pending_flags_host_pc
+                           : target->call_host_pc)
+                : (site->flags_bypass_offset != UINT32_MAX &&
+                                   target->pending_flags_host_pc
+                           ? target->pending_flags_host_pc
+                           : (target->direct_host_pc ? target->direct_host_pc
+                                                     : target->host_pc));
+        auto* traversal_host_pc = call ? target->call_host_pc : target->host_pc;
 
         if (site->state == LinkSiteState::Linked) {
             if (site->target_generation == target->generation) {
-                return target->host_pc;
+                return TraversalTarget(traversal_host_pc, call);
             }
             continue;
         }
         if (site->state == LinkSiteState::Far) {
             if (site->target_generation == target->generation) {
-                return target->host_pc;
+                return TraversalTarget(traversal_host_pc, call);
             }
             continue;
         }
@@ -73,14 +85,14 @@ extern "C" void* RegionLinkTrampolineSlow(RegionLinkContext* context,
                                  context->region->ContainsRx(direct_host_pc);
         if (!same_region || !Imm26Reachable(rx_site, direct_host_pc)) {
             if (context->manager->MarkFar(key, target->generation)) {
-                return target->host_pc;
+                return TraversalTarget(traversal_host_pc, call);
             }
             continue;
         }
 
         const auto offset = static_cast<u8*>(direct_host_pc) -
                             static_cast<const u8*>(rx_site);
-        const auto branch = EncodeB(offset);
+        const auto branch = call ? EncodeBL(offset) : EncodeB(offset);
         if (!branch) {
             return ReturnToDispatcher(*context, state, site);
         }
@@ -94,7 +106,7 @@ extern "C" void* RegionLinkTrampolineSlow(RegionLinkContext* context,
                                               *branch);
                 });
         if (linked) {
-            return target->host_pc;
+            return TraversalTarget(traversal_host_pc, call);
         }
     }
     return ReturnToDispatcher(*context, state, context->manager->QuerySite(key));
@@ -139,6 +151,7 @@ RegionLinkTrampolineCode BuildRegionLinkTrampoline(
             static_cast<u32>(masm.GetBuffer()->GetSizeInBytes());
     masm.Sub(sp, sp, frame_size);
     masm.Stp(x29, x30, MemOperand(sp, 0));
+    masm.Str(x14, MemOperand(sp, 24));
     for (u32 i = 0; i < gprs.size(); ++i) {
         masm.Str(XRegister(gprs[i]), MemOperand(sp, gpr_base + i * sizeof(u64)));
     }
@@ -172,14 +185,23 @@ RegionLinkTrampolineCode BuildRegionLinkTrampoline(
     for (u32 i = 0; i < gprs.size(); ++i) {
         masm.Ldr(XRegister(gprs[i]), MemOperand(sp, gpr_base + i * sizeof(u64)));
     }
-    masm.Ldr(x29, MemOperand(sp, 0));
+    masm.Ldr(x14, MemOperand(sp, 24));
+    masm.Ldp(x29, x30, MemOperand(sp, 0));
     masm.Ldr(x16, MemOperand(sp, 16));
     masm.Add(sp, sp, frame_size);
+    Label call_target;
+    masm.Tbnz(x16, 0, &call_target);
     masm.Mov(x30, reinterpret_cast<uintptr_t>(context->return_host));
+    masm.Bind(&call_target);
+    masm.Bic(x16, x16, 1);
     // A branch-instruction patch is not guaranteed to be observed merely by
     // cache maintenance performed on another core. The first slow traversal
     // performs context synchronization before entering the selected target.
     masm.Isb();
+    masm.Br(x16);
+    const u32 return_offset =
+            static_cast<u32>(masm.GetBuffer()->GetSizeInBytes());
+    masm.Mov(x16, reinterpret_cast<uintptr_t>(context->return_host));
     masm.Br(x16);
     masm.FinalizeCode();
 
@@ -188,6 +210,7 @@ RegionLinkTrampolineCode BuildRegionLinkTrampoline(
             .code = std::vector<u8>(size),
             .canonical_offset = canonical_offset,
             .pending_flags_offset = pending_flags_offset,
+            .return_offset = return_offset,
     };
     std::memcpy(result.code.data(),
                 masm.GetBuffer()->GetStartAddress<u8*>(),

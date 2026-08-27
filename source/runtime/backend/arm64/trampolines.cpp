@@ -263,10 +263,12 @@ void TrampolinesArm64::BuildRuntimeEntry(MacroAssembler& assembler) {
     const bool exec_prof = GetSvmConfig().exec_prof;
     auto record = [&](u32 offset) {
         if (!exec_prof) return;
+        __ Stp(ip0, ip1, MemOperand(sp, -16, PreIndex));
         __ Ldr(ip0, MemOperand(state, state_offset_exec_profile_ptr));
         __ Ldr(ip1, MemOperand(ip0, offset));
         __ Add(ip1, ip1, 1);
         __ Str(ip1, MemOperand(ip0, offset));
+        __ Ldp(ip0, ip1, MemOperand(sp, 16, PostIndex));
     };
     __ Bind(&label_runtime_entry);
     BuildSaveHostCallee(assembler);

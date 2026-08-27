@@ -290,6 +290,77 @@ TEST_CASE("direct-link patch epoch synchronizes each runtime before publication"
     tracker.UnregisterRuntime(token_b);
 }
 
+TEST_CASE("call-kind region links preserve the host continuation",
+          "[direct-link][trampoline][call]") {
+#if defined(__aarch64__)
+    std::vector<UniformMapDesc> descriptors;
+    auto config = TestConfig(descriptors);
+    config.global_opts = Optimizations::ReturnStackBuffer;
+    TrampolinesArm64 runtime_trampolines{config, FeatureSet{}};
+    LinkManager manager;
+    CodeCache cache{config, 1u << 20, FeatureSet{}};
+    auto* return_host = reinterpret_cast<void*>(runtime_trampolines.GetReturnHost());
+    REQUIRE(cache.InitializeRegionTrampoline(manager, return_host, return_host));
+    auto code = cache.AllocCode(256);
+    REQUIRE(code);
+
+    constexpr u64 guest_return = 0x12345678;
+    MacroAssembler source;
+    source.Mov(x14, guest_return);
+    const u32 site_offset = source.GetBuffer()->GetSizeInBytes();
+    source.dc32(*EncodeBL(0));
+    const u32 continuation_offset = source.GetBuffer()->GetSizeInBytes();
+    source.Mov(x16, reinterpret_cast<uintptr_t>(return_host));
+    source.Br(x16);
+    CopyAssembler(*code, 0, source);
+
+    constexpr u32 target_offset = 128;
+    MacroAssembler target;
+    target.Stp(x14, x30, MemOperand(x25, -16, PreIndex));
+    target.Mov(w11, static_cast<u32>(HaltReason::PageFatal));
+    target.Str(w11, MemOperand(x28, state_offset_halt_reason));
+    target.Ret();
+    CopyAssembler(*code, target_offset, target);
+
+    auto* site = code->exec_data + site_offset;
+    const auto unlinked = EncodeBL(
+            static_cast<u8*>(cache.GetRegionTrampoline()) - site);
+    REQUIRE(unlinked);
+    std::memcpy(code->rw_data + site_offset, &*unlinked, sizeof(*unlinked));
+    code->Flush();
+
+    const int owner_module{};
+    const int owner_allocation{};
+    const LinkSiteKey key{cache.GetRegion().id, code->offset + site_offset};
+    REQUIRE(manager.RegisterSite(key,
+                                 kGuestTarget,
+                                 {&owner_module, &owner_allocation},
+                                 nullptr,
+                                 LinkSiteKind::Call));
+    REQUIRE(manager.PublishTarget(kGuestTarget,
+                                  code->exec_data + target_offset,
+                                  cache.GetRegion().id,
+                                  {},
+                                  nullptr,
+                                  nullptr,
+                                  code->exec_data + target_offset) != 0);
+
+    TestState state{config.uniform_buffer_size};
+    auto* empty = state.state->rsb_pointer;
+    auto entry = runtime_trampolines.GetRuntimeEntry();
+    REQUIRE(entry(state.state, code->exec_data) == HaltReason::PageFatal);
+    REQUIRE(state.state->rsb_pointer == empty - 1);
+    REQUIRE(state.state->rsb_pointer->guest_location == guest_return);
+    REQUIRE(state.state->rsb_pointer->dispatch_index ==
+            reinterpret_cast<uintptr_t>(code->exec_data + continuation_offset));
+    REQUIRE(manager.QuerySite(key)->state == LinkSiteState::Linked);
+    REQUIRE(DecodeBranchTarget(site, LoadInsn(site)) ==
+            reinterpret_cast<uintptr_t>(code->exec_data + target_offset));
+#else
+    SUCCEED("call-kind trampoline execution requires an AArch64 host");
+#endif
+}
+
 TEST_CASE("region linker caches Far state and preserves dispatcher fallback",
           "[direct-link][trampoline][far]") {
     std::vector<UniformMapDesc> descriptors;

@@ -99,6 +99,8 @@ public:
 
     void Return();
 
+    void RegisterCallReturn(Location location);
+
     bool EndCommit() const;
     [[nodiscard]] bool IsFunctionMode() const { return hir_builder != nullptr; }
 

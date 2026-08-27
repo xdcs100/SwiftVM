@@ -89,7 +89,8 @@ Label* TerminalLocationPublication::MissLabel(const XRegister& target) const {
 }
 
 TerminalLocationPublication::RecoveryOffsets
-TerminalLocationPublication::EmitColdPaths(MacroAssembler& masm) {
+TerminalLocationPublication::EmitColdPaths(JitContext& context) {
+    auto& masm = context.GetMasm();
     RecoveryOffsets offsets{};
     for (u32 reg = 0; reg < miss_labels.size(); ++reg) {
         if (!miss_labels[reg]) {
@@ -98,7 +99,7 @@ TerminalLocationPublication::EmitColdPaths(MacroAssembler& masm) {
         offsets[reg] = masm.GetBuffer()->GetSizeInBytes();
         masm.Bind(miss_labels[reg].get());
         masm.Str(XRegister(reg), MemOperand(state, state_offset_current_loc));
-        masm.Ret();
+        context.ReturnHost();
     }
     Reset();
     return offsets;

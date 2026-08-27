@@ -421,6 +421,8 @@ void Interpreter::RunPushRSB(ir::Inst* inst, InterpStack& stack) {
     // is off (same as the JIT).
 }
 
+void Interpreter::RunCallReturn(ir::Inst* inst, InterpStack& stack) {}
+
 void Interpreter::RunPopRSB(ir::Inst* inst, InterpStack& stack) {
     // TODO: ReturnStackBuffer support; safe to ignore (same as the JIT).
 }

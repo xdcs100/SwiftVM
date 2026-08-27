@@ -27,6 +27,7 @@ struct RegionLinkTrampolineCode {
     std::vector<u8> code{};
     u32 canonical_offset{};
     u32 pending_flags_offset{};
+    u32 return_offset{};
 };
 
 [[nodiscard]] RegionLinkTrampolineCode BuildRegionLinkTrampoline(

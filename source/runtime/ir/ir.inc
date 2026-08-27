@@ -73,7 +73,8 @@ INST(LoadImm, Value, Imm)
 
 // Help
 INST(PushRSB, Void, Lambda)
-INST(PopRSB, Void)
+INST(CallReturn, Void, Value, Imm, Lambda)
+INST(PopRSB, Void, Lambda)
 
 // Calculator
 INST(Add, Value, Value, Operand)

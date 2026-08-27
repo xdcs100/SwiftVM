@@ -32,6 +32,7 @@ enum class LinkSiteKind : u8 {
     SwitchArm,
     CheckHalt,
     BackedgeCold,
+    Call,
     Count,
 };
 
@@ -91,6 +92,8 @@ struct LinkTargetRecord {
     void* host_pc{};
     void* direct_host_pc{};
     void* pending_flags_host_pc{};
+    void* call_host_pc{};
+    void* call_pending_flags_host_pc{};
     CodeRegionId region_id{};
     u64 generation{};
     LinkSourceOwner target_owner{};
@@ -144,7 +147,9 @@ public:
                                     CodeRegionId region_id = 0,
                                     LinkSourceOwner target_owner = {},
                                     void* direct_host_pc = nullptr,
-                                    void* pending_flags_host_pc = nullptr);
+                                    void* pending_flags_host_pc = nullptr,
+                                    void* call_host_pc = nullptr,
+                                    void* call_pending_flags_host_pc = nullptr);
     [[nodiscard]] std::optional<LinkTargetRecord> QueryTarget(u64 guest_target) const;
     [[nodiscard]] std::optional<u64> QueryTargetGeneration(u64 guest_target) const;
     [[nodiscard]] bool ValidateTargetGeneration(u64 guest_target, u64 generation) const;
@@ -203,6 +208,8 @@ private:
         void* host_pc{};
         void* direct_host_pc{};
         void* pending_flags_host_pc{};
+        void* call_host_pc{};
+        void* call_pending_flags_host_pc{};
         CodeRegionId region_id{};
         LinkSourceOwner target_owner{};
         SignalTarget* signal_target{};

@@ -748,6 +748,8 @@ JitTranslator::PrepareBlockState(ir::Block* block) {
     static_next_loc.reset();
     dynamic_next_loc.reset();
     dynamic_location_miss = nullptr;
+    call_return_value.reset();
+    call_return_pc.reset();
     compound_logical_clear_pending = false;
     // Function mode keeps one function-sized suppression bitmap. Grow it
     // before the per-block backedge proof marks the two sunk IR instructions.
@@ -1378,8 +1380,11 @@ void JitTranslator::Translate(ir::HIRFunction* function) {
             EmitFlagsPublishedVeneer(block);
         }
     }
+    context.EmitPendingFlagsCallEntry(
+            function->GetFunction()->GetStartLocation().Value());
     context.BeginColdScratch();
-    const auto recovery_offsets = terminal_location_publication.EmitColdPaths(masm);
+    EmitIndirectExitColdPaths();
+    const auto recovery_offsets = terminal_location_publication.EmitColdPaths(context);
     context.EndColdScratch();
     for (auto& fault : indirect_l1_fault_metadata) {
         if (fault.recovery_reg == UINT32_MAX) {
@@ -1428,7 +1433,8 @@ Register JitTranslator::MaterializeOperand(const Operand& operand, ir::ValueType
 void JitTranslator::Translate(ir::Inst* inst) {
     ASSERT(inst);
     context.TickIR(inst);
-    if (inst->GetOp() != ir::OpCode::SetLocation) {
+    if (inst->GetOp() != ir::OpCode::SetLocation &&
+        inst->GetOp() != ir::OpCode::CallReturn) {
         static_next_loc.reset();
         if (inst->GetOp() != ir::OpCode::PopRSB) {
             dynamic_next_loc.reset();

@@ -64,6 +64,10 @@ public:
         return reg_alloc.ValueType(value) == RegAlloc::FPR &&
                reg_alloc.ValueFPR(value).id == target;
     }
+    [[nodiscard]] bool IsGPRMappedTo(const ir::Value& value, u16 target) {
+        return reg_alloc.ValueType(value) == RegAlloc::GPR &&
+               reg_alloc.ValueGPR(value).id == target;
+    }
     [[nodiscard]] Register R(const ir::Value& value, bool auto_cast = false);
     [[nodiscard]] XRegister X(const ir::Value& value);
     [[nodiscard]] WRegister W(const ir::Value& value);
@@ -119,7 +123,7 @@ public:
     [[nodiscard]] bool CanBypassDispatcher(ir::Location location) const;
     [[nodiscard]] bool CanEmitDirectLink(ir::Location location) const;
     [[nodiscard]] bool HasDirectLinkSites() const {
-        return !pending_direct_link_sites.empty();
+        return !pending_direct_link_sites.empty() || !pending_return_sites.empty();
     }
     [[nodiscard]] const std::vector<DirectLinkSiteInfo>& GetDirectLinkSites() const {
         return pending_direct_link_sites;
@@ -136,7 +140,15 @@ public:
                                      DirectLinkFlagsBypass flags_bypass = {});
     [[nodiscard]] IndirectL1FaultRange
     ForwardIndirectL1(const Register& location, Label* miss = nullptr);
+    void ForwardContinuation(const Register& location, Label* miss);
+    [[nodiscard]] IndirectL1FaultRange
+    ForwardIndirectCall(const Register& location, Label* miss);
     void ReturnToDispatcher(const Register& location);
+    void ReturnHost();
+    [[nodiscard]] bool ContinuationActive() const {
+        return cur_function && direct_link_active && FlagsRegsEnabled() &&
+               features.indirect_l1;
+    }
 
     // --- Return Stack Buffer (RSB) emission --------------------------------
     // Called from the JitTranslator for PushRSB instructions and PopRSBHint
@@ -169,8 +181,12 @@ public:
             LocationDescriptor location) const;
     [[nodiscard]] ptrdiff_t GetPendingFlagsCodeOffset(
             LocationDescriptor location) const;
+    [[nodiscard]] ptrdiff_t GetCallCodeOffset(LocationDescriptor location) const;
+    [[nodiscard]] ptrdiff_t GetCallPendingFlagsCodeOffset(
+            LocationDescriptor location) const;
     void RecordDirectLinkEntry(LocationDescriptor location);
     void RecordPendingFlagsEntry(LocationDescriptor location);
+    void EmitPendingFlagsCallEntry(LocationDescriptor location);
     [[nodiscard]] bool IsUniform(const Register& reg);
     [[nodiscard]] bool IsSpilled(const ir::Value& value) {
         return reg_alloc.ValueType(value) == RegAlloc::MEM;
@@ -368,6 +384,8 @@ private:
     std::map<LocationDescriptor, Label> labels;
     std::map<LocationDescriptor, u32> direct_link_entry_offsets;
     std::map<LocationDescriptor, u32> pending_flags_entry_offsets;
+    std::map<LocationDescriptor, u32> call_entry_offsets;
+    std::map<LocationDescriptor, u32> call_pending_flags_entry_offsets;
     std::map<LocationDescriptor, Label> internal_labels;
     // FLAGS_REGS L2 veneer lands here, immediately before the entry counter.
     // Internal taken edges still use internal_labels after the counter, matching
@@ -385,6 +403,7 @@ private:
     std::map<u32, u8> spill_use_scratch;
     std::vector<PendingSpillWrite> pending_spill_writes;
     std::vector<DirectLinkSiteInfo> pending_direct_link_sites;
+    std::vector<u32> pending_return_sites;
 
     GPRSMask cur_dirty_gprs{};
     GPRSMask cur_dirty_fprs{};

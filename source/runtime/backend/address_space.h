@@ -41,6 +41,7 @@ public:
     void UnmapModule(LocationDescriptor start, LocationDescriptor end);
 
     u32 PushCodeCache(ir::Location location, void* cache);
+    u32 PushCallCodeCache(ir::Location location, void* cache);
 
     u32 GetCodeCacheIndex(ir::Location location);
 
@@ -71,6 +72,9 @@ public:
     // The address-space wide (L2) translate table backing PushCodeCache /
     // GetCodeCache; the JIT dispatcher reads it directly from generated code.
     [[nodiscard]] TranslateTable& GetCodeCacheTable() { return code_cache; }
+    [[nodiscard]] TranslateTable& GetCallCodeCacheTable() {
+        return call_code_cache;
+    }
 
     // JIT disk cache (SVM_JIT_CACHE=<dir>, off by default). Null when the
     // switch is unset or the environment cannot support it; every caller must
@@ -98,6 +102,7 @@ private:
     std::shared_ptr<Module> default_module;
     std::unique_ptr<Trampolines> trampolines;
     TranslateTable code_cache{code_cache_bits};
+    TranslateTable call_code_cache{18, TranslateTableHash::Direct};
     // mutable: SMC page records are tracking metadata, mutated through the
     // signal-handler / const-access paths (same pattern as GetTrampolines).
     mutable SmcTracker smc_tracker;

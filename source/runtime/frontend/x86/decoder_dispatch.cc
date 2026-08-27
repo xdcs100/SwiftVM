@@ -131,22 +131,32 @@ SVM_DISPATCH_STAGE bool X64Decoder::DecodeBaseOpcode(_DInst& insn) {
             break;
         case I_CALL: {
             auto ret_type = is_64bit ? ir::ValueType::U64 : ir::ValueType::U32;
+            auto return_value = __ LoadImm(ir::Imm(pc)).SetType(ret_type);
             // An indirect CALL resolves its target before pushing the return
             // address.  This matters for RSP-relative operands: resolving
             // call *disp(%rsp) after Push would read eight bytes below the
-            // architectural target slot.  Keep the direct path unchanged so
-            // its established IR/codegen fingerprint is unaffected.
+            // architectural target slot.
             if (insn.ops[0].type != O_PC) {
                 auto target = ir::Lambda{Src(insn, insn.ops[0])};
-                Push(__ LoadImm(ir::Imm(pc)), ret_type);
+                Push(return_value, ret_type);
                 __ PushRSB(ir::Lambda(ir::Imm{pc}));
                 __ SetLocation(target);
+                if (assembler->IsFunctionMode()) {
+                    __ CallReturn(return_value, ir::Imm{pc}, target);
+                    assembler->RegisterCallReturn(ir::Location{pc});
+                }
                 __ ReturnToDispatcher();
                 break;
             }
-            Push(__ LoadImm(ir::Imm(pc)), ret_type);
+            auto target = ir::Lambda{Src(insn, insn.ops[0])};
+            Push(return_value, ret_type);
             __ PushRSB(ir::Lambda(ir::Imm{pc}));
-            DecodeCondJump(insn, Cond::AL);
+            __ SetLocation(target);
+            if (assembler->IsFunctionMode()) {
+                __ CallReturn(return_value, ir::Imm{pc}, target);
+                assembler->RegisterCallReturn(ir::Location{pc});
+            }
+            __ ReturnToDispatcher();
             break;
         }
         case I_RET: {
@@ -157,14 +167,14 @@ SVM_DISPATCH_STAGE bool X64Decoder::DecodeBaseOpcode(_DInst& insn) {
                 R(_RegisterType::R_RSP, __ Add(sp, ir::Operand{ir::Imm(u64(insn.imm.word))}));
             }
             __ SetLocation(ir::Lambda{ret_addr});
-            __ PopRSB();
+            __ PopRSB(ir::Lambda{ret_addr});
             __ Return();
             break;
         }
         case I_RETF: {
             auto ret_addr = Pop(is_64bit ? ir::ValueType::U64 : ir::ValueType::U32);
             __ SetLocation(ir::Lambda{ret_addr});
-            __ PopRSB();
+            __ PopRSB(ir::Lambda{ret_addr});
             __ Return();
             break;
         }

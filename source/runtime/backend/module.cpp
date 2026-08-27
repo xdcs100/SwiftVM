@@ -357,7 +357,9 @@ u64 Module::PublishLinkTarget(ir::Location guest,
                               void* host_pc,
                               const void* allocation,
                               void* direct_host_pc,
-                              void* pending_flags_host_pc) {
+                              void* pending_flags_host_pc,
+                              void* call_host_pc,
+                              void* call_pending_flags_host_pc) {
     if (!IsDirectLinkConfigured()) {
         return 0;
     }
@@ -366,6 +368,9 @@ u64 Module::PublishLinkTarget(ir::Location guest,
         (direct_host_pc && !region->ContainsRx(direct_host_pc)) ||
         (pending_flags_host_pc &&
          !region->ContainsRx(pending_flags_host_pc)) ||
+        (call_host_pc && !region->ContainsRx(call_host_pc)) ||
+        (call_pending_flags_host_pc &&
+         !region->ContainsRx(call_pending_flags_host_pc)) ||
         region->trampoline_offset == CodeRegion::kInvalidTrampolineOffset) {
         return 0;
     }
@@ -375,7 +380,9 @@ u64 Module::PublishLinkTarget(ir::Location guest,
             region->id,
             {this, allocation},
             direct_host_pc,
-            pending_flags_host_pc);
+            pending_flags_host_pc,
+            call_host_pc,
+            call_pending_flags_host_pc);
 }
 
 void Module::DiscardLinkSource(const void* allocation) {

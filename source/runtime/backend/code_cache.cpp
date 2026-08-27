@@ -123,6 +123,7 @@ bool CodeCache::InitializeRegionTrampoline(LinkManager& manager,
     region.trampoline_offset = buffer->offset + trampoline.canonical_offset;
     region.pending_flags_trampoline_offset =
             buffer->offset + trampoline.pending_flags_offset;
+    region.return_trampoline_offset = buffer->offset + trampoline.return_offset;
     region_link_context_ = std::move(context);
     return true;
 }
@@ -142,6 +143,14 @@ void* CodeCache::GetPendingFlagsRegionTrampoline() const {
     return region.rx_base + region.pending_flags_trampoline_offset;
 }
 
+void* CodeCache::GetReturnRegionTrampoline() const {
+    if (region.return_trampoline_offset ==
+        CodeRegion::kInvalidTrampolineOffset) {
+        return nullptr;
+    }
+    return region.rx_base + region.return_trampoline_offset;
+}
+
 void CodeCache::Init() {
     code_mem = std::make_unique<MemMap>(max_size, true);
 #if defined(__APPLE__) || defined(__linux__)
@@ -156,6 +165,7 @@ void CodeCache::Init() {
             .trampoline_offset = CodeRegion::kInvalidTrampolineOffset,
             .pending_flags_trampoline_offset =
                     CodeRegion::kInvalidTrampolineOffset,
+            .return_trampoline_offset = CodeRegion::kInvalidTrampolineOffset,
     };
 
     if (!read_only) {

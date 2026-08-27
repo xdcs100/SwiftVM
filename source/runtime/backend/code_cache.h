@@ -32,6 +32,7 @@ struct CodeRegion {
     // Offset of the region's shared direct-link cold trampoline, when present.
     u32 trampoline_offset{kInvalidTrampolineOffset};
     u32 pending_flags_trampoline_offset{kInvalidTrampolineOffset};
+    u32 return_trampoline_offset{kInvalidTrampolineOffset};
 
     [[nodiscard]] bool ContainsRx(const void* address) const;
     [[nodiscard]] bool ContainsRw(const void* address) const;
@@ -80,6 +81,7 @@ public:
                                                   void* dispatcher);
     [[nodiscard]] void* GetRegionTrampoline() const;
     [[nodiscard]] void* GetPendingFlagsRegionTrampoline() const;
+    [[nodiscard]] void* GetReturnRegionTrampoline() const;
     [[nodiscard]] arm64::RegionLinkContext* GetRegionLinkContext() const {
         return region_link_context_.get();
     }

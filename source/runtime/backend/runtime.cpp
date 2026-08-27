@@ -131,6 +131,8 @@ struct Runtime::Impl final {
             profile_interface.hot_coalesce_counters = hot_coalesce_counters.data();
         }
         profile_interface.l1_code_cache = l1_code_cache.Data();
+        profile_interface.call_l1_code_cache =
+                address_space->GetCallCodeCacheTable().Data();
         state->indirect_l1_code_cache = l1_code_cache.Data();
         ASSERT_MSG(reinterpret_cast<std::uintptr_t>(l1_code_cache.Data()) %
                                    l1_code_cache.DataAlignment() == 0,
@@ -145,13 +147,7 @@ struct Runtime::Impl final {
         // Inline indirect-L1 faults use this request word even when the
         // optional backedge/SMC latch is disabled.
         state->exit_request = 0;
-        if (address_space->ExitLatchEnabled()) {
-            state->interface = &profile_interface;
-        }
-        if (exec_profile_enabled || execution_trace_enabled ||
-            hot_counter_storage_enabled) {
-            state->interface = &profile_interface;
-        }
+        state->interface = &profile_interface;
         // Wire the dispatcher's code-cache tables: L1 is per-runtime, L2 is the
         // address-space wide translate table that PushCodeCache writes to.
         state->l2_code_cache = address_space->GetCodeCacheTable().Data();
@@ -692,11 +688,16 @@ void Runtime::SignalInterrupt() {
     std::atomic_ref<u64>(impl->state->exit_request)
             .fetch_or(kBackedgeSignalRequest, std::memory_order_release);
     impl->PublishIndirectL1Base(GetInterruptL1Mapping().Data());
+    std::atomic_ref<void*>(impl->profile_interface.call_l1_code_cache)
+            .store(GetInterruptL1Mapping().Data(), std::memory_order_release);
 }
 
 void Runtime::ClearInterrupt() {
     impl->state->halt_reason = HaltReason::None;
     impl->PublishIndirectL1Base(impl->l1_code_cache.Data());
+    std::atomic_ref<void*>(impl->profile_interface.call_l1_code_cache)
+            .store(impl->address_space->GetCallCodeCacheTable().Data(),
+                   std::memory_order_release);
     std::atomic_ref<u64>(impl->state->exit_request)
             .fetch_and(kBackedgeSmcRequestMask, std::memory_order_acq_rel);
     impl->running.store(true, std::memory_order_release);
@@ -1021,25 +1022,43 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
                     emitted_context->GetDirectLinkCodeOffset(guest);
             const auto pending_flags_offset =
                     emitted_context->GetPendingFlagsCodeOffset(guest);
+            const auto call_offset = emitted_context->GetCallCodeOffset(guest);
+            const auto call_pending_flags_offset =
+                    emitted_context->GetCallPendingFlagsCodeOffset(guest);
             ASSERT(offset >= 0 && static_cast<size_t>(offset) < buffer.size);
             ASSERT(direct_offset >= 0 &&
                    static_cast<size_t>(direct_offset) < buffer.size);
             ASSERT(pending_flags_offset < 0 ||
                    static_cast<size_t>(pending_flags_offset) < buffer.size);
+            ASSERT(call_offset < 0 ||
+                   static_cast<size_t>(call_offset) < buffer.size);
+            ASSERT(call_pending_flags_offset < 0 ||
+                   static_cast<size_t>(call_pending_flags_offset) < buffer.size);
             auto* direct_host_pc = direct_offset == offset
                     ? nullptr
                     : buffer.exec_data + direct_offset;
             auto* pending_flags_host_pc = pending_flags_offset < 0
                     ? nullptr
                     : buffer.exec_data + pending_flags_offset;
+            auto* call_host_pc = call_offset < 0
+                    ? nullptr
+                    : buffer.exec_data + call_offset;
+            auto* call_pending_flags_host_pc = call_pending_flags_offset < 0
+                    ? nullptr
+                    : buffer.exec_data + call_pending_flags_offset;
             {
                 PerfScope2 perf_pub_l2{GetPerfStats2().publish_l2};
                 (void)module->PublishLinkTarget(
                         ir::Location{guest}, buffer.exec_data + offset,
                         buffer.exec_data,
                         direct_host_pc,
-                        pending_flags_host_pc);
+                        pending_flags_host_pc,
+                        call_host_pc,
+                        call_pending_flags_host_pc);
                 mutable_address_space.PushCodeCache(guest, buffer.exec_data + offset);
+                if (call_host_pc) {
+                    mutable_address_space.PushCallCodeCache(guest, call_host_pc);
+                }
             }
             cache_blocks.push_back({
                     .guest_start = guest,

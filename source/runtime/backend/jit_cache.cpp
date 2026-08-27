@@ -210,7 +210,7 @@ void JitDiskCache::RecordUnit(const std::shared_ptr<Module>& module,
     // never persist such a unit.  An old committed unit cannot revive into the
     // new shape because its FeatureSet hash differs at Load time.
     const auto resolved_features = ResolveFeatureSet(module->GetModuleConfig());
-    if (resolved_features.flags_loop_lazy) {
+    if (resolved_features.flags_loop_lazy || FlagsRegsEnabled()) {
         return;
     }
 

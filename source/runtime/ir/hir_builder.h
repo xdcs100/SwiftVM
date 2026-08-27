@@ -209,6 +209,12 @@ public:
     auto& GetPredecessors() { return predecessors; }
     auto& GetSuccessors() { return successors; }
 
+    [[nodiscard]] HIRBlock* GetCallReturnBlock() const {
+        return call_return_block;
+    }
+
+    [[nodiscard]] bool IsCallReturnBlock() const { return call_return_target; }
+
     auto& GetBackEdges() { return back_edges; }
 
     auto& GetDomFrontier() { return dom_frontier; }
@@ -238,6 +244,8 @@ private:
     HIRBlockVector successors;
     BackEdgeList back_edges{};
     HIRBlock* dominator{};
+    HIRBlock* call_return_block{};
+    bool call_return_target{};
     DomFrontier dom_frontier{};
 };
 
@@ -351,6 +359,7 @@ public:
     Function* GetFunction();
     void ReleaseFunctionOwnership();
     void AddEdge(HIRBlock* src, HIRBlock* dest, bool conditional = false);
+    void RegisterCallReturn(Location location);
     void RemoveEdge(Edge* edge);
     void MergeAdjacentBlocks(HIRBlock* left, HIRBlock* right);
     bool SplitBlock(HIRBlock* new_block, HIRBlock* old_block);
@@ -638,6 +647,8 @@ public:
     Vector<CaseBlock> Switch(const terminal::Switch& switch_);
 
     HIRBlock* LinkBlock(const terminal::LinkBlock& switch_);
+
+    void RegisterCallReturn(Location location);
 
     void ReturnToDispatcher();
 

@@ -598,7 +598,7 @@ bool JitContext::ForwardStatic(ir::Location location,
     RecordExecCounter(exec_offset_link_miss);
     __ Mov(ip, location.Value());
     __ Str(ip, MemOperand(state, state_offset_current_loc));
-    __ Ret();
+    ReturnHost();
     return true;
 }
 
@@ -632,7 +632,7 @@ void JitContext::Forward(ir::Location location,
             // Module miss
             __ Mov(ipw, static_cast<u32>(HaltReason::ModuleMiss));
             __ Str(ipw, MemOperand(state, state_offset_halt_reason));
-            __ Ret();
+            ReturnHost();
             return;
         }
 
@@ -679,12 +679,12 @@ void JitContext::Forward(ir::Location location,
             RecordExecCounter(exec_offset_link_miss);
             __ Mov(ip, location.Value());
             __ Str(ip, MemOperand(state, state_offset_current_loc));
-            __ Ret();
+            ReturnHost();
         } else {
             // do not link
             __ Mov(ip, location.Value());
             __ Str(ip, MemOperand(state, state_offset_current_loc));
-            __ Ret();
+            ReturnHost();
         }
     }
 }
@@ -761,7 +761,16 @@ void JitContext::ReturnToDispatcher(const Register& location) {
     // Block exit: see Forward.
     FlushSpillWrites();
     __ Str(location, MemOperand(state, state_offset_current_loc));
-    __ Ret();
+    ReturnHost();
+}
+
+void JitContext::ReturnHost() {
+    if (!ContinuationActive()) {
+        __ Ret();
+        return;
+    }
+    pending_return_sites.push_back(CurrentBufferSize());
+    __ dc32(*EncodeB(0));
 }
 
 JitContext::IndirectL1FaultRange
@@ -785,17 +794,50 @@ JitContext::ForwardIndirectL1(const Register& location, Label* miss) {
         __ Br(entry);
         __ Bind(&miss);
         RecordHotCounter(HotCoalesceCounter::IndirectL1Miss);
-        __ Ret();
+        ReturnHost();
         return {fault_begin, fault_end};
     }
 
     __ Cmp(index, location);
     if (miss) {
         __ B(miss, ne);
+    } else if (ContinuationActive()) {
+        Label hit;
+        __ B(&hit, eq);
+        ReturnHost();
+        __ Bind(&hit);
     } else {
         __ Csel(entry, entry, x30, eq);
     }
     __ Br(entry);
+    return {fault_begin, fault_end};
+}
+
+void JitContext::ForwardContinuation(const Register& location, Label* miss) {
+    ASSERT(miss);
+    const auto predicted = GetTmpX();
+    const auto continuation = GetTmpX();
+    __ Ldp(predicted, continuation, MemOperand(rsb_ptr, 16, PostIndex));
+    __ Cmp(predicted, location);
+    __ B(miss, ne);
+    __ Br(continuation);
+}
+
+JitContext::IndirectL1FaultRange
+JitContext::ForwardIndirectCall(const Register& location, Label* miss) {
+    ASSERT(miss);
+    const auto index = GetTmpX();
+    const auto entry = GetTmpX();
+    __ Ldr(entry, MemOperand(state, state_offset_exec_profile_ptr));
+    __ Ldr(entry, MemOperand(entry, profile_offset_call_l1_code_cache));
+    __ Bfi(entry, location, 4, L1_CODE_CACHE_BITS);
+    const u32 fault_begin = CurrentBufferSize();
+    __ Ldp(index, entry, MemOperand(entry));
+    const u32 fault_end = CurrentBufferSize();
+    __ Cmp(index, location);
+    __ Ccmp(entry, xzr, ZFlag, eq);
+    __ B(miss, eq);
+    __ Blr(entry);
     return {fault_begin, fault_end};
 }
 
@@ -861,7 +903,7 @@ void JitContext::EmitRSBPop(std::optional<XRegister> actual_target) {
         __ Br(slot);
         __ Bind(&rsb_miss);
         RecordExecCounter(exec_offset_rsb_miss);
-        __ Ret();
+        ReturnHost();
         return;
     }
     Label rsb_miss;
@@ -894,7 +936,7 @@ void JitContext::EmitRSBPop(std::optional<XRegister> actual_target) {
     __ Bind(&rsb_miss);
     __ Add(rsb_ptr, rsb_ptr, 16);
     RecordExecCounter(exec_offset_rsb_miss);
-    __ Ret();
+    ReturnHost();
 }
 
 u32 JitContext::GetDispatchIndex(u64 guest_addr) {
@@ -1012,6 +1054,19 @@ u8* JitContext::Flush(const CodeBuffer& code_cache) {
                      static_cast<void*>(code_cache.exec_data),
                      CurrentBufferSize());
     }
+    if (!pending_return_sites.empty()) {
+        auto* cache = module->GetCodeCache(code_cache.exec_data);
+        ASSERT(cache);
+        auto* trampoline = static_cast<u8*>(cache->GetReturnRegionTrampoline());
+        ASSERT(trampoline && cache->GetRegion().ContainsRx(trampoline));
+        auto* emitted = masm.GetBuffer()->GetStartAddress<u8*>();
+        for (const u32 offset : pending_return_sites) {
+            auto* rx_site = code_cache.exec_data + offset;
+            const auto branch = EncodeB(trampoline - rx_site);
+            ASSERT(branch);
+            std::memcpy(emitted + offset, &*branch, sizeof(*branch));
+        }
+    }
     if (!pending_direct_link_sites.empty()) {
         auto* cache = module->GetCodeCache(code_cache.exec_data);
         ASSERT(cache);
@@ -1100,6 +1155,23 @@ ptrdiff_t JitContext::GetPendingFlagsCodeOffset(
     return -1;
 }
 
+ptrdiff_t JitContext::GetCallCodeOffset(LocationDescriptor location) const {
+    if (const auto it = call_entry_offsets.find(location);
+        it != call_entry_offsets.end()) {
+        return it->second;
+    }
+    return -1;
+}
+
+ptrdiff_t JitContext::GetCallPendingFlagsCodeOffset(
+        LocationDescriptor location) const {
+    if (const auto it = call_pending_flags_entry_offsets.find(location);
+        it != call_pending_flags_entry_offsets.end()) {
+        return it->second;
+    }
+    return -1;
+}
+
 void JitContext::RecordDirectLinkEntry(LocationDescriptor location) {
     auto* entry = GetCountedEntryLabel(location);
     ASSERT(entry->IsBound());
@@ -1112,6 +1184,16 @@ void JitContext::RecordPendingFlagsEntry(LocationDescriptor location) {
     ASSERT(entry->IsBound());
     pending_flags_entry_offsets.insert_or_assign(
             location, static_cast<u32>(entry->GetLocation()));
+}
+
+void JitContext::EmitPendingFlagsCallEntry(LocationDescriptor location) {
+    if (!ContinuationActive() ||
+        !pending_flags_entry_offsets.contains(location)) {
+        return;
+    }
+    call_pending_flags_entry_offsets.emplace(location, CurrentBufferSize());
+    __ Stp(x14, x30, MemOperand(rsb_ptr, -16, PreIndex));
+    __ B(GetCountedEntryLabel(location));
 }
 
 bool JitContext::IsUniform(const Register& reg) {
@@ -1196,8 +1278,11 @@ void JitContext::SetCurrent(ir::Function* function) {
         unit_start = function->GetStartLocation().Value();
         unit_start_set = true;
     }
-    auto label = GetLabel(function->GetStartLocation().Value());
-    __ Bind(label);
+    if (ContinuationActive()) {
+        call_entry_offsets.emplace(function->GetStartLocation().Value(),
+                                   CurrentBufferSize());
+        __ Stp(x14, x30, MemOperand(rsb_ptr, -16, PreIndex));
+    }
 }
 
 void JitContext::TickIR(ir::Inst* instr) {

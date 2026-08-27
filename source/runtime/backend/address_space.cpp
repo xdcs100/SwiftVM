@@ -125,6 +125,10 @@ u32 AddressSpace::PushCodeCache(ir::Location location, void* cache) {
     return code_cache.Put(location.Value(), reinterpret_cast<size_t>(cache));
 }
 
+u32 AddressSpace::PushCallCodeCache(ir::Location location, void* cache) {
+    return call_code_cache.Put(location.Value(), reinterpret_cast<size_t>(cache));
+}
+
 u32 AddressSpace::GetCodeCacheIndex(ir::Location location) {
     return code_cache.GetOrPut(location.Value(), 0);
 }
@@ -187,7 +191,8 @@ AddressSpace::~AddressSpace() {
                      "signal_invalidations=%llu signal_targets_retained=%zu "
                      "signal_sites_retained=%zu epoch_sync=%llu "
                      "kinds=uncond:%zu/%zu/%zu,then:%zu/%zu/%zu,else:%zu/%zu/%zu,"
-                     "switch:%zu/%zu/%zu,check_halt:%zu/%zu/%zu,backedge_cold:%zu/%zu/%zu\n",
+                     "switch:%zu/%zu/%zu,check_halt:%zu/%zu/%zu,backedge_cold:%zu/%zu/%zu,"
+                     "call:%zu/%zu/%zu\n",
                      stats.sites,
                      stats.linked,
                      stats.far,
@@ -221,7 +226,10 @@ AddressSpace::~AddressSpace() {
                      kind(stats.far_by_kind, LinkSiteKind::CheckHalt),
                      kind(stats.sites_by_kind, LinkSiteKind::BackedgeCold),
                      kind(stats.linked_by_kind, LinkSiteKind::BackedgeCold),
-                     kind(stats.far_by_kind, LinkSiteKind::BackedgeCold));
+                     kind(stats.far_by_kind, LinkSiteKind::BackedgeCold),
+                     kind(stats.sites_by_kind, LinkSiteKind::Call),
+                     kind(stats.linked_by_kind, LinkSiteKind::Call),
+                     kind(stats.far_by_kind, LinkSiteKind::Call));
     }
     // Persist before anything is torn down: Save only touches the recorded
     // byte copies and the L2 slot assignment, both still intact here.

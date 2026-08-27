@@ -248,6 +248,14 @@ void HIRFunction::AddEdge(HIRBlock* src, HIRBlock* dest, bool conditional) {
     }
 }
 
+void HIRFunction::RegisterCallReturn(Location location) {
+    ASSERT(current_block);
+    auto* target = AppendBlock(location);
+    ASSERT(target && !current_block->call_return_block);
+    current_block->call_return_block = target;
+    target->call_return_target = true;
+}
+
 void HIRFunction::RemoveEdge(Edge* edge) {}
 
 void HIRFunction::MergeAdjacentBlocks(HIRBlock* left, HIRBlock* right) {}
@@ -293,8 +301,13 @@ void HIRFunction::ComputeRPO() {
     while (!stack.empty()) {
         auto& frame = stack.back();
         auto successors = frame.block->GetSuccessors();
-        if (frame.next_succ < successors.size()) {
-            auto* succ = successors[frame.next_succ++];
+        const u32 successor_count = static_cast<u32>(successors.size()) +
+                (frame.block->GetCallReturnBlock() ? 1u : 0u);
+        if (frame.next_succ < successor_count) {
+            auto* succ = frame.next_succ < successors.size()
+                    ? successors[frame.next_succ]
+                    : frame.block->GetCallReturnBlock();
+            ++frame.next_succ;
             if (mark_visited(succ)) {
                 stack.push_back({succ, 0});
             }
@@ -660,6 +673,11 @@ HIRBlock* HIRBuilder::LinkBlock(const terminal::LinkBlock& link) {
     auto next_block = current_function->AppendBlock(link.next);
     current_function->AddEdge(pre_block, next_block, false);
     return next_block;
+}
+
+void HIRBuilder::RegisterCallReturn(Location location) {
+    ASSERT(current_function);
+    current_function->RegisterCallReturn(location);
 }
 
 // A function-ending terminal clears current_function. The x86 decoder can emit

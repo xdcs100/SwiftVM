@@ -107,6 +107,7 @@ public:
         fixed_gpr_alias_end.resize(function->MaxInstrCount());
         fixed_gpr_affinity.resize(function->MaxInstrCount(), UINT16_MAX);
         fixed_gpr_affinity_store.resize(function->MaxInstrCount(), UINT32_MAX);
+        call_abi_affinity.resize(function->MaxInstrCount(), UINT16_MAX);
         fixed_class = backend::FixedGPRClassEnabled(alloc->GetGprs(), features);
         InitializeFixedClobbers();
         if (single_block_fast_path) {
@@ -143,6 +144,7 @@ public:
         fixed_gpr_alias_end.resize(block->MaxInstrId());
         fixed_gpr_affinity.resize(block->MaxInstrId(), UINT16_MAX);
         fixed_gpr_affinity_store.resize(block->MaxInstrId(), UINT32_MAX);
+        call_abi_affinity.resize(block->MaxInstrId(), UINT16_MAX);
         fixed_class = backend::FixedGPRClassEnabled(alloc->GetGprs(), features);
         InitializeFixedClobbers();
     }
@@ -280,6 +282,7 @@ public:
             CollectLiveIntervals(block);
         }
         PlanFixedGPRAffinities();
+        PlanCallReturnAffinities();
         perf_collect_live.Stop();
 
         // Step 2: Sort live intervals
@@ -315,11 +318,8 @@ public:
 
             ExpireOldIntervals(interval);
 
-            if (TryAllocateFixedGPR(interval)) {
-                // A fixed-class affinity owns its architectural home for this
-                // SSA interval.  The home remains reserved in the ordinary
-                // value/scratch mask; this is a separate register class, not
-                // extra pool capacity.
+            if (TryAllocateCallABIGPR(interval) ||
+                TryAllocateFixedGPR(interval)) {
             } else if (IsForcedSpill(interval)) {
                 SpillAtInterval(interval);
             } else if (!IsFloatValue(interval.inst)) {
@@ -413,6 +413,40 @@ public:
     }
 
 private:
+    void PlanCallReturnAffinities() {
+        if (!function || reg_alloc->GetGprs().Get(14)) {
+            return;
+        }
+        for (auto* hir_block : function->GetHIRBlocks()) {
+            for (auto& inst : hir_block->GetBlock()->GetInstList()) {
+                if (inst.GetOp() != OpCode::CallReturn) {
+                    continue;
+                }
+                const auto value = ResolveBitCastSource(inst.GetArg<Value>(0));
+                if (value.Defined() && value.Id() < call_abi_affinity.size() &&
+                    !IsFloatValue(value.Def())) {
+                    call_abi_affinity[value.Id()] = 14;
+                }
+            }
+        }
+    }
+
+    bool TryAllocateCallABIGPR(LiveInterval& interval) {
+        if (!function || IsFloatValue(interval.inst) ||
+            interval.inst->Id() >= call_abi_affinity.size()) {
+            return false;
+        }
+        const u16 target = call_abi_affinity[interval.inst->Id()];
+        if (target == UINT16_MAX ||
+            active_gprs.Get(target) ||
+            (IntervalFixedClobbers(interval) & (1u << target))) {
+            return false;
+        }
+        active_gprs.Mark(target);
+        reg_alloc->MapRegister(interval.inst->Id(), HostGPR{target});
+        return true;
+    }
+
     void MapFixedRead(u32 id, u16 target) {
         if (fixed_class && backend::IsFixedGPRHome(target)) {
             reg_alloc->MapFixedRegister(id, HostGPR{target});
@@ -843,7 +877,9 @@ private:
             return;
         }
 
-        const bool audit = GetSvmConfig().ra_hot_coalesce_all;
+        const auto& config = GetSvmConfig();
+        const bool audit = config.ra_shape_prof_is_set &&
+                           config.ra_shape_prof != "0";
         const u64 unit_pc = function
                 ? function->GetFunction()->GetStartLocation().Value()
                 : block->GetStartLocation().Value();
@@ -2414,6 +2450,7 @@ private:
     Vector<u32> fixed_gpr_alias_end{};
     Vector<u16> fixed_gpr_affinity{};
     Vector<u32> fixed_gpr_affinity_store{};
+    Vector<u16> call_abi_affinity{};
     std::array<Vector<std::pair<u32, u32>>, 32> fixed_ranges{};
     Vector<bool> spill_slots{};
     Vector<u32> fixed_gpr_clobbers{};

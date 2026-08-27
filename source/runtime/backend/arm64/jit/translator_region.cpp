@@ -960,7 +960,7 @@ void JitTranslator::EmitBackedgeColdPaths() {
         recovery_offset = context.CurrentBufferSize();
         __ Bind(plan.fault_recovery.get());
         EmitBackedgeMaterialize(plan);
-        __ Ret();
+        context.ReturnHost();
     }
     backedge_block_metadata.push_back({cur_block->GetStartLocation().Value(),
                                        backedge_host_begin,
@@ -1163,7 +1163,7 @@ void JitTranslator::EmitBackedgeExitStub() {
     __ Mov(ipw1, static_cast<u32>(HaltReason::Signal));
     __ Bind(&publish);
     __ Str(ipw1, MemOperand(state, state_offset_halt_reason));
-    __ Ret();
+    context.ReturnHost();
     backedge_exit_label.reset();
     backedge_exit_referenced = false;
 }
@@ -1189,7 +1189,7 @@ void JitTranslator::EmitDirectCycleExitStubs() {
         __ Mov(ipw1, static_cast<u32>(HaltReason::Signal));
         __ Bind(&publish);
         __ Str(ipw1, MemOperand(state, state_offset_halt_reason));
-        __ Ret();
+        context.ReturnHost();
     }
     direct_cycle_exits.clear();
 }

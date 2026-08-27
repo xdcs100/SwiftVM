@@ -53,6 +53,12 @@ void Assembler::Return() {
     }
 }
 
+void Assembler::RegisterCallReturn(Location location) {
+    if (hir_builder) {
+        hir_builder->RegisterCallReturn(location);
+    }
+}
+
 bool Assembler::EndCommit() const {
     return end_decode;
 }
