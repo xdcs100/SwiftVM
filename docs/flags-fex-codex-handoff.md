@@ -1986,6 +1986,21 @@ peepholes.
   A six-second counter run was stopped without output, and no profiler path or temporary probe is
   retained. OpenSSL still reports `infk` because its elapsed-time denominator is zero; do not use
   that throughput as code-generation evidence.
+- `89d4d94` closes two host-continuation invalidation holes without adding hit-path work. An empty
+  continuation slot previously used post-index `LDP` before discovering that no host continuation
+  existed, advancing x25 on every mixed-mode return miss. The empty arm now restores x25 before
+  entering the existing grouped miss publisher; nonzero mismatches retain the established consume
+  behavior. `ClearInterrupt` also resets the guarded continuation stack before guest signal-handler
+  re-entry, so host PCs from an interrupted active epoch cannot survive asynchronous control-flow
+  replacement. Mac and Orb continuation and interrupt focuses pass 3 and 8 assertions; Orb
+  direct-link without stress passes 771 assertions. CoreMark 2k retains `crcfinal=0x4983`, and the
+  one-second OpenSSL command again exits normally. A prototype that retained the static call target
+  through `CallReturn` proved that real call sites currently miss the continuation ABI and reduced
+  the `0x5567f0` setup range sharply, but it was fully removed: mixed function/non-function return
+  units first exposed the empty-pop defect, and after that repair OpenSSL's alarm handler wrote
+  `speed.c::run` from 1 to 0 while the interrupted SHA batch still failed to finish within the
+  seven-second cap. Do not reactivate static call continuation until async resume bounds the
+  interrupted batch without relying on the hot `current_loc` store.
 
 ## Orb loop
 
