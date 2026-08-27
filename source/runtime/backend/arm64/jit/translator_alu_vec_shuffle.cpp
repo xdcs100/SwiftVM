@@ -423,15 +423,12 @@ void JitTranslator::EmitVecMovMask(ir::Inst* inst) {
         auto packed = context.GetTmpV();
         auto work = context.GetTmpV();
         __ Ushr(work.V16B(), src.V16B(), 7);
-        __ Uzp1(packed.V16B(), work.V16B(), work.V16B());
-        __ Uzp2(work.V16B(), work.V16B(), work.V16B());
-        __ Sli(packed.V16B(), work.V16B(), 1);
-        __ Uzp2(work.V16B(), packed.V16B(), packed.V16B());
-        __ Uzp1(packed.V16B(), packed.V16B(), packed.V16B());
-        __ Sli(packed.V16B(), work.V16B(), 2);
-        __ Uzp2(work.V16B(), packed.V16B(), packed.V16B());
-        __ Uzp1(packed.V16B(), packed.V16B(), packed.V16B());
-        __ Sli(packed.V16B(), work.V16B(), 4);
+        __ Usra(work.V8H(), work.V8H(), 7);
+        __ Xtn(packed.V8B(), work.V8H());
+        __ Usra(packed.V4H(), packed.V4H(), 6);
+        __ Xtn(work.V8B(), packed.V8H());
+        __ Usra(work.V4H(), work.V4H(), 4);
+        __ Xtn(packed.V8B(), work.V8H());
         __ Umov(result, packed.V8H(), 0);
         return;
     }
