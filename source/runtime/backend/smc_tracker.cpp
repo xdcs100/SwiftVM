@@ -15,6 +15,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include "runtime/backend/address_space.h"
+#include "runtime/backend/interrupt_poll_state.h"
 #include "runtime/backend/module.h"
 #include "runtime/common/backedge_control.h"
 #include "runtime/common/logging.h"
@@ -105,8 +106,9 @@ bool SmcTracker::SetPageProtected(VAddr page, bool prot_read_only) {
 }
 
 SmcTracker::RuntimeToken SmcTracker::RegisterRuntime(TranslateTable& l1,
-                                                     u64* exit_request) {
-    auto token = std::make_shared<RuntimeEpoch>(&l1, exit_request);
+                                                     u64* exit_request,
+                                                     InterruptPollState* interrupt_poll) {
+    auto token = std::make_shared<RuntimeEpoch>(&l1, exit_request, interrupt_poll);
     // Registration occurs at a host boundary before this Runtime can execute
     // JIT code, so it is born synchronized with the current patch epoch and
     // pays no first-entry ISB in the no-delink steady state.
@@ -296,9 +298,9 @@ void SmcTracker::ClearDispatchSlots(AddressSpace& space,
         }
     }
     // Publish only after every shared/L1 dispatch slot is clear. The release
-    // operation below must order those clears before a generated LDAR that
-    // chooses the deopt veneer; publishing first would permit an executing
-    // loop to return and re-enter through a stale slot.
+    // operation below orders those clears before the poll page is protected;
+    // publishing first would permit an executing loop to re-enter through a
+    // stale slot.
     PublishExitRequest();
 }
 
@@ -311,12 +313,14 @@ void SmcTracker::PublishExitRequest() {
         if (!runtime || !runtime->exit_request) {
             continue;
         }
-        // Release publishes every dispatch-slot clear and dirty-page update
-        // ordered before this call. The generated LDAR is the matching
-        // acquire. A counter, rather than a boolean bit, lets the Runtime CAS
-        // away only the exact request its cold veneer observed.
+        // The fault handler acquire-loads this request after the poll page
+        // becomes inaccessible. A counter lets the Runtime CAS away only the
+        // exact request its cold veneer observed.
         std::atomic_ref<u64>(*runtime->exit_request)
                 .fetch_add(1, std::memory_order_release);
+        if (runtime->interrupt_poll) {
+            runtime->interrupt_poll->Arm();
+        }
     }
 }
 

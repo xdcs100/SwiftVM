@@ -1327,6 +1327,7 @@ void JitTranslator::Translate(ir::Block* block) {
 
     PerfScope2 perf_terminal{GetPerfStats2().codegen_terminal};
     EmitBlockTerminalAndColdPaths(block, density, density_bytes);
+    ASSERT(pending_exit_poll_faults.empty());
     PrintBlockDensity(block,
                       density,
                       density_ops,
@@ -1386,7 +1387,7 @@ void JitTranslator::Translate(ir::HIRFunction* function) {
     EmitIndirectExitColdPaths();
     const auto recovery_offsets = terminal_location_publication.EmitColdPaths(context);
     context.EndColdScratch();
-    for (auto& fault : indirect_l1_fault_metadata) {
+    for (auto& fault : fault_metadata) {
         if (fault.recovery_reg == UINT32_MAX) {
             continue;
         }

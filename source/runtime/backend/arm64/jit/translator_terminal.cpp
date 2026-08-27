@@ -97,12 +97,14 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
                     ? LocalBranchTarget(term.next)
                     : nullptr;
             const u32 link_before = context.CurrentBufferSize();
-            context.Forward(term.next,
-                            exit,
-                            self_target,
-                            direct_link_kind,
-                            local_flags_bypass.Valid() ? local_flags_bypass
-                                                      : flags_bypass);
+            RecordExitPollFault(
+                    context.Forward(term.next,
+                                    exit,
+                                    self_target,
+                                    direct_link_kind,
+                                    local_flags_bypass.Valid() ? local_flags_bypass
+                                                              : flags_bypass),
+                    exit);
             RecordBoundaryRange(BoundarySubsequence::LinkTail, link_before,
                                 context.CurrentBufferSize());
         } else if constexpr (std::is_same_v<T, ir::terminal::LinkBlockFast>) {
@@ -127,12 +129,14 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
                     ? LocalBranchTarget(term.next)
                     : nullptr;
             const u32 link_before = context.CurrentBufferSize();
-            context.Forward(term.next,
-                            exit,
-                            self_target,
-                            direct_link_kind,
-                            local_flags_bypass.Valid() ? local_flags_bypass
-                                                      : flags_bypass);
+            RecordExitPollFault(
+                    context.Forward(term.next,
+                                    exit,
+                                    self_target,
+                                    direct_link_kind,
+                                    local_flags_bypass.Valid() ? local_flags_bypass
+                                                              : flags_bypass),
+                    exit);
             RecordBoundaryRange(BoundarySubsequence::LinkTail, link_before,
                                 context.CurrentBufferSize());
         } else if constexpr (std::is_same_v<T, ir::terminal::PopRSBHint>) {
@@ -424,17 +428,18 @@ bool JitTranslator::EmitStaticForward(LinkSiteKind direct_link_kind,
     const u64 target = *static_next_loc;
     const u32 link_before = context.CurrentBufferSize();
     const auto location = ir::Location{target};
-    const bool emitted = context.ForwardStatic(
-            location, GetDirectCycleExit(location), direct_link_kind,
-            flags_bypass);
-    if (emitted) {
+    auto* cycle_exit = GetDirectCycleExit(location);
+    const auto forwarded = context.ForwardStatic(
+            location, cycle_exit, direct_link_kind, flags_bypass);
+    RecordExitPollFault(forwarded.poll_fault, cycle_exit);
+    if (forwarded.emitted) {
         static_next_loc.reset();
     } else {
         PublishPendingStaticLocation();
     }
     RecordBoundaryRange(BoundarySubsequence::LinkTail, link_before,
                         context.CurrentBufferSize());
-    return emitted;
+    return forwarded.emitted;
 }
 
 bool JitTranslator::EmitIndirectForward() {
@@ -447,7 +452,7 @@ bool JitTranslator::EmitIndirectForward() {
     dynamic_location_miss = nullptr;
     const u32 link_before = context.CurrentBufferSize();
     const auto fault = context.ForwardIndirectL1(location, miss);
-    indirect_l1_fault_metadata.push_back({
+    fault_metadata.push_back({
             .guest_start = cur_block->GetStartLocation().Value(),
             .host_begin = fault.begin,
             .host_end = fault.end,
@@ -508,7 +513,7 @@ bool JitTranslator::EmitIndirectCallForward(bool pending_flags) {
     const u32 link_before = context.CurrentBufferSize();
     const auto fault = context.ForwardIndirectCall(
             location, miss_site.label.get(), pending_flags);
-    indirect_l1_fault_metadata.push_back({
+    fault_metadata.push_back({
             .guest_start = cur_block->GetStartLocation().Value(),
             .host_begin = fault.begin,
             .host_end = fault.end,
@@ -550,7 +555,7 @@ void JitTranslator::EmitIndirectExitColdPaths() {
         const XRegister location{reg};
         auto* recovery = terminal_location_publication.MissLabel(location);
         const auto fault = context.ForwardIndirectL1(location, recovery);
-        indirect_l1_fault_metadata.push_back({
+        fault_metadata.push_back({
                 .guest_start = site.guest_start,
                 .host_begin = fault.begin,
                 .host_end = fault.end,

@@ -657,9 +657,7 @@ TEST_CASE("direct SCC descending edge observes a pending interrupt",
             space.PushCodeCache(Location{guest_a}, code_a);
             space.PushCodeCache(Location{guest_b}, code_b);
 
-            // ldar x16,[x28]. The ascending A->B edge stays unchanged; the
-            // descending edge carries the two-instruction cycle-cover poll.
-            constexpr u32 kExitRequestLdar = 0xc8dfff90u;
+            constexpr u32 kInterruptPollLoad = 0xb85e839fu;
             const auto region_a = module->GetCodeRegion(code_a);
             REQUIRE(region_a);
             const auto sites_a = FindProductionSites(space, *region_a, code_a);
@@ -672,7 +670,7 @@ TEST_CASE("direct SCC descending edge observes a pending interrupt",
             REQUIRE_FALSE(ContainsInsn(
                     code_a,
                     static_cast<size_t>(site_a->rx - code_a),
-                    kExitRequestLdar));
+                    kInterruptPollLoad));
             const auto region_b = module->GetCodeRegion(code_b);
             REQUIRE(region_b);
             const auto sites_b = FindProductionSites(space, *region_b, code_b);
@@ -685,7 +683,7 @@ TEST_CASE("direct SCC descending edge observes a pending interrupt",
             REQUIRE(ContainsInsn(
                     code_b,
                     static_cast<size_t>(site_b->rx - code_b),
-                    kExitRequestLdar));
+                    kInterruptPollLoad));
 
             Runtime runtime{&space};
             runtime.SetLocation(guest_a);
@@ -1006,7 +1004,8 @@ TEST_CASE("production direct links bypass a shared full flags merge",
                 .has_local_operation = false,
                 .backend_isa = kArm64,
                 .uniform_buffer_size = 64,
-                .global_opts = Optimizations::BlockLink,
+                .global_opts = Optimizations::BlockLink |
+                               Optimizations::ReturnStackBuffer,
                 .region_edges = true,
                 .memory_base = guest_memory,
                 .guest_addr_mask = guest_size - 1,
@@ -1143,7 +1142,8 @@ TEST_CASE("static forwards register their flags bypass",
                 .has_local_operation = false,
                 .backend_isa = kArm64,
                 .uniform_buffer_size = 64,
-                .global_opts = Optimizations::BlockLink,
+                .global_opts = Optimizations::BlockLink |
+                               Optimizations::ReturnStackBuffer,
                 .region_edges = true,
                 .memory_base = guest_memory,
                 .guest_addr_mask = guest_size - 1,

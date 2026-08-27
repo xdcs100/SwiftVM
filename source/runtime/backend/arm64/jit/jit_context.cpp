@@ -558,29 +558,32 @@ XRegister JitContext::GetSharedTmpX() {
     return XRegister(shared_tmp_gpr);
 }
 
-bool JitContext::ForwardStatic(ir::Location location,
-                               Label* cycle_exit,
-                               LinkSiteKind direct_link_kind,
-                               DirectLinkFlagsBypass flags_bypass) {
+JitContext::StaticForwardResult
+JitContext::ForwardStatic(ir::Location location,
+                          Label* cycle_exit,
+                          LinkSiteKind direct_link_kind,
+                          DirectLinkFlagsBypass flags_bypass) {
     // Same-module only, like the BlockLink path in Forward(): a slot filled by
     // another module outlives this module's view of it. The lookup also keeps
     // dispatch slots (a finite shared table) from being reserved for addresses
     // no module owns -- a computed jmp into unmapped memory must not consume
     // one.
     if (!CanBypassDispatcher(location)) {
-        return false;
+        return {};
     }
     auto target_module = module;
     // The Ret this replaces leaves the translator without touching JitContext,
     // so a spilled def from the block's last instruction would never reach its
     // slot; branching straight to the next unit makes that visible.
     FlushSpillWrites();
+    std::optional<FaultRange> poll_fault;
     if (cycle_exit) {
-        __ Ldar(ip0, MemOperand(state, state_offset_exit_request));
-        __ Cbnz(ip0, cycle_exit);
+        const u32 begin = CurrentBufferSize();
+        __ Ldr(wzr, MemOperand(state, state_offset_interrupt_poll));
+        poll_fault = FaultRange{begin, CurrentBufferSize()};
     }
     if (EmitDirectLink(location, direct_link_kind, flags_bypass)) {
-        return true;
+        return {true, poll_fault};
     }
     const u32 dispatcher_index = target_module->GetDispatchIndex(location);
     Label empty_slot;
@@ -599,25 +602,25 @@ bool JitContext::ForwardStatic(ir::Location location,
     __ Mov(ip, location.Value());
     __ Str(ip, MemOperand(state, state_offset_current_loc));
     ReturnHost();
-    return true;
+    return {true, poll_fault};
 }
 
-void JitContext::Forward(ir::Location location,
-                         Label* backedge_exit,
-                         Label* self_target,
-                         LinkSiteKind direct_link_kind,
-                         DirectLinkFlagsBypass flags_bypass) {
+std::optional<JitContext::FaultRange>
+JitContext::Forward(ir::Location location,
+                    Label* backedge_exit,
+                    Label* self_target,
+                    LinkSiteKind direct_link_kind,
+                    DirectLinkFlagsBypass flags_bypass) {
     ASSERT(cur_block);
     // Block exit: land any pending spill write-back before the transfer
     // (a spilled value defined by the block's last instruction may be live
     // into the target block in function mode).
     FlushSpillWrites();
+    std::optional<FaultRange> poll_fault;
     if (backedge_exit) {
-        // State::exit_request is deliberately the first field, so every
-        // cycle-cover poll is exactly two hot instructions. The release
-        // publishers are SignalInterrupt and SmcTracker invalidation.
-        __ Ldar(ip0, MemOperand(state, state_offset_exit_request));
-        __ Cbnz(ip0, backedge_exit);
+        const u32 begin = CurrentBufferSize();
+        __ Ldr(wzr, MemOperand(state, state_offset_interrupt_poll));
+        poll_fault = FaultRange{begin, CurrentBufferSize()};
     }
     auto self_forward = location == cur_block->GetStartLocation();
     if (!self_forward && cur_function) {
@@ -633,13 +636,13 @@ void JitContext::Forward(ir::Location location,
             __ Mov(ipw, static_cast<u32>(HaltReason::ModuleMiss));
             __ Str(ipw, MemOperand(state, state_offset_halt_reason));
             ReturnHost();
-            return;
+            return poll_fault;
         }
 
         const bool self_module_forward{module == target_module};
         const ModuleConfig& module_config{module->GetModuleConfig()};
         if (EmitDirectLink(location, direct_link_kind, flags_bypass)) {
-            return;
+            return poll_fault;
         }
 
         if (self_module_forward && module_config.HasOpt(Optimizations::BlockLink)) {
@@ -687,6 +690,7 @@ void JitContext::Forward(ir::Location location,
             ReturnHost();
         }
     }
+    return poll_fault;
 }
 
 bool JitContext::EmitDirectLink(ir::Location location,
@@ -730,20 +734,23 @@ bool JitContext::CanBypassDispatcher(ir::Location location) const {
     return module->GetAddressSpace().GetModule(location.Value()) == module;
 }
 
-void JitContext::ForwardLocal(ir::Location location,
-                              Label* cycle_exit,
-                              bool fallthrough,
-                              Label* local_target) {
+std::optional<JitContext::FaultRange>
+JitContext::ForwardLocal(ir::Location location,
+                         Label* cycle_exit,
+                         bool fallthrough,
+                         Label* local_target) {
     ASSERT(cur_block);
     FlushSpillWrites();
+    std::optional<FaultRange> poll_fault;
     if (cycle_exit) {
-        // release 侧在信号和 SMC 失效路径发布请求；这里只对成环边付 acquire 税。
-        __ Ldar(ip0, MemOperand(state, state_offset_exit_request));
-        __ Cbnz(ip0, cycle_exit);
+        const u32 begin = CurrentBufferSize();
+        __ Ldr(wzr, MemOperand(state, state_offset_interrupt_poll));
+        poll_fault = FaultRange{begin, CurrentBufferSize()};
     }
     if (!fallthrough) {
         __ B(local_target ? local_target : GetInternalLabel(location.Value()));
     }
+    return poll_fault;
 }
 
 bool JitContext::CanEmitDirectLink(ir::Location location) const {
@@ -773,7 +780,7 @@ void JitContext::ReturnHost() {
     __ dc32(*EncodeB(0));
 }
 
-JitContext::IndirectL1FaultRange
+JitContext::FaultRange
 JitContext::ForwardIndirectL1(const Register& location, Label* miss) {
     const auto index = GetTmpX();
     const auto entry = GetTmpX();
@@ -823,7 +830,7 @@ void JitContext::ForwardContinuation(const Register& location, Label* miss) {
     __ Br(continuation);
 }
 
-JitContext::IndirectL1FaultRange
+JitContext::FaultRange
 JitContext::ForwardIndirectCall(const Register& location,
                                 Label* miss,
                                 bool pending_flags) {

@@ -20,6 +20,7 @@
 #include "runtime/backend/context.h"
 #include "runtime/backend/guarded_return_stack.h"
 #include "runtime/backend/interrupt_l1_mapping.h"
+#include "runtime/backend/interrupt_poll_state.h"
 #include "runtime/backend/interp/interpreter.h"
 #include "runtime/backend/runtime.h"
 #include "runtime/backend/signal_handler.h"
@@ -98,11 +99,12 @@ struct OwnerSlot {
 static thread_local std::shared_ptr<OwnerSlot> tls_owner_slot{};
 
 struct Runtime::Impl final {
-    explicit Impl(backend::AddressSpace* address_space) : address_space(address_space) {
-        state_buffer.resize(sizeof(RuntimeNamedVectorConstants) +
+    explicit Impl(backend::AddressSpace* address_space)
+            : state_storage(sizeof(RuntimeNamedVectorConstants) +
                             sizeof(backend::State) +
-                            address_space->GetConfig().uniform_buffer_size);
-        auto* named = state_buffer.data();
+                            address_space->GetConfig().uniform_buffer_size),
+              address_space(address_space) {
+        auto* named = state_storage.Data();
         state = reinterpret_cast<backend::State*>(
                 named + sizeof(RuntimeNamedVectorConstants));
         ASSERT_MSG(reinterpret_cast<std::uintptr_t>(named) %
@@ -110,6 +112,9 @@ struct Runtime::Impl final {
                    "runtime named-vector prefix is not 16-byte aligned");
         ASSERT_MSG(reinterpret_cast<std::uintptr_t>(state) % alignof(backend::State) == 0,
                    "runtime State is not 16-byte aligned after named-vector prefix");
+        ASSERT_MSG(reinterpret_cast<u8*>(state) + backend::state_offset_interrupt_poll ==
+                           state_storage.PollAddress(),
+                   "runtime interrupt poll offset does not match State placement");
         constexpr RuntimeNamedVectorConstants constants{};
         std::memcpy(named, &constants, sizeof(constants));
         const auto& svm_config = GetSvmConfig();
@@ -154,7 +159,7 @@ struct Runtime::Impl final {
         // address-space wide translate table that PushCodeCache writes to.
         state->l2_code_cache = address_space->GetCodeCacheTable().Data();
         smc_epoch = address_space->GetSmcTracker().RegisterRuntime(
-                l1_code_cache, &state->exit_request);
+                l1_code_cache, &state->exit_request, &state_storage);
         // Guest address virtualization: Config::memory_base carries the
         // guest->host bias (host = guest + bias); the JIT keeps it in the
         // reserved pt register and the interpreter reads it from here.
@@ -310,6 +315,18 @@ struct Runtime::Impl final {
         const auto host_pc = reinterpret_cast<u8*>(backend::SignalHandler::GetContextPC(uctx));
         const auto fault_addr = reinterpret_cast<std::uintptr_t>(info->si_addr);
         backend::FaultEntry entry{};
+        if (self->state_storage.Contains(fault_addr)) {
+            const auto request = std::atomic_ref<u64>(self->state->exit_request)
+                                         .load(std::memory_order_acquire);
+            if (request == 0 ||
+                !self->address_space->LookupFault(host_pc, entry) ||
+                !entry.recovery) {
+                return false;
+            }
+            backend::SignalHandler::SetContextPC(
+                    uctx, reinterpret_cast<std::uintptr_t>(entry.recovery));
+            return true;
+        }
         if (GetInterruptL1Mapping().Contains(fault_addr)) {
             const auto request = std::atomic_ref<u64>(self->state->exit_request)
                                          .load(std::memory_order_acquire);
@@ -428,10 +445,12 @@ struct Runtime::Impl final {
         // Clear only the exact SMC generation seen before CloseWriteWindow.
         // A concurrent invalidation changes the low counter, makes this CAS
         // fail, and is therefore observed by the next boundary/backedge.
-        request.compare_exchange_strong(expected,
-                                        desired,
-                                        std::memory_order_acq_rel,
-                                        std::memory_order_acquire);
+        if (request.compare_exchange_strong(expected,
+                                            desired,
+                                            std::memory_order_acq_rel,
+                                            std::memory_order_acquire)) {
+            state_storage.DisarmIfIdle(&state->exit_request);
+        }
     }
 
     [[nodiscard]] HaltReason Interpreter() const {
@@ -620,7 +639,7 @@ struct Runtime::Impl final {
     }
 
     Instance* instance{};
-    std::vector<u8> state_buffer{};
+    backend::InterruptPollState state_storage;
     backend::State* state{};
     std::optional<backend::GuardedReturnStack> return_stack{};
     backend::AddressSpace* address_space{};
@@ -694,6 +713,7 @@ void Runtime::SignalInterrupt() {
             .store(GetInterruptL1Mapping().Data(), std::memory_order_release);
     std::atomic_ref<void*>(impl->profile_interface.pending_call_l1_code_cache)
             .store(GetInterruptL1Mapping().Data(), std::memory_order_release);
+    impl->state_storage.Arm();
 }
 
 void Runtime::ClearInterrupt() {
@@ -707,6 +727,7 @@ void Runtime::ClearInterrupt() {
                    std::memory_order_release);
     std::atomic_ref<u64>(impl->state->exit_request)
             .fetch_and(kBackedgeSmcRequestMask, std::memory_order_acq_rel);
+    impl->state_storage.DisarmIfIdle(&impl->state->exit_request);
     impl->running.store(true, std::memory_order_release);
 }
 
@@ -752,8 +773,8 @@ void RecordJitCacheUnit(const std::shared_ptr<backend::Module>& module,
                               site.flags_bypass_instruction});
     }
     std::vector<SerialFaultSite> fault_sites;
-    fault_sites.reserve(translator.GetIndirectL1FaultMetadata().size());
-    for (const auto& fault : translator.GetIndirectL1FaultMetadata()) {
+    fault_sites.reserve(translator.GetFaultMetadata().size());
+    for (const auto& fault : translator.GetFaultMetadata()) {
         fault_sites.push_back({fault.guest_start,
                                fault.host_begin,
                                fault.host_end,
@@ -776,7 +797,7 @@ void PublishIndirectL1Faults(
         const std::shared_ptr<backend::Module>& module,
         const CodeBuffer& buffer,
         const backend::arm64::JitTranslator& translator) {
-    for (const auto& fault : translator.GetIndirectL1FaultMetadata()) {
+    for (const auto& fault : translator.GetFaultMetadata()) {
         module->AddFaultEntry(buffer.exec_data + fault.host_begin,
                               buffer.exec_data + fault.host_end,
                               fault.guest_start,

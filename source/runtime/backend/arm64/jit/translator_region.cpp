@@ -249,12 +249,15 @@ void JitTranslator::EmitRegionEdge(ir::Location target,
         region_block_local_branch_bytes += sizeof(u32);
     }
     const u32 link_before = context.CurrentBufferSize();
-    context.ForwardLocal(target,
-                         region_cycle || pending_flags_cycle
-                                 ? backedge_exit_label.get()
-                                 : ordered_cycle_exit,
-                         fallthrough,
-                         fallthrough ? nullptr : LocalBranchTarget(target));
+    auto* cycle_exit = region_cycle || pending_flags_cycle
+            ? backedge_exit_label.get()
+            : ordered_cycle_exit;
+    RecordExitPollFault(
+            context.ForwardLocal(target,
+                                 cycle_exit,
+                                 fallthrough,
+                                 fallthrough ? nullptr : LocalBranchTarget(target)),
+            cycle_exit);
     RecordBoundaryRange(BoundarySubsequence::LinkTail, link_before,
                         context.CurrentBufferSize());
 }
@@ -876,9 +879,11 @@ bool JitTranslator::EmitBackedgeFlagsTerminal(const ir::Terminal& terminal) {
     }
     backedge_exit_referenced = true;
     const u32 link_before = context.CurrentBufferSize();
-    context.Forward(plan.self_target,
-                    backedge_exit_label.get(),
-                    LocalBranchTarget(plan.self_target));
+    RecordExitPollFault(
+            context.Forward(plan.self_target,
+                            backedge_exit_label.get(),
+                            LocalBranchTarget(plan.self_target)),
+            backedge_exit_label.get());
     RecordBoundaryRange(BoundarySubsequence::LinkTail, link_before,
                         context.CurrentBufferSize());
     return true;
@@ -902,10 +907,10 @@ void JitTranslator::EmitBackedgeColdPaths() {
                 EmitRegionEdge(plan.cold_target, false, true, false);
             } else {
                 context.RecordExecCounter(exec_offset_exit_direct);
-                context.Forward(plan.cold_target,
-                                nullptr,
-                                nullptr,
-                                LinkSiteKind::BackedgeCold);
+                (void) context.Forward(plan.cold_target,
+                                       nullptr,
+                                       nullptr,
+                                       LinkSiteKind::BackedgeCold);
             }
         }
         nzcv_dirty = false;
@@ -948,10 +953,10 @@ void JitTranslator::EmitBackedgeColdPaths() {
             EmitRegionEdge(plan.cold_target);
         } else {
             context.RecordExecCounter(exec_offset_exit_direct);
-            context.Forward(plan.cold_target,
-                            nullptr,
-                            nullptr,
-                            LinkSiteKind::BackedgeCold);
+            (void) context.Forward(plan.cold_target,
+                                   nullptr,
+                                   nullptr,
+                                   LinkSiteKind::BackedgeCold);
         }
     }
 
@@ -1149,6 +1154,8 @@ void JitTranslator::EmitBackedgeExitStub() {
     Label signal;
     Label publish;
     __ Bind(backedge_exit_label.get());
+    ResolveExitPollFaults(backedge_exit_label.get());
+    __ Ldar(ip0, MemOperand(state, state_offset_exit_request));
     if (backedge_flags_plan && backedge_flags_plan->optimized) {
         EmitBackedgeMaterialize(*backedge_flags_plan);
     } else if (FlagsRegsEnabled()) {
@@ -1174,6 +1181,8 @@ void JitTranslator::EmitDirectCycleExitStubs() {
         Label signal;
         Label publish;
         __ Bind(label.get());
+        ResolveExitPollFaults(label.get());
+        __ Ldar(ip0, MemOperand(state, state_offset_exit_request));
         // The poll runs after MergeNZCV and FlushSpillWrites. Publish the edge
         // target so resuming after the guest signal continues at the committed
         // terminal boundary rather than repeating the source block.
@@ -1192,6 +1201,37 @@ void JitTranslator::EmitDirectCycleExitStubs() {
         context.ReturnHost();
     }
     direct_cycle_exits.clear();
+}
+
+void JitTranslator::RecordExitPollFault(
+        std::optional<JitContext::FaultRange> fault,
+        Label* recovery) {
+    if (!fault) {
+        return;
+    }
+    ASSERT(recovery);
+    const size_t index = fault_metadata.size();
+    fault_metadata.push_back({cur_block->GetStartLocation().Value(),
+                              fault->begin,
+                              fault->end,
+                              0,
+                              UINT32_MAX});
+    pending_exit_poll_faults.push_back({index, recovery});
+}
+
+void JitTranslator::ResolveExitPollFaults(Label* recovery) {
+    ASSERT(recovery && recovery->IsBound());
+    const u32 offset = static_cast<u32>(recovery->GetLocation());
+    for (auto it = pending_exit_poll_faults.begin();
+         it != pending_exit_poll_faults.end();) {
+        if (it->recovery != recovery) {
+            ++it;
+            continue;
+        }
+        ASSERT(it->metadata_index < fault_metadata.size());
+        fault_metadata[it->metadata_index].recovery_offset = offset;
+        it = pending_exit_poll_faults.erase(it);
+    }
 }
 
 }  // namespace swift::runtime::backend::arm64

@@ -82,7 +82,7 @@ public:
         u32 recovery_offset{};
     };
 
-    struct IndirectL1FaultMetadata {
+    struct FaultMetadata {
         u64 guest_start{};
         u32 host_begin{};
         u32 host_end{};
@@ -101,9 +101,8 @@ public:
         return backedge_block_metadata;
     }
 
-    [[nodiscard]] const std::vector<IndirectL1FaultMetadata>&
-    GetIndirectL1FaultMetadata() const {
-        return indirect_l1_fault_metadata;
+    [[nodiscard]] const std::vector<FaultMetadata>& GetFaultMetadata() const {
+        return fault_metadata;
     }
 
     Operand EmitOperand(ir::Operand &ir_op);
@@ -462,6 +461,9 @@ private:
     [[nodiscard]] Label* LocalBranchTarget(ir::Location target) const;
     void EmitBackedgeExitStub();
     void EmitDirectCycleExitStubs();
+    void RecordExitPollFault(std::optional<JitContext::FaultRange> fault,
+                             Label* recovery);
+    void ResolveExitPollFaults(Label* recovery);
 
     // Labels used by Goto / NotGoto / BindLabel
     Label *GetLocalLabel(ir::Inst *inst);
@@ -815,7 +817,12 @@ private:
     u32 backedge_host_begin{};
     u32 backedge_host_end{};
     std::vector<BackedgeBlockMetadata> backedge_block_metadata{};
-    std::vector<IndirectL1FaultMetadata> indirect_l1_fault_metadata{};
+    std::vector<FaultMetadata> fault_metadata{};
+    struct PendingExitPollFault {
+        size_t metadata_index{};
+        Label* recovery{};
+    };
+    std::vector<PendingExitPollFault> pending_exit_poll_faults{};
     struct IndirectExitMissSite {
         std::unique_ptr<Label> label{};
         u64 guest_start{};

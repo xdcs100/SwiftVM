@@ -13,8 +13,8 @@
 //  - Every per-Runtime L1 and the shared AddressSpace L2 are cleared, so a
 //    later dispatch cannot newly enter the retired translation.
 //  - Direct inter-block edges are synchronously restored to their region
-//    trampoline by the write-fault handler. Region 内部环的 DFS 回边带 acquire
-//    poll；整 function 失效后，执行线程在下一条成环边有界退出。
+//    trampoline by the write-fault handler. Region cycles use a fault-backed
+//    poll so an invalidated function exits at the next cycle-cover edge.
 //
 // Limitations:
 //  - No mid-block rewind: a block that patches a later instruction in itself
@@ -36,6 +36,8 @@
 
 namespace swift::runtime::backend {
 
+class InterruptPollState;
+
 class AddressSpace;
 class Module;
 
@@ -44,8 +46,10 @@ public:
     static constexpr u64 kInactiveEpoch = UINT64_MAX;
 
     struct RuntimeEpoch {
-        RuntimeEpoch(TranslateTable* table, u64* request)
-                : l1(table), exit_request(request) {}
+        RuntimeEpoch(TranslateTable* table,
+                     u64* request,
+                     InterruptPollState* poll)
+                : l1(table), exit_request(request), interrupt_poll(poll) {}
 
         std::atomic<u64> active_epoch{kInactiveEpoch};
         // Last code-patch generation for which this execution context has
@@ -56,6 +60,7 @@ public:
         // Points at State::exit_request. The Runtime owns State for at least
         // as long as this token remains registered.
         u64* exit_request{};
+        InterruptPollState* interrupt_poll{};
     };
     using RuntimeToken = std::shared_ptr<RuntimeEpoch>;
 
@@ -80,7 +85,8 @@ public:
     // return. Entry publishes and validates a generation using atomics only;
     // reclamation locking occurs only while pending_count_ is non-zero.
     [[nodiscard]] RuntimeToken RegisterRuntime(TranslateTable& l1,
-                                               u64* exit_request = nullptr);
+                                               u64* exit_request = nullptr,
+                                               InterruptPollState* interrupt_poll = nullptr);
     void UnregisterRuntime(const RuntimeToken& token);
     void BeginJit(const RuntimeToken& token);
     void EndJit(const RuntimeToken& token);

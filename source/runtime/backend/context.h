@@ -94,15 +94,15 @@ union CPUFlags {
 // Runtime 在 State 前保留一个私有的 16 字节只读常量前缀。这里只公开
 // emitter 所需的只读偏移，storage 类型和内容仍封装在 runtime.cpp。
 constexpr s32 state_offset_named_vector_constants = -16;
+constexpr s32 state_offset_interrupt_poll =
+        state_offset_named_vector_constants - static_cast<s32>(sizeof(u64));
 
 struct State {
     // Keep the legacy first word at offset zero. It is now always the atomic
     // exit request: Signal occupies bit 63 and the optional SMC
     // latch uses the low bits. The historical L1 pointer name remains as a
     // layout alias, while all ARM64 dispatch paths use the dedicated
-    // indirect_l1_code_cache slot below. Keeping the request at offset zero
-    // makes generated safepoints exactly LDAR plus a conditional branch without
-    // shifting any existing State/uniform address.
+    // indirect_l1_code_cache slot below.
     union {
         void* l1_code_cache{};
         alignas(8) u64 exit_request;

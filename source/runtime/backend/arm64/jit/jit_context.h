@@ -47,9 +47,14 @@ struct DirectLinkSiteInfo {
 
 class JitContext : DeleteCopyAndMove {
 public:
-    struct IndirectL1FaultRange {
+    struct FaultRange {
         u32 begin{};
         u32 end{};
+    };
+
+    struct StaticForwardResult {
+        bool emitted{};
+        std::optional<FaultRange> poll_fault{};
     };
 
     explicit JitContext(const std::shared_ptr<Module> &module,
@@ -111,15 +116,17 @@ public:
     void BeginColdScratch();
     void EndColdScratch();
 
-    void Forward(ir::Location location,
-                 Label* backedge_exit = nullptr,
-                 Label* self_target = nullptr,
-                 LinkSiteKind direct_link_kind = LinkSiteKind::Unconditional,
-                 DirectLinkFlagsBypass flags_bypass = {});
-    void ForwardLocal(ir::Location location,
-                      Label* cycle_exit = nullptr,
-                      bool fallthrough = false,
-                      Label* local_target = nullptr);
+    [[nodiscard]] std::optional<FaultRange>
+    Forward(ir::Location location,
+            Label* backedge_exit = nullptr,
+            Label* self_target = nullptr,
+            LinkSiteKind direct_link_kind = LinkSiteKind::Unconditional,
+            DirectLinkFlagsBypass flags_bypass = {});
+    [[nodiscard]] std::optional<FaultRange>
+    ForwardLocal(ir::Location location,
+                 Label* cycle_exit = nullptr,
+                 bool fallthrough = false,
+                 Label* local_target = nullptr);
     [[nodiscard]] bool CanBypassDispatcher(ir::Location location) const;
     [[nodiscard]] bool CanEmitDirectLink(ir::Location location) const;
     [[nodiscard]] bool HasDirectLinkSites() const {
@@ -133,15 +140,15 @@ public:
     // Prefer a tracked direct-link site and retain the inline L2 lookup when the
     // region cannot host one. Emits nothing when the target is not linkable;
     // Commits state->current_loc only on a dispatcher fallback.
-    [[nodiscard]] bool ForwardStatic(ir::Location location,
-                                     Label* cycle_exit = nullptr,
-                                     LinkSiteKind direct_link_kind =
-                                             LinkSiteKind::Unconditional,
-                                     DirectLinkFlagsBypass flags_bypass = {});
-    [[nodiscard]] IndirectL1FaultRange
+    [[nodiscard]] StaticForwardResult
+    ForwardStatic(ir::Location location,
+                  Label* cycle_exit = nullptr,
+                  LinkSiteKind direct_link_kind = LinkSiteKind::Unconditional,
+                  DirectLinkFlagsBypass flags_bypass = {});
+    [[nodiscard]] FaultRange
     ForwardIndirectL1(const Register& location, Label* miss = nullptr);
     void ForwardContinuation(const Register& location, Label* miss);
-    [[nodiscard]] IndirectL1FaultRange
+    [[nodiscard]] FaultRange
     ForwardIndirectCall(const Register& location,
                         Label* miss,
                         bool pending_flags = false);
@@ -149,7 +156,9 @@ public:
     void ReturnHost();
     [[nodiscard]] bool ContinuationActive() const {
         return cur_function && direct_link_active && FlagsRegsEnabled() &&
-               features.indirect_l1;
+               features.indirect_l1 &&
+               module->GetModuleConfig().HasOpt(
+                       Optimizations::ReturnStackBuffer);
     }
 
     // --- Return Stack Buffer (RSB) emission --------------------------------
