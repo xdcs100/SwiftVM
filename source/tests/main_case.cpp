@@ -886,6 +886,7 @@ TEST_CASE("Runtime preserves an interrupt between Run calls") {
             .enable_jit = true,
             .has_local_operation = false,
             .backend_isa = kArm64,
+            .global_opts = Optimizations::ReturnStackBuffer,
     };
     AddressSpace address_space{config};
     Runtime runtime{&address_space};
@@ -897,6 +898,8 @@ TEST_CASE("Runtime preserves an interrupt between Run calls") {
     bool request_cleared = true;
     bool pending_call_redirected = true;
     bool pending_call_restored = true;
+    auto* const empty_rsb = runtime.GetState()->rsb_pointer;
+    bool continuation_reset = empty_rsb != nullptr;
     auto* profile = static_cast<RuntimeProfileInterface*>(
             runtime.GetState()->interface);
     auto* pending_call_table =
@@ -912,7 +915,9 @@ TEST_CASE("Runtime preserves an interrupt between Run calls") {
         pending_call_redirected &=
                 profile->pending_call_l1_code_cache != pending_call_table;
         interrupt_seen &= runtime.Run() == HaltReason::Signal;
+        runtime.GetState()->rsb_pointer = empty_rsb - 1;
         runtime.ClearInterrupt();
+        continuation_reset &= runtime.GetState()->rsb_pointer == empty_rsb;
         request_cleared &=
                 (runtime.GetState()->exit_request & kBackedgeSignalRequest) == 0;
         pending_call_restored &=
@@ -926,6 +931,7 @@ TEST_CASE("Runtime preserves an interrupt between Run calls") {
     REQUIRE(request_cleared);
     REQUIRE(pending_call_redirected);
     REQUIRE(pending_call_restored);
+    REQUIRE(continuation_reset);
 }
 
 TEST_CASE("Test block ir print") {

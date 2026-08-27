@@ -50,6 +50,10 @@ TEST_CASE("indirect L1 cold lookup preserves its target register",
     (void)context.ForwardIndirectL1(vixl::aarch64::x8, &miss);
     context.GetMasm().Bind(&miss);
     context.ReturnHost();
+    vixl::aarch64::Label continuation_miss;
+    context.ForwardContinuation(vixl::aarch64::x8, &continuation_miss);
+    context.GetMasm().Bind(&continuation_miss);
+    context.ReturnHost();
     context.EndColdScratch();
     context.Finish();
 
@@ -74,5 +78,8 @@ TEST_CASE("indirect L1 cold lookup preserves its target register",
         return text.find("cmp") != std::string::npos &&
                text.find(", x8") != std::string::npos &&
                text.find("x8, x8") == std::string::npos;
+    }));
+    REQUIRE(std::ranges::any_of(instructions, [](const std::string& text) {
+        return text.find("sub x25, x25, #0x10") != std::string::npos;
     }));
 }

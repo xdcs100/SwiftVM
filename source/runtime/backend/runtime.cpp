@@ -718,6 +718,9 @@ void Runtime::SignalInterrupt() {
 
 void Runtime::ClearInterrupt() {
     impl->state->halt_reason = HaltReason::None;
+    if (impl->return_stack) {
+        impl->state->rsb_pointer = impl->return_stack->Empty();
+    }
     impl->PublishIndirectL1Base(impl->l1_code_cache.Data());
     std::atomic_ref<void*>(impl->state->indirect_call_l1_code_cache)
             .store(impl->address_space->GetCallCodeCacheTable().Data(),

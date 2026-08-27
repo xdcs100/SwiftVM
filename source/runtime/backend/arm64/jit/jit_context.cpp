@@ -827,11 +827,15 @@ void JitContext::ForwardContinuation(const Register& location, Label* miss) {
     ReserveTmpX(XRegister{location.GetCode()});
     const auto predicted = GetTmpX();
     const auto continuation = GetTmpX();
+    Label empty;
     __ Ldp(predicted, continuation, MemOperand(rsb_ptr, 16, PostIndex));
-    __ Cbz(continuation, miss);
+    __ Cbz(continuation, &empty);
     __ Cmp(predicted, location);
     __ B(miss, ne);
     __ Br(continuation);
+    __ Bind(&empty);
+    __ Sub(rsb_ptr, rsb_ptr, sizeof(RSBFrame));
+    __ B(miss);
 }
 
 JitContext::FaultRange
