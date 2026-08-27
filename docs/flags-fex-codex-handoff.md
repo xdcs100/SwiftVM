@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Product code tip: **`3e58efb`** `perf: compact linked flags publication`
+- Product code tip: **`1dff969`** `perf: streamline return continuation hits`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -2051,6 +2051,28 @@ peepholes.
   `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`; default SQLite exits in
   1.59 seconds with `TOTAL 0.974s`, and the one-second OpenSSL SHA command exits normally. No stress
   run, probe, diagnostic path or environment switch remains.
+- `1dff969` reduces the validated return-continuation hit from five instructions to four:
+  `LDP; CMP; B.ne miss; BLR continuation`. Ordinary empty frames and guest-target mismatches branch
+  to the existing grouped cold publisher, which reloads x25 from the Runtime's immutable
+  `State::rsb_empty` before dispatching the actual guest target. The only equality corner that can
+  still reach a zero host continuation is an empty frame with actual guest target zero. `BLR 0`
+  leaves its source PC in x30; the signal handler accepts `LR-4` only when it resolves to a precise
+  `ContinuationMiss` fault record, resets x25 to Empty and resumes the same cold publisher. Other
+  null branches and guest address-zero faults retain their existing handling. Fault records carry
+  this recovery kind through disk-cache format 12.
+  The exact CoreMark 2k comparison keeps all 3,695 PCs/versions, 100% coverage and
+  `crcfinal=0x4983`; hot-shape weight moves `299,985,184 -> 292,339,525` (`-7,645,659`,
+  `-2.548679%`) with no growth. `0x403383` shrinks `9 -> 6` and contributes `-4,656,000`; every
+  changed return block loses three static instructions. The strict successful-hit saving is one
+  executed instruction per traversal. Across 291 common emitted units, total code size also falls
+  `283,172 -> 279,760` (`-3,412` bytes) with no growing unit. A rejected all-mismatch-fault variant
+  kept the same hot shape but moved SQLite to `TOTAL 1.825/1.833s`; it is fully removed. The final
+  branch-to-cold design restores bounded SQLite to `TOTAL 1.020/1.000s` in 1.64/1.62-second wall
+  runs. Mac/Orb function, direct-link without stress, target-zero/mismatch, guarded-return,
+  interrupt and serializer focuses pass 1,174/1,111 assertions. Bounded smallpt retains oracle
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`, and the one-second
+  OpenSSL SHA command exits normally. No stress run, probe, diagnostic path or environment switch
+  remains.
 
 ## Orb loop
 
