@@ -2196,6 +2196,20 @@ peepholes.
   Bounded smallpt retains SHA-256
   `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. No stress run, retained
   probe, diagnostic source path or new environment switch remains.
+- `3f38207` replaces CPUID's four parallel leaf-selection chains with one x86-specific semantic
+  helper returning two packed 64-bit results. The helper receives the dynamic leaf/subleaf and a
+  compile-time feature mask, so code-cache-visible feature gating remains identical while the hot
+  IR no longer keeps every candidate output live. A shared pair-result ABI now serves both CPUID
+  and 128-bit division; the AArch64 backend owns the common preserve-all call lowering, and the
+  interpreter invokes the same CPUID model. Against `4994d73`, bounded SQLite `main/10` keeps all
+  1,995 units and moves `465,921 -> 464,464` (`-1,457`, `-0.312714%`), with all five CPUID units
+  shrinking and none growing. `get_common_cache_info` at `0x4d8ce0` moves `1,498 -> 1,226`; the two
+  larger CPUID roots move `2,404 -> 1,703` and `999 -> 621`. Mac and Orb pass the fixed-seed CPUID
+  differential, XSAVE's three configuration cases, FSGSBASE/ADX gating, PKRU non-advertisement and
+  the paired-division regression. SQLite exits normally, CoreMark 20k retains `crcfinal=0x382f`,
+  and bounded smallpt retains SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. No stress run, fallback,
+  retained probe, diagnostic source path or new environment switch remains.
 
 ## Orb loop
 
