@@ -2352,6 +2352,19 @@ peepholes.
   fixed seeds 101/424242 with 100 random DIV/IDIV iterations plus directed `CQO; IDIV` cases. No
   stress run, probe, diagnostic source path or environment switch remains.
 
+- Direct-cycle fault recovery now performs the acquire load of `exit_request` once in the shared
+  reason tail instead of once per resume-location stub. Each stub still owns its fault metadata and
+  publishes pending flags before joining the tail, so Signal versus CodeMiss selection and guest
+  resume PCs are unchanged. An exact SQLite `main/10` static-only A/B keeps all 1,999 units at 100%
+  coverage and moves `383,923 -> 379,915` host instructions (`-4,008`, `-1.043959%`), with 307
+  shrinking units and no growth. `0x4a5518` moves `678 -> 651`, `0x4a5470` moves `506 -> 482`, and
+  the largest single reduction is 29 instructions. Timing-normalized SQLite output remains
+  byte-identical with SHA-256
+  `efb4bea2cec1e324d746acc11d14f62c8c742fcd98f1a52f4b75a7e44a864a25`; bounded smallpt retains
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. Mac and Orb pass the
+  function-SMC cycle, pending-interrupt, disabled-latch and W81 focused paths. No stress run, probe,
+  diagnostic source path or environment switch remains.
+
 ## Orb loop
 
 ```
