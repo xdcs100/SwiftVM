@@ -2270,6 +2270,19 @@ peepholes.
   `crcfinal=0x382f`, and smallpt retains SHA-256
   `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. No stress run, retained
   probe, diagnostic source path or new environment switch remains.
+- `5df9b59` splits rotate flag updates by the decoder's already-known count class. Dynamic counts
+  retain the zero-count branch and conditional carry-polarity merge, statically zero counts retain
+  both incoming flags and polarity without emitting an update, and statically nonzero counts write
+  CF/OF directly without the synthesized `CMP + CSET + CBZ`. Against `c7107cd`, bounded SQLite
+  `main/10` keeps all 1,995 units and moves `435,777 -> 435,491` (`-286`, `-0.065630%`), with the
+  same eight rotate units shrinking and no growth. `sqlite3_randomness` moves `1,765 -> 1,659` and
+  its alternate root moves `367 -> 263`; cumulative movement from `9ac80fd` is
+  `467,641 -> 435,491` (`-32,150`, `-6.874932%`). The Mac/Orb fixed seeds retain their exact
+  established rotate/BT mismatch counts with zero CMPXCHG mismatches; the zero-count repro and
+  narrow rotate test pass. Bounded SQLite exits normally, CoreMark 20k retains `crcfinal=0x382f`,
+  and smallpt retains SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. No stress run, retained
+  probe, diagnostic source path or new environment switch remains.
 
 ## Orb loop
 
