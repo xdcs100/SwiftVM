@@ -1,5 +1,6 @@
 #include "terminal_location_publication.h"
 
+#include <algorithm>
 #include <vector>
 
 #include "runtime/backend/arm64/defines.h"
@@ -23,7 +24,8 @@ ir::Inst* FindPendingLocation(ir::Block* block) {
     for (auto& inst : block->GetInstList()) {
         if (inst.GetOp() == ir::OpCode::SetLocation) {
             pending = &inst;
-        } else if (inst.GetOp() != ir::OpCode::PopRSB) {
+        } else if (inst.GetOp() != ir::OpCode::PopRSB &&
+                   inst.GetOp() != ir::OpCode::CallReturn) {
             pending = nullptr;
         }
     }
@@ -42,6 +44,7 @@ void TerminalLocationPublication::Prepare(std::span<ir::Block* const> blocks,
     struct Candidate {
         const ir::Inst* inst;
         u32 reg;
+        bool required;
     };
     std::vector<Candidate> candidates;
     std::array<u32, 32> counts{};
@@ -58,12 +61,17 @@ void TerminalLocationPublication::Prepare(std::span<ir::Block* const> blocks,
             continue;
         }
         const u32 reg = context.X(location.GetValue()).GetCode();
-        candidates.push_back({location_inst, reg});
+        const bool required = std::any_of(
+                block->GetInstList().begin(), block->GetInstList().end(),
+                [](const ir::Inst& inst) {
+                    return inst.GetOp() == ir::OpCode::CallReturn;
+                });
+        candidates.push_back({location_inst, reg, required});
         ++counts[reg];
     }
 
     for (const auto& candidate : candidates) {
-        if (counts[candidate.reg] < 2) {
+        if (counts[candidate.reg] < 2 && !candidate.required) {
             continue;
         }
         deferred.insert(candidate.inst);

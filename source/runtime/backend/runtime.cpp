@@ -131,9 +131,9 @@ struct Runtime::Impl final {
             profile_interface.hot_coalesce_counters = hot_coalesce_counters.data();
         }
         profile_interface.l1_code_cache = l1_code_cache.Data();
-        profile_interface.call_l1_code_cache =
-                address_space->GetCallCodeCacheTable().Data();
         state->indirect_l1_code_cache = l1_code_cache.Data();
+        state->indirect_call_l1_code_cache =
+                address_space->GetCallCodeCacheTable().Data();
         ASSERT_MSG(reinterpret_cast<std::uintptr_t>(l1_code_cache.Data()) %
                                    l1_code_cache.DataAlignment() == 0,
                    "runtime L1 cache does not satisfy its address-formation alignment");
@@ -688,14 +688,14 @@ void Runtime::SignalInterrupt() {
     std::atomic_ref<u64>(impl->state->exit_request)
             .fetch_or(kBackedgeSignalRequest, std::memory_order_release);
     impl->PublishIndirectL1Base(GetInterruptL1Mapping().Data());
-    std::atomic_ref<void*>(impl->profile_interface.call_l1_code_cache)
+    std::atomic_ref<void*>(impl->state->indirect_call_l1_code_cache)
             .store(GetInterruptL1Mapping().Data(), std::memory_order_release);
 }
 
 void Runtime::ClearInterrupt() {
     impl->state->halt_reason = HaltReason::None;
     impl->PublishIndirectL1Base(impl->l1_code_cache.Data());
-    std::atomic_ref<void*>(impl->profile_interface.call_l1_code_cache)
+    std::atomic_ref<void*>(impl->state->indirect_call_l1_code_cache)
             .store(impl->address_space->GetCallCodeCacheTable().Data(),
                    std::memory_order_release);
     std::atomic_ref<u64>(impl->state->exit_request)

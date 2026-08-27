@@ -828,8 +828,7 @@ JitContext::ForwardIndirectCall(const Register& location, Label* miss) {
     ASSERT(miss);
     const auto index = GetTmpX();
     const auto entry = GetTmpX();
-    __ Ldr(entry, MemOperand(state, state_offset_exec_profile_ptr));
-    __ Ldr(entry, MemOperand(entry, profile_offset_call_l1_code_cache));
+    __ Ldr(entry, MemOperand(state, state_offset_indirect_call_l1_code_cache));
     __ Bfi(entry, location, 4, L1_CODE_CACHE_BITS);
     const u32 fault_begin = CurrentBufferSize();
     __ Ldp(index, entry, MemOperand(entry));

@@ -27,6 +27,7 @@ enum class PinnedReadShape {
     Or,
     SelfAnd,
     SelfWrite,
+    SelfWriteAddress,
     Copy,
     TransferredCopy,
     CopyU16,
@@ -140,6 +141,7 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
         auto result = block->Xor(value, Operand{right}).SetType(ValueType::U32);
         block->StoreUniform(Uniform{64, ValueType::U32}, result);
     } else if (shape == PinnedReadShape::SelfWrite ||
+               shape == PinnedReadShape::SelfWriteAddress ||
                 shape == PinnedReadShape::Copy ||
                shape == PinnedReadShape::CopyU16 ||
                shape == PinnedReadShape::LoadU16) {
@@ -150,6 +152,14 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
         auto result = block->ZeroExtend32To64(extended).SetType(ValueType::U64);
         block->SetHostGPR(result, HostRegIndex(22), Imm{0u});
         auto address = block->BitCast(result).SetType(ValueType::U64);
+        if (shape == PinnedReadShape::SelfWriteAddress) {
+            auto base = block->GetHostGPR(HostRegIndex(19), Imm{0u})
+                                .SetType(ValueType::U64);
+            address = block->GetOperand(
+                                   Operand{base, address,
+                                           {OperandOp::PlusExt, 2}})
+                              .SetType(ValueType::U64);
+        }
         auto loaded = block->LoadMemory(Operand{address, Imm{8u}})
                               .SetType(ValueType::U8);
         block->StoreUniform(Uniform{64, ValueType::U8}, loaded);
@@ -300,6 +310,13 @@ TEST_CASE("a pinned low-32 self-write clears its high half in one instruction") 
     REQUIRE(Count(lines, "mov w22, w22", "") == 1);
     REQUIRE(Count(lines, "mov w", "w22") == 1);
     REQUIRE(Count(lines, "ldrb ", "[x22") == 1);
+}
+
+TEST_CASE("a pinned self-write feeds a materialized indexed address") {
+    const auto lines = EmitPinnedRead(PinnedReadShape::SelfWriteAddress, false);
+    REQUIRE(Count(lines, "ubfx ", "x22") == 0);
+    REQUIRE(Count(lines, "mov w22, w22", "") == 1);
+    REQUIRE(Count(lines, "add x", "x19, x22, lsl #2") == 1);
 }
 
 TEST_CASE("a pinned low-32 copy publishes directly between fixed homes") {

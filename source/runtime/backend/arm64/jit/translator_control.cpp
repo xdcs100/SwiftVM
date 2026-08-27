@@ -608,7 +608,9 @@ void JitTranslator::EmitGetOperand(ir::Inst* inst) {
         __ Mov(result, operand.GetLeft().imm.Get());
         left = result;
     } else {
-        left = context.R(operand.GetLeft().value, true);
+        const auto value = operand.GetLeft().value;
+        const auto pinned = ResolvePinnedGPRValue(value);
+        left = pinned ? Register{*pinned} : context.R(value, true);
     }
     Register dst = left.Is64Bits() ? result.X() : result.W();
     auto right = operand.GetRight();
@@ -634,7 +636,9 @@ void JitTranslator::EmitGetOperand(ir::Inst* inst) {
         return;
     }
 
-    auto right_reg = context.R(right.value, true);
+    const auto pinned = ResolvePinnedGPRValue(right.value);
+    auto right_reg = pinned ? Register{*pinned}
+                            : context.R(right.value, true);
     if (operand.GetOp() == ir::OperandOp::Plus) {
         __ Add(dst, left, right_reg);
     } else if (operand.GetOp() == ir::OperandOp::LSL) {

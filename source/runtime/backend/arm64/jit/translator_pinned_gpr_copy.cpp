@@ -110,6 +110,36 @@ bool IsU32AluUse(ir::Inst& consumer, ir::Inst* definition) {
            ir::GetValueSizeByte(consumer.ReturnType()) == sizeof(u32);
 }
 
+bool IsPinnedU64AliasUse(ir::Block* block, ir::Inst& consumer) {
+    if (consumer.GetOp() != ir::OpCode::Add &&
+        consumer.GetOp() != ir::OpCode::GetOperand) {
+        return false;
+    }
+    if (ir::GetValueSizeByte(consumer.ReturnType()) != sizeof(u64)) {
+        return false;
+    }
+    if (consumer.GetOp() == ir::OpCode::Add) {
+        return true;
+    }
+    if (consumer.GetUses() == 0) {
+        return false;
+    }
+
+    u32 memory_uses = 0;
+    for (auto& scan : block->GetInstList()) {
+        for (auto used : scan.GetValues()) {
+            if (used.Def() != &consumer) {
+                continue;
+            }
+            if (!IsMemoryAddressUse(scan, &consumer)) {
+                return false;
+            }
+            ++memory_uses;
+        }
+    }
+    return memory_uses == consumer.GetUses();
+}
+
 bool IsHelperClobber(ir::OpCode op) {
     switch (op) {
         case ir::OpCode::CallLambda:
@@ -284,9 +314,15 @@ JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
             if (IsMemoryAddressUse(scan, alias)) {
                 ++alias_uses;
                 last_use = std::max<u32>(last_use, scan.Id());
-            } else if (alias->GetOp() == ir::OpCode::BitExtract) {
+            } else if (alias->GetOp() == ir::OpCode::BitExtract ||
+                       alias->GetOp() == ir::OpCode::BitCast) {
                 for (auto used : scan.GetValues()) {
                     if (used.Def() == alias) {
+                        if (alias->GetOp() == ir::OpCode::BitCast &&
+                            (!source_index || *source_index != target ||
+                             !IsPinnedU64AliasUse(cur_block, scan))) {
+                            return std::nullopt;
+                        }
                         ++alias_uses;
                         last_use = std::max<u32>(last_use, scan.Id());
                     }
