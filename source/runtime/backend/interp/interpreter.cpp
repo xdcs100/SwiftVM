@@ -736,6 +736,20 @@ void Interpreter::RunByteSwap(ir::Inst* inst, InterpStack& stack) {
     }
 }
 
+void Interpreter::RunCountLeadingZeros64(ir::Inst* inst, InterpStack& stack) {
+    const auto source = inst->GetArg<ir::Value>(0);
+    ASSERT(source.Type() == ir::ValueType::U64);
+    const u64 value = ReadScalar(stack, source);
+    WriteScalar(stack, inst, std::countl_zero(value));
+}
+
+void Interpreter::RunCountTrailingZeros64(ir::Inst* inst, InterpStack& stack) {
+    const auto source = inst->GetArg<ir::Value>(0);
+    ASSERT(source.Type() == ir::ValueType::U64);
+    const u64 value = ReadScalar(stack, source);
+    WriteScalar(stack, inst, std::countr_zero(value));
+}
+
 void Interpreter::RunBitExtract(ir::Inst* inst, InterpStack& stack) {
     const u64 value = ReadScalar(stack, inst->GetArg<ir::Value>(0));
     const u64 lsb = inst->GetArg<ir::Imm>(1).Get();

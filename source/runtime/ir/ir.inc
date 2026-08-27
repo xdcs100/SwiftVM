@@ -142,6 +142,8 @@ INST(RorImm, Value, Value, Imm)
 INST(RorValue, Value, Value, Value)
 // Reverse the byte order within a 16/32/64-bit scalar.
 INST(ByteSwap, Value, Value, Imm)
+INST(CountLeadingZeros64, U64, Value)
+INST(CountTrailingZeros64, U64, Value)
 // Bit
 INST(BitExtract, Value, Value, Imm, Imm)
 INST(BitInsert, Value, Value, Value, Imm, Imm)

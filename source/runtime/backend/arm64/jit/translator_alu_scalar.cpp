@@ -757,6 +757,20 @@ void JitTranslator::EmitByteSwap(ir::Inst* inst) {
     }
 }
 
+void JitTranslator::EmitCountLeadingZeros64(ir::Inst* inst) {
+    auto value = inst->GetArg<ir::Value>(0);
+    ASSERT(value.Type() == ir::ValueType::U64);
+    __ Clz(context.X(ir::Value{inst}), context.X(value));
+}
+
+void JitTranslator::EmitCountTrailingZeros64(ir::Inst* inst) {
+    auto value = inst->GetArg<ir::Value>(0);
+    ASSERT(value.Type() == ir::ValueType::U64);
+    auto result = context.X(ir::Value{inst});
+    __ Rbit(result, context.X(value));
+    __ Clz(result, result);
+}
+
 void JitTranslator::EmitBitCast(ir::Inst* inst) {
     // Ignore
 }
