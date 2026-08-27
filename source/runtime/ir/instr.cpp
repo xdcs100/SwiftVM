@@ -341,7 +341,8 @@ bool Inst::HasValue() { return meta::HasValue(GetIRMetaInfo(op_code).return_type
 
 bool Inst::IsPseudoOperation() {
     return op_code == OpCode::GetFlags || op_code == OpCode::SaveFlags ||
-           op_code == OpCode::BranchOnlyFlags || op_code == OpCode::GetResult;
+           op_code == OpCode::BranchOnlyFlags || op_code == OpCode::GetResult ||
+           op_code == OpCode::Div128Remainder;
 }
 
 bool Inst::IsGetHostRegOperation() {

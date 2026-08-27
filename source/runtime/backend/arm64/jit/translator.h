@@ -584,7 +584,8 @@ private:
     void EmitHostCall(const ir::Lambda &lambda,
                       const std::vector<ir::DataClass> &args,
                       bool has_result,
-                      const Register &result);
+                      const Register &result,
+                      std::optional<Register> secondary_result = std::nullopt);
     void SpillStaticFPRUniforms();
     void RestoreStaticFPRUniforms();
 

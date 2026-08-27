@@ -11,6 +11,7 @@
 #include <alloca.h>
 #include "interpreter.h"
 #include <bit>
+#include "runtime/common/div128.h"
 #include "runtime/common/variant_util.h"
 #include "runtime/frontend/x86/x87.h"
 
@@ -306,6 +307,23 @@ void Interpreter::RunCallLambda(ir::Inst* inst, InterpStack& stack) {
     }
     WriteScalar(stack, inst, CallHostFunc(stack, lambda, args));
 }
+
+void Interpreter::RunDiv128(ir::Inst* inst, InterpStack& stack) {
+    const auto high = ReadScalar(stack, inst->GetArg<ir::Value>(0));
+    const auto low = ReadScalar(stack, inst->GetArg<ir::Value>(1));
+    const auto divisor = ReadScalar(stack, inst->GetArg<ir::Value>(2));
+    const auto result = inst->GetArg<ir::Imm>(3).Get()
+            ? swift::runtime::DivideSigned128(high, low, divisor)
+            : swift::runtime::DivideUnsigned128(high, low, divisor);
+    WriteScalar(stack, inst, result.quotient);
+    const auto remainders = inst->GetPseudoOperations(ir::OpCode::Div128Remainder);
+    ASSERT(remainders.size() <= 1);
+    if (!remainders.empty()) {
+        WriteScalar(stack, remainders.front(), result.remainder);
+    }
+}
+
+void Interpreter::RunDiv128Remainder(ir::Inst*, InterpStack&) {}
 
 void Interpreter::RunSse42Str(ir::Inst* inst, InterpStack& stack) {
     const u128 a = ReadVec(stack, inst->GetArg<ir::Value>(0));

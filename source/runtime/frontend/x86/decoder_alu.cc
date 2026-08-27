@@ -1,5 +1,4 @@
 #include "runtime/frontend/x86/decoder_internal.h"
-#include "runtime/common/helper_abi.h"
 #include "runtime/ir/atomic_rmw.h"
 
 namespace swift::x86 {
@@ -8,42 +7,10 @@ using namespace swift::runtime::frontend;
 
 #define __ assembler->
 
-// Host helpers for operations the IR cannot express directly (128-bit
-// dividends). Invoked through CallHost. Divide-by-zero / overflow do NOT raise
-// #DE here yet (TODO), they just produce 0.
-//
 // The 64x64 high half used to live here too. It is now ir::MulHigh, one
 // SMULH/UMULH: a call site costs 376 bytes of register save/restore plus the
 // branch pair, which made a 64-bit multiply loop 3.27x slower than the same
 // loop without the multiply (docs/perf-baseline.md 5.1).
-static u64 DivQU64(u64 hi, u64 lo, u64 den) {
-    if (!den) {
-        return 0;
-    }
-    auto num = (static_cast<unsigned __int128>(hi) << 64) | lo;
-    return static_cast<u64>(num / den);
-}
-
-static u64 DivRU64(u64 hi, u64 lo, u64 den) {
-    if (!den) {
-        return 0;
-    }
-    auto num = (static_cast<unsigned __int128>(hi) << 64) | lo;
-    return static_cast<u64>(num % den);
-}
-
-static u64 DivQS64(u64 hi, u64 lo, u64 den) {
-    auto sden = static_cast<s64>(den);
-    if (!sden) {
-        return 0;
-    }
-    auto num = static_cast<__int128>((static_cast<unsigned __int128>(hi) << 64) | lo);
-    if (sden == -1 && num == (-static_cast<__int128>(1) << 127)) {
-        return static_cast<u64>(static_cast<s64>(num));
-    }
-    return static_cast<u64>(num / sden);
-}
-
 // popcnt helper.
 static u64 Popcnt64(u64 v, u64) { return u64(__builtin_popcountll(v)); }
 // lzcnt: count of leading zero bits within the architectural width.
@@ -71,18 +38,6 @@ static u64 Crc32c64(u64 crc, u64 data, u64 nbytes) {
         }
     }
     return u64(c);
-}
-
-static u64 DivRS64(u64 hi, u64 lo, u64 den) {
-    auto sden = static_cast<s64>(den);
-    if (!sden) {
-        return 0;
-    }
-    auto num = static_cast<__int128>((static_cast<unsigned __int128>(hi) << 64) | lo);
-    if (sden == -1 && num == (-static_cast<__int128>(1) << 127)) {
-        return 0;
-    }
-    return static_cast<u64>(num % sden);
 }
 
 struct DivResult {
@@ -673,10 +628,8 @@ void X64Decoder::DecodeDiv(_DInst& insn, bool sign) {
             auto lo = R(_RegisterType::R_RAX);
             auto hi = R(_RegisterType::R_RDX);
             auto den = Extend(src, ir::ValueType::U64, sign);
-            auto div_q = sign ? &DivQS64 : &DivQU64;
-            auto div_r = sign ? &DivRS64 : &DivRU64;
-            auto quot = __ CallHostUniformPureFPFree(div_q, hi, lo, den);
-            auto rem = __ CallHostUniformPureFPFree(div_r, hi, lo, den);
+            auto quot = __ Div128(hi, lo, den, ir::Imm(sign)).SetType(ir::ValueType::U64);
+            auto rem = __ Div128Remainder(quot).SetType(ir::ValueType::U64);
             R(_RegisterType::R_RAX, quot);
             R(_RegisterType::R_RDX, rem);
             break;

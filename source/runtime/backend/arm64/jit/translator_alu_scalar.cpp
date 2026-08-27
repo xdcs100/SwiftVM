@@ -6,6 +6,7 @@
 
 #include "runtime/backend/arm64/defines.h"
 #include "runtime/backend/context.h"
+#include "runtime/common/div128.h"
 #include "runtime/common/svm_config.h"
 
 namespace swift::runtime::backend::arm64 {
@@ -842,6 +843,33 @@ void JitTranslator::EmitSignedDiv64(ir::Inst* inst) {
     ASSERT(dividend.Is64Bits() && divisor.Is64Bits());
     __ Sdiv(context.X(ir::Value{inst}), dividend.X(), divisor.X());
 }
+
+void JitTranslator::EmitDiv128(ir::Inst* inst) {
+    const auto remainders = inst->GetPseudoOperations(ir::OpCode::Div128Remainder);
+    ASSERT(remainders.size() <= 1);
+    const bool sign = inst->GetArg<ir::Imm>(3).Get() != 0;
+    const auto target = sign ? &swift::runtime::DivideSigned128
+                             : &swift::runtime::DivideUnsigned128;
+    const ir::Lambda lambda{
+            ir::DataClass{ir::Imm{reinterpret_cast<VAddr>(target)}},
+            ir::HelperCallTraits{
+                    .uniform = ir::UniformEffectId::None,
+                    .abi = ir::HelperABI::PreserveAllLeaf,
+                    .host_fp = ir::HostFpEffect::FPCRTransparent,
+            }};
+    std::vector<ir::DataClass> args{
+            inst->GetArg<ir::Value>(0),
+            inst->GetArg<ir::Value>(1),
+            inst->GetArg<ir::Value>(2),
+    };
+    const auto quotient = context.R(ir::Value{inst});
+    const auto remainder = remainders.empty()
+            ? std::optional<Register>{}
+            : std::optional<Register>{context.RForWrite(ir::Value{remainders.front()})};
+    EmitHostCall(lambda, args, true, quotient, remainder);
+}
+
+void JitTranslator::EmitDiv128Remainder(ir::Inst*) {}
 
 void JitTranslator::EmitMul(ir::Inst* inst) {
     auto left = inst->GetArg<ir::Value>(0);

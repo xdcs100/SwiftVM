@@ -80,6 +80,7 @@ public:
                reg_alloc.ValueGPR(value).id == target;
     }
     [[nodiscard]] Register R(const ir::Value& value, bool auto_cast = false);
+    [[nodiscard]] Register RForWrite(const ir::Value& value);
     [[nodiscard]] XRegister X(const ir::Value& value);
     [[nodiscard]] WRegister W(const ir::Value& value);
     [[nodiscard]] VRegister V(const ir::Value& value);
@@ -335,7 +336,7 @@ private:
     //    block's last instruction is skipped there. Harmless in block mode
     //    (spill slots are block-local); only a function-mode spill at the
     //    final instruction into such a terminal would be affected.
-    [[nodiscard]] Register SpillGPR(const ir::Value& value);
+    [[nodiscard]] Register SpillGPR(const ir::Value& value, bool definition = false);
     [[nodiscard]] VRegister SpillFPR(const ir::Value& value);
     void FlushSpillWrites();
     [[nodiscard]] bool FlushSpillWrites(ir::Inst* consumer);

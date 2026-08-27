@@ -170,7 +170,8 @@ void JitTranslator::EmitCallReturn(ir::Inst* inst) {
 void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
                                  const std::vector<ir::DataClass>& args,
                                  bool has_result,
-                                 const Register& result) {
+                                 const Register& result,
+                                 std::optional<Register> secondary_result) {
     ASSERT(args.size() <= 8);
     MergeNZCV(FlagsRegsAuditMergeCause::Helper,
               FlagsRegsAuditEdgeKind::Host);
@@ -331,6 +332,10 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
     cursor += 16;
     const u32 kResultSlot = cursor;
     cursor += 8;
+    const u32 kSecondaryResultSlot = cursor;
+    if (secondary_result) {
+        cursor += 8;
+    }
     // sp must stay 16-byte aligned, and the Q accesses below want a 16-byte
     // multiple as their base.
     const u32 kSimdSaveOffset = (cursor + 15u) & ~15u;
@@ -416,6 +421,9 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
     __ Blr(ip);
 
     __ Str(x0, MemOperand(sp, kResultSlot));
+    if (secondary_result) {
+        __ Str(x1, MemOperand(sp, kSecondaryResultSlot));
+    }
     if (sse_afp_nan && !fpcr_transparent) {
         // A helper such as XRSTOR or a NaN cold handler may have updated
         // context.mxcsr. Every helper takes the same compare path; none is
@@ -444,6 +452,9 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
     __ Ldp(x29, x30, MemOperand(sp, kLinkSlot));
     if (has_result) {
         __ Ldr(result, MemOperand(sp, kResultSlot));
+    }
+    if (secondary_result) {
+        __ Ldr(*secondary_result, MemOperand(sp, kSecondaryResultSlot));
     }
     __ Add(sp, sp, kSaveBytes);
     if (sync_xmm_after) {

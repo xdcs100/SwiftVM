@@ -14,6 +14,8 @@ add_library(swift_runtime STATIC
         include/sruntime.h
         include/config.h
         common/types.h
+        common/div128.cpp
+        common/div128.h
         common/slab_alloc.cc
         common/slab_alloc.h
         common/object_pool.h
