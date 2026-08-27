@@ -1568,6 +1568,24 @@ TEST_CASE("Fuzz x86 div idiv") {
         // Flags are architecturally undefined after div/idiv: mask them all.
         env.RunIteration(b.c, FlagMask{0, false}, "div");
     }
+    constexpr std::array<std::pair<s64, s64>, 4> kCqoCases{{
+            {-17, 3},
+            {INT64_MIN, 2},
+            {INT64_MAX, -7},
+            {0, 1},
+    }};
+    for (const auto [dividend, divisor] : kCqoCases) {
+        CodeBuf b;
+        env.InitRegs();
+        env.ctx->rax.qword = static_cast<u64>(dividend);
+        env.ctx->rdx.qword = 0xdeadbeef;
+        env.ctx->rbx.qword = static_cast<u64>(divisor);
+        b.B(0x48);
+        b.B(0x99);
+        EmitGroupF6(b, 7, 64, kRbx);
+        env.EmitFlagCapture(b);
+        env.RunIteration(b.c, FlagMask{0, false}, "cqo-idiv");
+    }
     REQUIRE(env.failures == 0);
 }
 

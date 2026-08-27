@@ -13,6 +13,40 @@ namespace swift::runtime::backend::arm64 {
 
 #define __ masm.
 
+static ir::Value ResolvePlainDivOperand(ir::Value value) {
+    while (value.Def()) {
+        while (value.Def() && value.Def()->GetOp() == ir::OpCode::BitCast) {
+            value = value.Def()->GetArg<ir::Value>(0);
+        }
+        if (!value.Def() || value.Def()->GetOp() != ir::OpCode::GetOperand) {
+            break;
+        }
+        const auto operand = value.Def()->GetArg<ir::Operand>(0);
+        if (operand.GetOp().type != ir::OperandOp::None ||
+            !operand.GetRight().Null() || !operand.GetLeft().IsValue()) {
+            break;
+        }
+        value = operand.GetLeft().value;
+    }
+    return value;
+}
+
+static bool IsNarrowDiv128Dividend(ir::Value high,
+                                   ir::Value low,
+                                   bool sign) {
+    auto* definition = high.Def();
+    if (!definition) {
+        return false;
+    }
+    if (!sign) {
+        return definition->GetOp() == ir::OpCode::LoadImm &&
+               definition->GetArg<ir::Imm>(0).Get() == 0;
+    }
+    return definition->GetOp() == ir::OpCode::AsrImm &&
+           definition->GetArg<ir::Imm>(1).Get() == 63 &&
+           definition->GetArg<ir::Value>(0).Def() == low.Def();
+}
+
 void JitTranslator::EmitAdd(ir::Inst* inst) {
     if (auto fusion = narrow_carry_fusions.find(inst);
         fusion != narrow_carry_fusions.end()) {
@@ -846,12 +880,51 @@ void JitTranslator::EmitSignedDiv64(ir::Inst* inst) {
 
 void JitTranslator::EmitDiv128(ir::Inst* inst) {
     const bool sign = inst->GetArg<ir::Imm>(3).Get() != 0;
+    const auto high = inst->GetArg<ir::Value>(0);
+    const auto low = inst->GetArg<ir::Value>(1);
+    const auto divisor = inst->GetArg<ir::Value>(2);
+    const auto narrow_high = ResolvePlainDivOperand(high);
+    const auto narrow_low = ResolvePlainDivOperand(low);
+    if (IsNarrowDiv128Dividend(narrow_high, narrow_low, sign)) {
+        const auto secondary_results =
+                inst->GetPseudoOperations(ir::OpCode::Div128Remainder);
+        ASSERT(secondary_results.size() <= 1);
+        const auto low_register = context.X(low);
+        const auto divisor_register = context.X(divisor);
+        const auto quotient = context.X(ir::Value{inst});
+        if (secondary_results.empty()) {
+            if (sign) {
+                __ Sdiv(quotient, low_register, divisor_register);
+            } else {
+                __ Udiv(quotient, low_register, divisor_register);
+            }
+            return;
+        }
+
+        const XRegister remainder{context.RForWrite(
+                ir::Value{secondary_results.front()}).GetCode()};
+        context.ReserveTmpX(remainder);
+        const auto quotient_tmp = context.GetTmpX();
+        if (sign) {
+            __ Sdiv(quotient_tmp, low_register, divisor_register);
+        } else {
+            __ Udiv(quotient_tmp, low_register, divisor_register);
+        }
+        __ Msub(remainder, quotient_tmp, divisor_register, low_register);
+        Label divisor_ready;
+        __ Cbnz(divisor_register, &divisor_ready);
+        __ Mov(remainder, xzr);
+        __ Bind(&divisor_ready);
+        __ Mov(quotient, quotient_tmp);
+        return;
+    }
+
     const auto target = sign ? &swift::runtime::DivideSigned128
                              : &swift::runtime::DivideUnsigned128;
     std::vector<ir::DataClass> args{
-            inst->GetArg<ir::Value>(0),
-            inst->GetArg<ir::Value>(1),
-            inst->GetArg<ir::Value>(2),
+            high,
+            low,
+            divisor,
     };
     EmitPreserveAllPairCall(inst,
                             reinterpret_cast<VAddr>(target),
