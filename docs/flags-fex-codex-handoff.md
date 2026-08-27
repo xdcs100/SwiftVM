@@ -1825,6 +1825,36 @@ peepholes.
   caller-side `ADR+STP`. A viable continuation ABI must form LR through a call-kind `BL`, push it in
   a call-entry veneer without re-materializing the guest return, and replace the per-return signal
   poll with an equally strong fault/cycle safepoint before it can beat inline L1.
+- `940dcfe` moves inline indirect-exit interrupt observation to a 4 MiB aligned inaccessible L1
+  mapping. Signal publication switches the Runtime's L1 base to that mapping; the exact fault-site
+  metadata either enters the shared deferred-location publisher or returns through the committed
+  host boundary. The hot return/indirect hit loses one instruction. Exact CoreMark 2k moves
+  `339,833,893 -> 336,642,810` (`-3,191,083`, `-0.939013%`); Mac/Orb interrupt, SMC and cache
+  serializer focuses pass without a stress run or retained diagnostic path.
+- `736d04d` replaces the remaining dead U8/U16 subtract-and-carry chain with a fail-closed narrow
+  compare. It accepts only canonical zero-extended inputs when C is the sole surviving flag and all
+  extra flags are either overwritten or consumed only by the proved branch. Exact CoreMark 2k moves
+  `336,649,767 -> 335,551,767` (`-1,098,000`, `-0.326155%`), entirely from `0x4026ca: 21 -> 18`.
+  Narrow focuses pass 297 assertions on Mac and Orb; bounded smallpt retains its canonical PPM.
+- `631e0a7` replaces the rejected caller-side continuation prototype with a generation-safe call
+  ABI. Function HIR records a call-return layout root without adding an SSA/dominance edge; linear
+  scan assigns the guest return to x14 when the ABI is eligible. A call-kind direct-link site stays
+  `BL` through first traversal, patching and SMC unlink, while the callee entry stores
+  `{x14, x30}` in the guarded x25 stack. Canonical and pending-flags call entries are published
+  separately, so the existing cross-call flags bypass remains generation checked. All generated
+  host exits use a region return veneer while continuation is active, and return/call misses are
+  grouped by target physical register in the unit cold area. Indirect calls use a separately
+  invalidated call-L1 table; Signal switches both L1 bases to the same inaccessible mapping and SMC
+  clears both tables. Against a detached `736d04d` Release build, the 5-6 second CoreMark 2k short
+  run covers 99.999495% of baseline host weight and moves the common weighted total
+  `389,812,375 -> 388,290,607` (`-1,521,768`, `-0.390385%`); the largest return block is
+  `0x403383: 10 -> 8`. The discarded inline-miss candidate was `+3.998337%` and is not retained.
+  Mac direct-link/guarded-return/indirect-L1/function focuses pass 1,212 assertions, Orb passes 843,
+  and 20k CoreMark returns `crcfinal=0x382f` on both. `quick_shape.py` full-unit collection no longer
+  activates constant-address audit logging, keeping the Release screen bounded. No stress run,
+  temporary environment switch or debug path remains. Applying the three measured post-refresh
+  reductions to the last live FEX denominator estimates the remaining CoreMark host-instruction gap
+  at about 5.4%; refresh both engines before treating that estimate as a new formal ratio.
 
 ## Orb loop
 
