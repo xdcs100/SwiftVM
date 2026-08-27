@@ -2379,6 +2379,15 @@ peepholes.
   assertions and 27 alias/REX assertions. No stress run, probe, diagnostic source path or
   environment switch remains.
 
+- A dedicated ARM64 `REP MOVS` loop was evaluated against the two helper snapshots in
+  `sqlite3_randomness` at `0x423620` and fully rejected. The candidate kept precise page-fault PCs,
+  copied forward and backward in architectural element order, and passed Mac/Orb fixed-seed fuzz,
+  the interpreter path and the bounded smallpt oracle. Its bounded-window checks and fixed-clobber
+  pressure nevertheless moved the exact 1,999-unit SQLite static shape from `379,667 -> 384,298`
+  (`+4,631`, `+1.219753%`), while `0x423620` grew `1,360 -> 1,477`. Do not retry an inline loop until
+  the guest window has a guaranteed guard-page ABI that removes per-site bounds code, or the loop
+  can be expressed with materially fewer fixed clobbers. No implementation or probe remains.
+
 ## Orb loop
 
 ```
