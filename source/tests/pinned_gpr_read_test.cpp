@@ -36,6 +36,7 @@ enum class PinnedReadShape {
     LoadU8Flags,
     LoadU8SavedFlags,
     LoadNarrowSubtract,
+    LoadCallerNarrowSubtract,
     FullAddAlias,
     OverwrittenWrite,
     OverwrittenWriteFault,
@@ -83,7 +84,8 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
                          shape == PinnedReadShape::SignedLoadU16 ||
                          shape == PinnedReadShape::LoadU8Flags ||
                          shape == PinnedReadShape::LoadU8SavedFlags ||
-                         shape == PinnedReadShape::LoadNarrowSubtract
+                         shape == PinnedReadShape::LoadNarrowSubtract ||
+                         shape == PinnedReadShape::LoadCallerNarrowSubtract
             ? block->LoadMemory(Operand{block->LoadImm(Imm{swift::u64{0x1000}})
                                                 .SetType(ValueType::U64)})
                       .SetType(type)
@@ -101,11 +103,15 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
                                .SetType(ValueType::U32);
         block->StoreUniform(Uniform{64, ValueType::U64}, widened);
         block->StoreUniform(Uniform{72, ValueType::U32}, product);
-    } else if (shape == PinnedReadShape::LoadNarrowSubtract) {
+    } else if (shape == PinnedReadShape::LoadNarrowSubtract ||
+               shape == PinnedReadShape::LoadCallerNarrowSubtract) {
         auto extended = block->ZeroExtend32(value).SetType(ValueType::U32);
         auto published = block->ZeroExtend32To64(extended)
                                  .SetType(ValueType::U64);
-        block->SetHostGPR(published, HostRegIndex(22), Imm{0u});
+        const auto target = shape == PinnedReadShape::LoadCallerNarrowSubtract
+                ? 2u
+                : 22u;
+        block->SetHostGPR(published, HostRegIndex(target), Imm{0u});
         const auto width = ir::GetValueSizeByte(type) * 8;
         auto alias = block->BitExtract(published, Imm{0u}, Imm{width})
                              .SetType(type);
@@ -472,6 +478,18 @@ TEST_CASE("a published narrow load supplies subtraction from its fixed home") {
         REQUIRE(Count(lines, load, "") == 1);
         REQUIRE(Count(lines, "mov w22", "") == 0);
         REQUIRE(Count(lines, "subs w", "w22") == 1);
+    }
+}
+
+TEST_CASE("a caller-saved narrow load supplies subtraction from its fixed home") {
+    for (auto type : {ValueType::U8, ValueType::U16}) {
+        CAPTURE(type);
+        const auto lines = EmitPinnedRead(
+                PinnedReadShape::LoadCallerNarrowSubtract, false, type);
+        const auto load = type == ValueType::U8 ? "ldrb w2" : "ldrh w2";
+        REQUIRE(Count(lines, load, "") == 1);
+        REQUIRE(Count(lines, "mov w2", "") == 0);
+        REQUIRE(Count(lines, "subs w", "w2") == 1);
     }
 }
 

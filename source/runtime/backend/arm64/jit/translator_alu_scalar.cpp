@@ -149,7 +149,8 @@ void JitTranslator::EmitSub(ir::Inst* inst) {
         auto pseudo_flags = GetPseudoFlags(inst);
         pseudo_flags.set = ir::Flags::Carry;
         const auto result = FlagsResultRegister(inst, pseudo_flags);
-        const auto left = context.W(plan->second.left);
+        const auto pinned = ResolvePinnedGPRWUse(plan->second.left, inst);
+        const auto left = pinned ? *pinned : context.W(plan->second.left);
         if (!pseudo_flags.branch_only) {
             BeginFlagsTokenProducer(pseudo_flags);
         }

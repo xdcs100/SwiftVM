@@ -45,6 +45,9 @@ ir::Value JitTranslator::ResolveNarrowFlagsInput(ir::Value value,
     if (!value.Def()) {
         return value;
     }
+    if (fused_pin_gpr_reads.contains(value.Def())) {
+        return value;
+    }
     auto plan = narrow_flags_inputs.find(value.Def());
     if (plan == narrow_flags_inputs.end()) {
         return value;

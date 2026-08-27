@@ -203,9 +203,8 @@ JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
             source_width == sizeof(u32) && context.IsSpilled(source) &&
             read->GetPseudoOperations().empty();
     std::optional<u16> source_index;
-    if ((signed_load && !load_source) ||
-        (context.IsHostWriteCoalesced(inst->Id()) &&
-         (!signed_load || !load_source))) {
+    if (!load_source &&
+        (signed_load || context.IsHostWriteCoalesced(inst->Id()))) {
         return std::nullopt;
     }
     if (!load_source && !add_source) {
