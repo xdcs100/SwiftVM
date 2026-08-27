@@ -1,6 +1,6 @@
 # Codex handoff: Align SVM flags with FEX
 
-Date: 2026-08-26
+Date: 2026-08-27
 Repo: `/Users/swift/CLionProjects/SwiftVM` (macOS). Linux identity runs on Orb: `ubuntu@orb`, tree `/home/swift/svm-phasec/SwiftVM`, build `/home/swift/svm-phasec/build`.
 Author on git: `swift_gan`. **Do not push** until asked. English commits, no task IDs, no AI trailer.
 
@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Code tip: **`4661866`** `perf: store narrow pinned values directly`
+- Product code tip: **`aa4ed1b`** `perf: extend flags bypass to static forwards`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -1798,6 +1798,33 @@ peepholes.
   `0x403680/0x403552` (~5.80M/~5.30M), and the remaining narrow compare/ADC work at `0x4026ca`
   (~4.49M). The first three require continuation or cross-unit flags ABI work; do not replace them
   with per-site cold growth or ABI assumptions about guest code.
+- Static `SetLocation(imm) + ReturnToDispatch` edges now carry the same `DirectLinkFlagsBypass`
+  recipe as `LinkBlock` edges (`aa4ed1b`). This closes the missing connection on direct calls: when
+  the linked target publishes a pending-flags entry, LinkManager replaces the first instruction of
+  the three-instruction full NZCV merge with a branch over the whole merge and links the site to
+  that entry. Incompatible publication and SMC invalidation continue to restore the original
+  instruction through the existing generation/unlink transaction. There is no new runtime switch,
+  fallback protocol or static code growth. An exact detached-`e53e193` 20k A/B keeps all 2,819 PCs /
+  2,934 versions, 100% coverage and `crcfinal=0x382f`; the static weighted number is intentionally
+  identical because the saving is a runtime patch. The retained host dump contains two dominant
+  `merge; poll; BL` opportunities at `0x403320` and `0x403552`, with a mechanical linked-path upper
+  bound of 65,600,000 fewer executed instructions; realization is conditional on their targets
+  advertising pending-flags entries. The bounded smallpt oracle remains
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`.
+  Mac and Orb end-to-end checks pass 14 assertions for the new static-forward path and 40 for the
+  existing shared conditional bypass, including actual patching to the pending-flags entry and SMC
+  restoration. No diagnostic path or environment switch was retained.
+- The first raw host-continuation RSB prototype was rejected and fully removed before `aa4ed1b`.
+  It stored `{guest return, ADR continuation}` in the existing guarded x25 stack, reset the logical
+  stack before leaving the active QSBR epoch, and sent misses to the existing deferred dispatcher
+  publisher. It was correct on CoreMark/smallpt and the Mac/Orb SMC checks, but an exact
+  detached-`e53e193` CoreMark comparison was `3,940,481,890 -> 4,013,934,489`
+  (`+73,452,599`, `+1.864051%`) with 100% PC/version coverage. The dominant costs were two extra
+  instructions at direct/indirect calls and one extra instruction at return; the older
+  `build-master` comparison that looked strongly positive was stale and is invalid. Do not retry
+  caller-side `ADR+STP`. A viable continuation ABI must form LR through a call-kind `BL`, push it in
+  a call-entry veneer without re-materializing the guest return, and replace the per-return signal
+  poll with an equally strong fault/cycle safepoint before it can beat inline L1.
 
 ## Orb loop
 
