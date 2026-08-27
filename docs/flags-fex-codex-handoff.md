@@ -2323,6 +2323,21 @@ peepholes.
   `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. No stress run, retained
   probe, diagnostic source path or new environment switch remains.
 
+- Published region entries now share their counted entry when no split backedge ABI is required.
+  Dispatcher, region-link slow traversal, indirect-L1 and legacy RSB paths restore NZCV before
+  entering that shared address, while direct links retain their already-valid PSTATE path. This
+  removes the per-block `MSR NZCV; B counted-entry` veneers. An exact same-machine, same-command
+  SQLite `main/10` static-only A/B covers all
+  1,999 units and moves `432,331 -> 384,068` host instructions (`-48,263`, `-11.163437%`), with
+  1,414 shrinking units and 80 one-instruction growths. The largest current gaps move as follows:
+  `0x4a5518 848 -> 748`, `0x4a5470 581 -> 506`, `0x449880 706 -> 647`,
+  `0x4e8720 767 -> 677`, `0x4e2380 839 -> 746`, `0x506d30 645 -> 610` and
+  `0x50b870 918 -> 871`. Timing-normalized SQLite output remains byte-identical with SHA-256
+  `efb4bea2cec1e324d746acc11d14f62c8c742fcd98f1a52f4b75a7e44a864a25`; bounded smallpt retains
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. Local and Orb entry,
+  direct-link, continuation, guarded-return and flags focuses pass 169 assertions across nine
+  cases. No stress run, probe, diagnostic source path or environment switch remains.
+
 ## Orb loop
 
 ```
