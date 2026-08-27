@@ -2283,6 +2283,20 @@ peepholes.
   and smallpt retains SHA-256
   `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. No stress run, retained
   probe, diagnostic source path or new environment switch remains.
+- `d9f2922` gives direct scalar state accesses, shifts, extensions and logical operations their
+  measured per-instruction GPR scratch prices. After the ordinary Linux allocation proves that a
+  unit spills and reserves x18 for reloads, the verified allocator tries one lower dynamic scratch
+  reserve before its existing ladder. Non-spilling units retain the original allocation path, and
+  any candidate that cannot satisfy the emitter plus reload contract falls back immediately. An
+  exact HEAD/candidate SQLite `main/10` in-memory A/B keeps the same 2,065 PCs and versions, 100%
+  host and entry coverage, 28 shrinking units and no growth. Static host instructions move
+  `446,280 -> 445,666` (`-614`, `-0.137582%`); `sqlite3_randomness` moves `1,659 -> 1,450` and its
+  alternate root moves `263 -> 209`. Timing-normalized SQLite output is byte-identical. The local
+  and Orb spill-eviction, saturated scratch-pool and hidden-scratch contract cases pass, while
+  bounded smallpt retains SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. A reserve of one produces
+  the same SQLite shape as reserve two, so the less aggressive reserve remains canonical. No stress
+  run, retained probe, diagnostic source path or new environment switch remains.
 
 ## Orb loop
 
