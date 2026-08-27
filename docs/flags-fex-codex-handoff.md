@@ -1926,6 +1926,17 @@ peepholes.
   `542db87b61af7a5cfff84083696082819f8608dc9c3ffaeda04b1db5b3210635`. No stress run, probe,
   diagnostic path or environment switch remains. This reduction is larger than the previous 3.0%
   estimated gap, so refresh the live FEX denominator before claiming parity or a lead.
+- The requested five-item tranche is complete. Static-call flags bypass is provided by `aa4ed1b`;
+  the generation-safe `BL` continuation ABI by `631e0a7`; return and cycle safepoints by `940dcfe`
+  and `48014ae`; call-aware indirect L1 and its boundary reductions by `631e0a7`, `0783986` and
+  `661a995`; and the remaining narrow compare/carry reduction by `736d04d`. A fresh same-input
+  CoreMark 2k join against the live `f2e35f3` FEX measurement build covers 99.999931% of entries
+  and 99.999887% of SwiftVM host weight. SwiftVM measures `1.789534` host instructions per guest
+  instruction versus FEX `1.860078`, or `0.962075x`, a 3.7925% lead on this workload. Both use the
+  same guest ELF and arguments; FEX returns `crcfinal=0x4983` with `disableavx`, multiblock enabled,
+  ABI-local flags enabled and object-code caching disabled. This closes the five-item CoreMark
+  target but is not evidence of parity across other workloads; the next tranche should begin with
+  fresh bounded joins for smallpt and at least one branch-heavy workload.
 
 ## Orb loop
 
