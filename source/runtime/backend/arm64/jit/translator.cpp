@@ -26,7 +26,7 @@ namespace swift::runtime::backend::arm64 {
 
 namespace {
 
-constexpr u32 kCycleTailShareMinStubs = 5;
+constexpr u32 kCycleTailShareMinStubs = 2;
 
 ir::Value ResolveBitCastValue(ir::Value value) {
     while (value.Defined() && value.Def()->IsBitCastOperation()) {
