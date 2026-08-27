@@ -64,7 +64,8 @@ void TerminalLocationPublication::Prepare(std::span<ir::Block* const> blocks,
         const bool required = std::any_of(
                 block->GetInstList().begin(), block->GetInstList().end(),
                 [](const ir::Inst& inst) {
-                    return inst.GetOp() == ir::OpCode::CallReturn;
+                    return inst.GetOp() == ir::OpCode::CallReturn ||
+                           inst.GetOp() == ir::OpCode::PopRSB;
                 });
         candidates.push_back({location_inst, reg, required});
         ++counts[reg];
