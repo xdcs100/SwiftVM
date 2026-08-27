@@ -170,9 +170,9 @@ bool JitTranslator::HasRegionCycleEdgeFromCurrent() const {
                        [&](const auto& edge) { return edge.first == source; });
 }
 
-bool JitTranslator::IsDirectCycleCutEdge(ir::Location target) const {
-    if (!direct_cycle_latch || !cur_block ||
-        target.Value() >= cur_block->GetStartLocation().Value()) {
+bool JitTranslator::IsDirectCycleCutEdge(ir::Location source,
+                                         ir::Location target) const {
+    if (!direct_cycle_latch || target.Value() >= source.Value()) {
         return false;
     }
     // Guest block starts form a total order, so every non-self directed cycle
@@ -184,6 +184,27 @@ bool JitTranslator::IsDirectCycleCutEdge(ir::Location target) const {
     // twice: EmitRegionEdge selects the DFS exit before requesting this cut.
     // External direct edges can stay in JIT only when BlockLink owns both ends.
     return IsRegionInternalEdge(target) || context.CanBypassDispatcher(target);
+}
+
+bool JitTranslator::IsDirectCycleCutEdge(ir::Location target) const {
+    return cur_block &&
+           IsDirectCycleCutEdge(cur_block->GetStartLocation(), target);
+}
+
+u32 JitTranslator::CountDirectCycleExitCandidates(
+        std::span<ir::Block* const> blocks) const {
+    u32 count{};
+    for (auto* block : blocks) {
+        std::vector<u64> targets;
+        CollectRegionTargets(block->GetTerminal(), targets);
+        std::sort(targets.begin(), targets.end());
+        targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
+        for (u64 target : targets) {
+            count += IsDirectCycleCutEdge(block->GetStartLocation(),
+                                          ir::Location{target});
+        }
+    }
+    return count;
 }
 
 Label* JitTranslator::GetDirectCycleExit(ir::Location target) {
@@ -1177,10 +1198,20 @@ void JitTranslator::EmitBackedgeExitStub() {
 }
 
 void JitTranslator::EmitDirectCycleExitStubs() {
-    for (auto& [target, label] : direct_cycle_exits) {
+    if (direct_cycle_exits.empty()) {
+        return;
+    }
+    Label local_reason;
+    Label* reason = &local_reason;
+    if (translating_function && share_direct_cycle_exit_reason) {
+        if (!direct_cycle_exit_reason) {
+            direct_cycle_exit_reason = std::make_unique<Label>();
+        }
+        reason = direct_cycle_exit_reason.get();
+    }
+    for (auto it = direct_cycle_exits.begin(); it != direct_cycle_exits.end(); ++it) {
+        auto& [target, label] = *it;
         ASSERT(label);
-        Label signal;
-        Label publish;
         __ Bind(label.get());
         ResolveExitPollFaults(label.get());
         __ Ldar(ip0, MemOperand(state, state_offset_exit_request));
@@ -1192,16 +1223,30 @@ void JitTranslator::EmitDirectCycleExitStubs() {
         }
         __ Mov(ip1, target);
         __ Str(ip1, MemOperand(state, state_offset_current_loc));
-        __ Tbnz(ip0, 63, &signal);
-        __ Mov(ipw1, static_cast<u32>(HaltReason::CodeMiss));
-        __ B(&publish);
-        __ Bind(&signal);
-        __ Mov(ipw1, static_cast<u32>(HaltReason::Signal));
-        __ Bind(&publish);
-        __ Str(ipw1, MemOperand(state, state_offset_halt_reason));
-        context.ReturnHost();
+        if ((translating_function && share_direct_cycle_exit_reason) ||
+            std::next(it) != direct_cycle_exits.end()) {
+            __ B(reason);
+        }
+    }
+    if (!translating_function || !share_direct_cycle_exit_reason) {
+        EmitDirectCycleExitReasonTail(reason);
     }
     direct_cycle_exits.clear();
+}
+
+void JitTranslator::EmitDirectCycleExitReasonTail(Label* reason) {
+    ASSERT(reason);
+    Label signal;
+    Label publish;
+    __ Bind(reason);
+    __ Tbnz(ip0, 63, &signal);
+    __ Mov(ipw1, static_cast<u32>(HaltReason::CodeMiss));
+    __ B(&publish);
+    __ Bind(&signal);
+    __ Mov(ipw1, static_cast<u32>(HaltReason::Signal));
+    __ Bind(&publish);
+    __ Str(ipw1, MemOperand(state, state_offset_halt_reason));
+    context.ReturnHost();
 }
 
 void JitTranslator::RecordExitPollFault(

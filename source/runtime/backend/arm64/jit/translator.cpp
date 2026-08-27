@@ -26,6 +26,8 @@ namespace swift::runtime::backend::arm64 {
 
 namespace {
 
+constexpr u32 kDirectCycleTailShareMinStubs = 5;
+
 ir::Value ResolveBitCastValue(ir::Value value) {
     while (value.Defined() && value.Def()->IsBitCastOperation()) {
         value = value.Def()->GetArg<ir::Value>(0);
@@ -1364,6 +1366,9 @@ void JitTranslator::Translate(ir::HIRFunction* function) {
         emitted_blocks.push_back(block);
     }
     terminal_location_publication.Prepare(emitted_blocks, context);
+    share_direct_cycle_exit_reason =
+            CountDirectCycleExitCandidates(emitted_blocks) >=
+            kDirectCycleTailShareMinStubs;
     translating_function = true;
     InvalidateFlagsToken();
     flags_token_keep = false;
@@ -1392,6 +1397,10 @@ void JitTranslator::Translate(ir::HIRFunction* function) {
     context.EmitPendingFlagsCallEntry(
             function->GetFunction()->GetStartLocation().Value());
     context.BeginColdScratch();
+    if (direct_cycle_exit_reason) {
+        EmitDirectCycleExitReasonTail(direct_cycle_exit_reason.get());
+        direct_cycle_exit_reason.reset();
+    }
     EmitIndirectExitColdPaths();
     ASSERT(pending_deferred_faults.empty());
     const auto recovery_offsets = terminal_location_publication.EmitColdPaths(context);
@@ -1406,6 +1415,7 @@ void JitTranslator::Translate(ir::HIRFunction* function) {
         fault.recovery_reg = UINT32_MAX;
     }
     translating_function = false;
+    share_direct_cycle_exit_reason = false;
     PlacementPoint("unit", placement_unit_pc);
     next_region_block.reset();
 }
