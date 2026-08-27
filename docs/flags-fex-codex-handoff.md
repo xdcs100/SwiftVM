@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Product code tip: **`8c4f055`** `perf: compact byte vector movemask`
+- Product code tip: **`9ac80fd`** `perf: share compact byte movemask`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -19,6 +19,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 
 | Commit | What |
 |---|---|
+| `9ac80fd` | Share the compact byte movemask hierarchy with inline SSE4.2 string-result collection |
 | `8c4f055` | Replace the 11-instruction byte `VecMovMask` shuffle tree with an 8-instruction `USHR`/`USRA`/`XTN` hierarchy |
 | `26c5f40` | Share the halt-reason/return tail across direct-cycle cold exits in functions with at least five candidate stubs |
 | `4c9c669` | Lower 8/16/32-bit DIV/IDIV to native 64-bit division and arithmetic remainder; retain helpers only for 128/64 division |
@@ -2170,6 +2171,17 @@ peepholes.
   `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. The directed SSE batch
   passes 129 assertions on Mac and Orb; a fixed 20-iteration SSE2 seed retains the baseline's 11
   unrelated flag divergences. No stress run, probe, diagnostic path or environment switch remains.
+- `9ac80fd` moves that hierarchy into one vector-lowering helper and uses it to collect byte
+  IntRes1 masks in inline PCMPISTRI/M. This removes the synthesized 128-bit weight constant, two
+  horizontal reductions and the scalar high-half merge from every byte-form `Sse42Str`. Against
+  `8c4f055`, bounded SQLite `main/10` keeps all 1,995 units and moves `468,118 -> 467,641`
+  (`-477`, `-0.101897%`), with 16 shrinking units and no growth. `__strcspn_sse42` moves
+  `806 -> 752`; the exact 735-unit FEX join moves to `157,334 / 145,699`, or `1.0799x`. The helper
+  fallback was measured separately and rejected (`+2,907`, all 16 affected units grew), so the
+  inline path remains canonical. Mac and Orb pass the 16,255-assertion Rosetta/SDM differential,
+  the scratch-contract and PMOVMSKB directed gates; bounded smallpt retains SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. No stress run, probe,
+  diagnostic path or environment switch remains.
 
 ## Orb loop
 
