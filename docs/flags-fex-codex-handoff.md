@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Product code tip: **`26c5f40`** `perf: share direct cycle exit tails`
+- Product code tip: **`8c4f055`** `perf: compact byte vector movemask`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -19,6 +19,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 
 | Commit | What |
 |---|---|
+| `8c4f055` | Replace the 11-instruction byte `VecMovMask` shuffle tree with an 8-instruction `USHR`/`USRA`/`XTN` hierarchy |
 | `26c5f40` | Share the halt-reason/return tail across direct-cycle cold exits in functions with at least five candidate stubs |
 | `4c9c669` | Lower 8/16/32-bit DIV/IDIV to native 64-bit division and arithmetic remainder; retain helpers only for 128/64 division |
 | `30c85c7` | Replace BSF/BSR preserve-all helpers with U64 count-zero IR lowered to native AArch64 `CLZ` and `RBIT + CLZ` |
@@ -2154,6 +2155,21 @@ peepholes.
   bounded SQLite moved `468,505 -> 469,934` (`+1,429`), all five changed CPUID units grew, and
   `get_common_cache_info` grew `1,594 -> 1,821`. A future CPUID reduction must use compact
   leaf-directed control flow or a dedicated lowering rather than extending all output lifetimes.
+- CPUID output markers and a CPUID-scoped pinned-register constant tracker were also fully removed.
+  They kept the existing branchless table live and added marker pressure without folding its final
+  outputs: the three bounded variants moved SQLite by `+135`, `+179` and `+164`, with the same five
+  CPUID units growing and none shrinking. Do not retry a value-DAG wrapper around the current table.
+- `8c4f055` compacts the byte `VecMovMask` lowering used by PMOVMSKB. The input is first reduced to
+  one sign bit per byte; three `USRA`/`XTN` levels then combine adjacent 1-, 2- and 4-bit groups
+  without a constant vector or scalar bridge. Each occurrence falls from 11 to 8 AArch64
+  instructions. Bounded SQLite `main/10` keeps all 1,995 units and moves `468,505 -> 468,118`
+  (`-387`, `-0.082603%`), with 22 shrinking units and no growth. `__strrchr_sse2` moves
+  `1,041 -> 957`, `__memcmp_sse2` moves `1,017 -> 966`, and the exact 735-unit FEX join moves from
+  `1.0854x` to `1.0828x` (`157,757 / 145,699`). The order-reversed full SQLite wall samples are
+  neutral-to-positive, and bounded smallpt retains SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. The directed SSE batch
+  passes 129 assertions on Mac and Orb; a fixed 20-iteration SSE2 seed retains the baseline's 11
+  unrelated flag divergences. No stress run, probe, diagnostic path or environment switch remains.
 
 ## Orb loop
 
