@@ -845,31 +845,35 @@ void JitTranslator::EmitSignedDiv64(ir::Inst* inst) {
 }
 
 void JitTranslator::EmitDiv128(ir::Inst* inst) {
-    const auto remainders = inst->GetPseudoOperations(ir::OpCode::Div128Remainder);
-    ASSERT(remainders.size() <= 1);
     const bool sign = inst->GetArg<ir::Imm>(3).Get() != 0;
     const auto target = sign ? &swift::runtime::DivideSigned128
                              : &swift::runtime::DivideUnsigned128;
-    const ir::Lambda lambda{
-            ir::DataClass{ir::Imm{reinterpret_cast<VAddr>(target)}},
-            ir::HelperCallTraits{
-                    .uniform = ir::UniformEffectId::None,
-                    .abi = ir::HelperABI::PreserveAllLeaf,
-                    .host_fp = ir::HostFpEffect::FPCRTransparent,
-            }};
     std::vector<ir::DataClass> args{
             inst->GetArg<ir::Value>(0),
             inst->GetArg<ir::Value>(1),
             inst->GetArg<ir::Value>(2),
     };
-    const auto quotient = context.R(ir::Value{inst});
-    const auto remainder = remainders.empty()
-            ? std::optional<Register>{}
-            : std::optional<Register>{context.RForWrite(ir::Value{remainders.front()})};
-    EmitHostCall(lambda, args, true, quotient, remainder);
+    EmitPreserveAllPairCall(inst,
+                            reinterpret_cast<VAddr>(target),
+                            args,
+                            ir::OpCode::Div128Remainder);
 }
 
 void JitTranslator::EmitDiv128Remainder(ir::Inst*) {}
+
+void JitTranslator::EmitCpuid(ir::Inst* inst) {
+    std::vector<ir::DataClass> args{
+            inst->GetArg<ir::Value>(0),
+            inst->GetArg<ir::Value>(1),
+            inst->GetArg<ir::Imm>(2),
+    };
+    EmitPreserveAllPairCall(inst,
+                            inst->GetArg<ir::Imm>(3).Get(),
+                            args,
+                            ir::OpCode::CpuidUpper);
+}
+
+void JitTranslator::EmitCpuidUpper(ir::Inst*) {}
 
 void JitTranslator::EmitMul(ir::Inst* inst) {
     auto left = inst->GetArg<ir::Value>(0);

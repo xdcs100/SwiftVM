@@ -462,6 +462,27 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
     }
 }
 
+void JitTranslator::EmitPreserveAllPairCall(ir::Inst* inst,
+                                            VAddr target,
+                                            const std::vector<ir::DataClass>& args,
+                                            ir::OpCode secondary) {
+    const auto secondary_results = inst->GetPseudoOperations(secondary);
+    ASSERT(secondary_results.size() <= 1);
+    const ir::Lambda lambda{
+            ir::DataClass{ir::Imm{target}},
+            ir::HelperCallTraits{
+                    .uniform = ir::UniformEffectId::None,
+                    .abi = ir::HelperABI::PreserveAllLeaf,
+                    .host_fp = ir::HostFpEffect::FPCRTransparent,
+            }};
+    const auto primary_result = context.R(ir::Value{inst});
+    const auto secondary_result = secondary_results.empty()
+            ? std::optional<Register>{}
+            : std::optional<Register>{
+                      context.RForWrite(ir::Value{secondary_results.front()})};
+    EmitHostCall(lambda, args, true, primary_result, secondary_result);
+}
+
 void JitTranslator::EmitCallLambda(ir::Inst* inst) {
     auto lambda = inst->GetArg<ir::Lambda>(0);
     std::vector<ir::DataClass> args{};

@@ -586,6 +586,10 @@ private:
                       bool has_result,
                       const Register &result,
                       std::optional<Register> secondary_result = std::nullopt);
+    void EmitPreserveAllPairCall(ir::Inst* inst,
+                                 VAddr target,
+                                 const std::vector<ir::DataClass>& args,
+                                 ir::OpCode secondary);
     void SpillStaticFPRUniforms();
     void RestoreStaticFPRUniforms();
 

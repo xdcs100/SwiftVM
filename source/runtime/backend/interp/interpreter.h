@@ -3,6 +3,7 @@
 #include <vector>
 #include "base/common_funcs.h"
 #include "runtime/backend/context.h"
+#include "runtime/common/host_pair_result.h"
 #include "runtime/common/types.h"
 #include "runtime/include/config.h"
 #include "runtime/ir/block.h"
@@ -54,6 +55,10 @@ private:
     u128 ReadVec(InterpStack& stack, ir::Value value);
     void WriteScalar(InterpStack& stack, ir::Inst* inst, u64 value);
     void WriteVec(InterpStack& stack, ir::Inst* inst, u128 value);
+    void WritePairResult(InterpStack& stack,
+                         ir::Inst* inst,
+                         const HostPairResult& result,
+                         ir::OpCode secondary);
 
     u64 EvalDataClass(InterpStack& stack, const ir::DataClass& data);
     u64 EvalOperand(InterpStack& stack, const ir::Operand& operand);

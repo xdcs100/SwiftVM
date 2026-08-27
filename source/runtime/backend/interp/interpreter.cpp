@@ -75,6 +75,18 @@ void Interpreter::WriteVec(InterpStack& stack, ir::Inst* inst, u128 value) {
     SetReg(stack, ir::Value{inst}, value);
 }
 
+void Interpreter::WritePairResult(InterpStack& stack,
+                                  ir::Inst* inst,
+                                  const HostPairResult& result,
+                                  ir::OpCode secondary) {
+    WriteScalar(stack, inst, result.first);
+    const auto secondary_results = inst->GetPseudoOperations(secondary);
+    ASSERT(secondary_results.size() <= 1);
+    if (!secondary_results.empty()) {
+        WriteScalar(stack, secondary_results.front(), result.second);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Operand / immediate evaluation
 // ---------------------------------------------------------------------------
@@ -315,15 +327,21 @@ void Interpreter::RunDiv128(ir::Inst* inst, InterpStack& stack) {
     const auto result = inst->GetArg<ir::Imm>(3).Get()
             ? swift::runtime::DivideSigned128(high, low, divisor)
             : swift::runtime::DivideUnsigned128(high, low, divisor);
-    WriteScalar(stack, inst, result.quotient);
-    const auto remainders = inst->GetPseudoOperations(ir::OpCode::Div128Remainder);
-    ASSERT(remainders.size() <= 1);
-    if (!remainders.empty()) {
-        WriteScalar(stack, remainders.front(), result.remainder);
-    }
+    WritePairResult(stack, inst, result, ir::OpCode::Div128Remainder);
 }
 
 void Interpreter::RunDiv128Remainder(ir::Inst*, InterpStack&) {}
+
+void Interpreter::RunCpuid(ir::Inst* inst, InterpStack& stack) {
+    using Helper = HostPairResult (*)(u64, u64, u64);
+    const auto helper = reinterpret_cast<Helper>(inst->GetArg<ir::Imm>(3).Get());
+    const auto result = helper(ReadScalar(stack, inst->GetArg<ir::Value>(0)),
+                               ReadScalar(stack, inst->GetArg<ir::Value>(1)),
+                               inst->GetArg<ir::Imm>(2).Get());
+    WritePairResult(stack, inst, result, ir::OpCode::CpuidUpper);
+}
+
+void Interpreter::RunCpuidUpper(ir::Inst*, InterpStack&) {}
 
 void Interpreter::RunSse42Str(ir::Inst* inst, InterpStack& stack) {
     const u128 a = ReadVec(stack, inst->GetArg<ir::Value>(0));

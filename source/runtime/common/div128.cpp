@@ -2,7 +2,7 @@
 
 namespace swift::runtime {
 
-SVM_HELPER_PRESERVE_ALL Div128Result DivideUnsigned128(u64 high, u64 low, u64 divisor) {
+SVM_HELPER_PRESERVE_ALL HostPairResult DivideUnsigned128(u64 high, u64 low, u64 divisor) {
     if (!divisor) {
         return {};
     }
@@ -10,7 +10,7 @@ SVM_HELPER_PRESERVE_ALL Div128Result DivideUnsigned128(u64 high, u64 low, u64 di
     return {static_cast<u64>(dividend / divisor), static_cast<u64>(dividend % divisor)};
 }
 
-SVM_HELPER_PRESERVE_ALL Div128Result DivideSigned128(u64 high, u64 low, u64 divisor) {
+SVM_HELPER_PRESERVE_ALL HostPairResult DivideSigned128(u64 high, u64 low, u64 divisor) {
     const auto signed_divisor = static_cast<s64>(divisor);
     if (!signed_divisor) {
         return {};

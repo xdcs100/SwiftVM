@@ -16,6 +16,7 @@ add_library(swift_runtime STATIC
         common/types.h
         common/div128.cpp
         common/div128.h
+        common/host_pair_result.h
         common/slab_alloc.cc
         common/slab_alloc.h
         common/object_pool.h
