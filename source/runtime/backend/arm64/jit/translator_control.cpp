@@ -28,6 +28,14 @@ bool LeafHelperABIEnabled(const FeatureSet& features) {
 #endif
 }
 
+constexpr bool GeneralRegistersOnlyABIEnabled() {
+#if SVM_HAS_HELPER_GENERAL_REGS_ONLY
+    return true;
+#else
+    return false;
+#endif
+}
+
 constexpr u64 kConstAddressPageOffsetMask = 0xfff;
 constexpr u64 kConstAddressPageMask = ~kConstAddressPageOffsetMask;
 
@@ -220,6 +228,10 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
     const bool fpcr_transparent =
             sse_afp_nan && !lambda.IsValue() &&
             lambda.GetHostFpEffect() == ir::HostFpEffect::FPCRTransparent;
+    const bool general_registers_only =
+            GeneralRegistersOnlyABIEnabled() && !lambda.IsValue() &&
+            lambda.GetHostRegisterEffect() ==
+                    ir::HostRegisterEffect::GeneralOnly;
 
     // Save the caller-saved registers that are actually live across the call,
     // plus x29/x30: the Blr below clobbers the link register holding this
@@ -280,15 +292,17 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
         }
     }
     boost::container::small_vector<u32, 32> save_fprs;
-    FPRSMask live_fprs = context.GetLiveFPRs();
-    for (const auto& desc : context.GetConfig().buffers_static_alloc) {
-        if (desc.is_float) {
-            live_fprs.Mark(desc.reg);
+    if (!general_registers_only) {
+        FPRSMask live_fprs = context.GetLiveFPRs();
+        for (const auto& desc : context.GetConfig().buffers_static_alloc) {
+            if (desc.is_float) {
+                live_fprs.Mark(desc.reg);
+            }
         }
-    }
-    for (u32 code = 0; code < 32; ++code) {
-        if (live_fprs.Get(code) && (!preserve_all_leaf || code <= 7)) {
-            save_fprs.push_back(code);
+        for (u32 code = 0; code < 32; ++code) {
+            if (live_fprs.Get(code) && (!preserve_all_leaf || code <= 7)) {
+                save_fprs.push_back(code);
+            }
         }
     }
 
@@ -465,7 +479,8 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
 void JitTranslator::EmitPreserveAllPairCall(ir::Inst* inst,
                                             VAddr target,
                                             const std::vector<ir::DataClass>& args,
-                                            ir::OpCode secondary) {
+                                            ir::OpCode secondary,
+                                            ir::HostRegisterEffect host_registers) {
     const auto secondary_results = inst->GetPseudoOperations(secondary);
     ASSERT(secondary_results.size() <= 1);
     const ir::Lambda lambda{
@@ -474,6 +489,7 @@ void JitTranslator::EmitPreserveAllPairCall(ir::Inst* inst,
                     .uniform = ir::UniformEffectId::None,
                     .abi = ir::HelperABI::PreserveAllLeaf,
                     .host_fp = ir::HostFpEffect::FPCRTransparent,
+                    .host_registers = host_registers,
             }};
     const auto primary_result = context.R(ir::Value{inst});
     const auto secondary_result = secondary_results.empty()

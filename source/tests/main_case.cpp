@@ -262,12 +262,14 @@ TEST_CASE("hot coalesce probe classifies static opportunities") {
     REQUIRE(stats.saved_instructions == 4);
 }
 
-TEST_CASE("helper FP effects default conservative and compose with ABI metadata") {
+TEST_CASE("helper effects default conservative and compose with ABI metadata") {
     using namespace swift::runtime::ir;
 
     const auto address = DataClass{Imm{swift::u64{0x1234}}};
     const Lambda ordinary{address};
     REQUIRE(ordinary.GetHostFpEffect() == HostFpEffect::MayTouch);
+    REQUIRE(ordinary.GetHostRegisterEffect() ==
+            HostRegisterEffect::MayTouchSIMD);
     REQUIRE(ordinary.GetHelperABI() == HelperABI::NormalAAPCS);
     REQUIRE(ordinary.GetUniformEffectId() == UniformEffectId::Unknown);
 
@@ -277,9 +279,12 @@ TEST_CASE("helper FP effects default conservative and compose with ABI metadata"
                     .uniform = UniformEffectId::None,
                     .abi = HelperABI::PreserveAllLeaf,
                     .host_fp = HostFpEffect::FPCRTransparent,
+                    .host_registers = HostRegisterEffect::GeneralOnly,
             }};
     REQUIRE(combined.GetImm().Get() == swift::u64{0x1234});
     REQUIRE(combined.GetHostFpEffect() == HostFpEffect::FPCRTransparent);
+    REQUIRE(combined.GetHostRegisterEffect() ==
+            HostRegisterEffect::GeneralOnly);
     REQUIRE(combined.GetHelperABI() == HelperABI::PreserveAllLeaf);
     REQUIRE(combined.GetUniformEffectId() == UniformEffectId::None);
 }

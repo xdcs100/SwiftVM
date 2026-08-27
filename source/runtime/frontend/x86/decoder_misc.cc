@@ -114,6 +114,9 @@ void X64Decoder::DecodeCpuid(_DInst& insn) {
     }
     if (xsave) {
         features |= CpuidXsave;
+        if (swift::runtime::GetSvmConfig().xsave_ymm) {
+            features |= CpuidXsaveYmm;
+        }
     }
 
     auto leaf = __ ZeroExtend64(R(_RegisterType::R_EAX));

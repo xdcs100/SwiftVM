@@ -16,10 +16,10 @@ enum CpuidFeature : u64 {
     CpuidBmi = 1ull << 7,
     CpuidAdx = 1ull << 8,
     CpuidXsave = 1ull << 9,
+    CpuidXsaveYmm = 1ull << 10,
 };
 
-SVM_HELPER_PRESERVE_ALL runtime::HostPairResult QueryCpuid(u64 leaf,
-                                                          u64 subleaf,
-                                                          u64 features);
+SVM_HELPER_PRESERVE_ALL SVM_HELPER_GENERAL_REGS_ONLY
+runtime::HostPairResult QueryCpuid(u64 leaf, u64 subleaf, u64 features);
 
 }  // namespace swift::x86

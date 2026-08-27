@@ -6,19 +6,22 @@ namespace swift::x86 {
 
 namespace {
 
+SVM_HELPER_GENERAL_REGS_ONLY
 runtime::HostPairResult PackCpuid(u32 eax, u32 ebx, u32 ecx, u32 edx) {
     return {u64(eax) | (u64(ebx) << 32), u64(ecx) | (u64(edx) << 32)};
 }
 
-bool HasFeature(u64 features, CpuidFeature feature) {
+SVM_HELPER_GENERAL_REGS_ONLY bool HasFeature(u64 features,
+                                            CpuidFeature feature) {
     return (features & feature) != 0;
 }
 
 }  // namespace
 
-SVM_HELPER_PRESERVE_ALL runtime::HostPairResult QueryCpuid(u64 leaf_value,
-                                                          u64 subleaf_value,
-                                                          u64 features) {
+SVM_HELPER_PRESERVE_ALL SVM_HELPER_GENERAL_REGS_ONLY
+runtime::HostPairResult QueryCpuid(u64 leaf_value,
+                                  u64 subleaf_value,
+                                  u64 features) {
     static constexpr u32 kSse2Edx = (1u << 0) | (1u << 4) | (1u << 8) |
                                     (1u << 15) | (1u << 24) | (1u << 25) |
                                     (1u << 26);
@@ -32,6 +35,11 @@ SVM_HELPER_PRESERVE_ALL runtime::HostPairResult QueryCpuid(u64 leaf_value,
     const bool avx = HasFeature(features, CpuidAvx);
     const bool crypto = HasFeature(features, CpuidCrypto);
     const bool xsave = HasFeature(features, CpuidXsave);
+    const u64 xcr0 = kXstateX87 | kXstateSse |
+                     (HasFeature(features, CpuidXsaveYmm) ? kXstateYmm : 0);
+    const u32 xsave_area_size = (xcr0 & kXstateYmm)
+            ? (kXsaveYmmOffset + kXsaveYmmSize)
+            : (kXsaveHeaderOffset + kXsaveHeaderSize);
     const u32 leaf1_ecx =
             kLeaf1Ecx | (HasFeature(features, CpuidSse4) ? kSse4Ecx : 0u) |
             (HasFeature(features, CpuidSse42) ? (1u << 20) : 0u) |
@@ -61,14 +69,18 @@ SVM_HELPER_PRESERVE_ALL runtime::HostPairResult QueryCpuid(u64 leaf_value,
                 return {};
             }
             if (subleaf == 0) {
-                const u64 xcr0 = GuestXcr0();
-                const u32 size = XsaveAreaSize();
-                return PackCpuid(u32(xcr0), size, size, u32(xcr0 >> 32));
+                return PackCpuid(u32(xcr0),
+                                 xsave_area_size,
+                                 xsave_area_size,
+                                 u32(xcr0 >> 32));
             }
             if (subleaf == 1) {
-                return PackCpuid((1u << 0) | (1u << 1), XsaveAreaSize(), 0, 0);
+                return PackCpuid((1u << 0) | (1u << 1),
+                                 xsave_area_size,
+                                 0,
+                                 0);
             }
-            if (subleaf == 2 && (GuestXcr0() & kXstateYmm)) {
+            if (subleaf == 2 && (xcr0 & kXstateYmm)) {
                 return PackCpuid(kXsaveYmmSize, kXsaveYmmOffset, 0, 0);
             }
             return {};

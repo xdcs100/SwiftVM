@@ -870,7 +870,8 @@ void JitTranslator::EmitCpuid(ir::Inst* inst) {
     EmitPreserveAllPairCall(inst,
                             inst->GetArg<ir::Imm>(3).Get(),
                             args,
-                            ir::OpCode::CpuidUpper);
+                            ir::OpCode::CpuidUpper,
+                            ir::HostRegisterEffect::GeneralOnly);
 }
 
 void JitTranslator::EmitCpuidUpper(ir::Inst*) {}

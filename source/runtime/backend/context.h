@@ -138,6 +138,7 @@ struct State {
     // GuestMemory::RangeIsMapped. nullptr = fall back to guest_addr_limit only.
     bool (*interp_range_check)(void* ctx, u64 addr, u64 size){nullptr};
     void* interp_range_check_ctx{};
+    void* unaligned_atomic_lock_address{};
     // Spill area for RegAlloc::MEM values (linear-scan register allocator):
     // fixed u64 slots addressed from JIT code as
     // [state, state_offset_spill_area + slot * 8]; a spilled SIMD value
@@ -186,6 +187,8 @@ constexpr u32 state_offset_pt = offsetof(State, pt);
 constexpr u32 state_offset_rsb_pointer = offsetof(State, rsb_pointer);
 constexpr u32 state_offset_rsb_empty = offsetof(State, rsb_empty);
 constexpr u32 state_offset_host_flags = offsetof(State, host_cpu_flags);
+constexpr u32 state_offset_unaligned_atomic_lock =
+        offsetof(State, unaligned_atomic_lock_address);
 constexpr u32 state_offset_exec_profile_ptr = offsetof(State, interface);
 constexpr u32 exec_offset_exit_direct = offsetof(RuntimeProfileInterface, exec) +
                                         offsetof(ExecProfileCounters, exit_direct);

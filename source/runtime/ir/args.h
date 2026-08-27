@@ -219,13 +219,20 @@ enum class HostFpEffect : u8 {
     FPCRTransparent,
 };
 
+enum class HostRegisterEffect : u8 {
+    MayTouchSIMD = 0,
+    GeneralOnly,
+};
+
 struct HelperCallTraits {
     UniformEffectId uniform{UniformEffectId::Unknown};
     HelperABI abi{HelperABI::NormalAAPCS};
     HostFpEffect host_fp{HostFpEffect::MayTouch};
+    HostRegisterEffect host_registers{HostRegisterEffect::MayTouchSIMD};
 };
 
 static_assert(static_cast<u8>(HostFpEffect::MayTouch) == 0);
+static_assert(static_cast<u8>(HostRegisterEffect::MayTouchSIMD) == 0);
 
 inline constexpr UniformEffectSet kNoUniformEffects{};
 
@@ -259,6 +266,7 @@ public:
     UniformEffectId GetUniformEffectId() const;
     HelperABI GetHelperABI() const;
     HostFpEffect GetHostFpEffect() const;
+    HostRegisterEffect GetHostRegisterEffect() const;
 
 private:
     [[nodiscard]] bool IsTaggedImm() const;

@@ -6,7 +6,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <iterator>
-#include "runtime/backend/atomic_fallback.h"
 #include "runtime/backend/context.h"
 #include "runtime/backend/arm64/defines.h"
 #include "runtime/backend/arm64/fpcr_mode.h"
@@ -961,26 +960,27 @@ bool HostBaseFoldEligible(bool enabled,
            !tso_or_atomic;
 }
 
-void JitTranslator::AcquireUnalignedAtomicLock(const Register& scratch) {
+void JitTranslator::LoadUnalignedAtomicLockAddress(const Register& lock) {
+    __ Ldr(lock, MemOperand(state, state_offset_unaligned_atomic_lock));
+}
+
+void JitTranslator::AcquireUnalignedAtomicLock(const Register& lock,
+                                               const Register& scratch) {
     // x12 is last_result when FLAGS_REGS is on. The lock sequence clobbers it.
     if (FlagsRegsEnabled()) {
         EmitSplitFlagsPublish();
     }
     Label retry;
-    __ Mov(atomic_scratch,
-           reinterpret_cast<uintptr_t>(&runtime::backend::unaligned_atomic_lock));
     __ Bind(&retry);
-    __ Ldaxr(scratch.W(), MemOperand(atomic_scratch));
+    __ Ldaxr(scratch.W(), MemOperand(lock));
     __ Cbnz(scratch.W(), &retry);
     __ Mov(scratch.W(), 1);
-    __ Stxr(ipw, scratch.W(), MemOperand(atomic_scratch));
+    __ Stxr(ipw, scratch.W(), MemOperand(lock));
     __ Cbnz(ipw, &retry);
 }
 
-void JitTranslator::ReleaseUnalignedAtomicLock() {
-    __ Mov(atomic_scratch,
-           reinterpret_cast<uintptr_t>(&runtime::backend::unaligned_atomic_lock));
-    __ Stlr(wzr, MemOperand(atomic_scratch));
+void JitTranslator::ReleaseUnalignedAtomicLock(const Register& lock) {
+    __ Stlr(wzr, MemOperand(lock));
 }
 
 void JitTranslator::EmitPlainAtomicLoad(ir::ValueType type,
@@ -2279,13 +2279,14 @@ void JitTranslator::EmitCompareAndSwap(ir::Inst* inst) {
     if (ir::GetValueSizeByte(type) > 1) {
         __ Tst(address, ir::GetValueSizeByte(type) - 1);
         __ B(&aligned, eq);
-        AcquireUnalignedAtomicLock(result);
+        LoadUnalignedAtomicLockAddress(atomic_pair_scratch);
+        AcquireUnalignedAtomicLock(atomic_pair_scratch, result);
         EmitPlainAtomicLoad(type, result, address);
         __ Cmp(result, context.R(expected, true));
         __ B(&cas_done, ne);
         EmitPlainAtomicStore(type, context.R(desired, true), address);
         __ Bind(&cas_done);
-        ReleaseUnalignedAtomicLock();
+        ReleaseUnalignedAtomicLock(atomic_pair_scratch);
         __ B(&done);
     }
 
@@ -2380,7 +2381,8 @@ void JitTranslator::EmitCompareAndSwap128(ir::Inst* inst) {
     // Rosetta), so preserve it with a serialized plain pair load/store.
     __ Tst(address, 15);
     __ B(&aligned, eq);
-    AcquireUnalignedAtomicLock(atomic_pair_scratch);
+    LoadUnalignedAtomicLockAddress(atomic_scratch);
+    AcquireUnalignedAtomicLock(atomic_scratch, atomic_pair_scratch);
     __ Ldp(atomic_scratch, atomic_pair_scratch, MemOperand(address));
     __ Cmp(atomic_scratch, context.X(expected_lo));
     __ B(&fallback_no_store, ne);
@@ -2390,7 +2392,8 @@ void JitTranslator::EmitCompareAndSwap128(ir::Inst* inst) {
     __ Bind(&fallback_no_store);
     __ Ins(result.V2D(), 0, atomic_scratch);
     __ Ins(result.V2D(), 1, atomic_pair_scratch);
-    ReleaseUnalignedAtomicLock();
+    LoadUnalignedAtomicLockAddress(atomic_scratch);
+    ReleaseUnalignedAtomicLock(atomic_scratch);
     __ B(&done);
 
     __ Bind(&aligned);
@@ -2444,10 +2447,11 @@ void JitTranslator::EmitAtomicExchange(ir::Inst* inst) {
     if (ir::GetValueSizeByte(type) > 1) {
         __ Tst(address, ir::GetValueSizeByte(type) - 1);
         __ B(&aligned, eq);
-        AcquireUnalignedAtomicLock(result);
+        LoadUnalignedAtomicLockAddress(atomic_pair_scratch);
+        AcquireUnalignedAtomicLock(atomic_pair_scratch, result);
         EmitPlainAtomicLoad(type, result, address);
         EmitPlainAtomicStore(type, context.R(desired, true), address);
-        ReleaseUnalignedAtomicLock();
+        ReleaseUnalignedAtomicLock(atomic_pair_scratch);
         __ B(&done);
     }
 
@@ -2513,7 +2517,8 @@ void JitTranslator::EmitAtomicFetchAdd(ir::Inst* inst) {
     if (ir::GetValueSizeByte(type) > 1) {
         __ Tst(address, ir::GetValueSizeByte(type) - 1);
         __ B(&aligned, eq);
-        AcquireUnalignedAtomicLock(result);
+        LoadUnalignedAtomicLockAddress(atomic_pair_scratch);
+        AcquireUnalignedAtomicLock(atomic_pair_scratch, result);
         EmitPlainAtomicLoad(type, result, address);
         if (ir::GetValueSizeByte(type) == 8) {
             __ Add(atomic_scratch, result, context.X(addend));
@@ -2521,7 +2526,7 @@ void JitTranslator::EmitAtomicFetchAdd(ir::Inst* inst) {
             __ Add(atomic_scratch.W(), result.W(), context.W(addend));
         }
         EmitPlainAtomicStore(type, atomic_scratch, address);
-        ReleaseUnalignedAtomicLock();
+        ReleaseUnalignedAtomicLock(atomic_pair_scratch);
         __ B(&done);
     }
 
@@ -2594,11 +2599,12 @@ void JitTranslator::EmitAtomicRMW(ir::Inst* inst) {
     if (ir::GetValueSizeByte(type) > 1) {
         __ Tst(address, ir::GetValueSizeByte(type) - 1);
         __ B(&aligned, eq);
-        AcquireUnalignedAtomicLock(result);
+        LoadUnalignedAtomicLockAddress(atomic_pair_scratch);
+        AcquireUnalignedAtomicLock(atomic_pair_scratch, result);
         EmitPlainAtomicLoad(type, result, address);
         EmitAtomicRMWValue(op, type, atomic_scratch, result, operand, carry);
         EmitPlainAtomicStore(type, atomic_scratch, address);
-        ReleaseUnalignedAtomicLock();
+        ReleaseUnalignedAtomicLock(atomic_pair_scratch);
         __ B(&done);
     }
 

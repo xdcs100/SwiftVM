@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <utility>
 #include "runtime/backend/address_space.h"
+#include "runtime/backend/atomic_fallback.h"
 #include "runtime/backend/arm64/constant.h"
 #include "runtime/backend/arm64/defines.h"
 #include "runtime/backend/arm64/jit/translator.h"
@@ -174,6 +175,8 @@ struct Runtime::Impl final {
         // definitionally invalid; the interpreter checks this before every
         // memory access and raises PageFatal instead of crashing the host.
         state->guest_addr_limit = static_cast<u64>(address_space->GetConfig().loc_end);
+        state->unaligned_atomic_lock_address =
+                &backend::unaligned_atomic_lock;
         if (True(address_space->GetConfig().global_opts & Optimizations::ReturnStackBuffer)) {
             return_stack.emplace();
             state->rsb_pointer = return_stack->Empty();

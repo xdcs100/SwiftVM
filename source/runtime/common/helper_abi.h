@@ -12,6 +12,18 @@
 #define SVM_HAS_HELPER_PRESERVE_ALL 0
 #endif
 
+#if defined(__aarch64__) && defined(__clang__) && \
+        __has_attribute(general_regs_only)
+#define SVM_HELPER_GENERAL_REGS_ONLY __attribute__((general_regs_only))
+#define SVM_HAS_HELPER_GENERAL_REGS_ONLY 1
+#elif defined(__aarch64__) && defined(__GNUC__)
+#define SVM_HELPER_GENERAL_REGS_ONLY __attribute__((target("general-regs-only")))
+#define SVM_HAS_HELPER_GENERAL_REGS_ONLY 1
+#else
+#define SVM_HELPER_GENERAL_REGS_ONLY
+#define SVM_HAS_HELPER_GENERAL_REGS_ONLY 0
+#endif
+
 // ELF local-exec TLS lowers to TPIDR_EL0 plus a fixed offset and is a true
 // leaf. Mach-O TLV necessarily calls __tlv_get_addr, so a helper that touches
 // thread_local storage must retain the normal caller snapshot on macOS even

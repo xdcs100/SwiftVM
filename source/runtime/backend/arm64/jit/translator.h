@@ -389,8 +389,10 @@ private:
     [[nodiscard]] static bool MayFaultOrObserve(ir::OpCode op);
     VRegister GetVecScalarOperand(ir::Value value, u32 lane_bits);
 
-    void AcquireUnalignedAtomicLock(const Register& scratch);
-    void ReleaseUnalignedAtomicLock();
+    void LoadUnalignedAtomicLockAddress(const Register& lock);
+    void AcquireUnalignedAtomicLock(const Register& lock,
+                                    const Register& scratch);
+    void ReleaseUnalignedAtomicLock(const Register& lock);
     void EmitPlainAtomicLoad(ir::ValueType type,
                              const Register& result,
                              const Register& address);
@@ -603,7 +605,9 @@ private:
     void EmitPreserveAllPairCall(ir::Inst* inst,
                                  VAddr target,
                                  const std::vector<ir::DataClass>& args,
-                                 ir::OpCode secondary);
+                                 ir::OpCode secondary,
+                                 ir::HostRegisterEffect host_registers =
+                                         ir::HostRegisterEffect::MayTouchSIMD);
     void SpillStaticFPRUniforms();
     void RestoreStaticFPRUniforms();
 
