@@ -8877,12 +8877,13 @@ TEST_CASE("indirect L1 and lean shadow stack select compatible return paths") {
         auto it = result.mnemonics.find(std::string{mnemonic});
         return it == result.mnemonics.end() ? 0u : it->second;
     };
-    REQUIRE(l1.bytes == off.bytes + 5 * vixl::aarch64::kInstructionSize);
+    REQUIRE(l1.bytes == off.bytes + 6 * vixl::aarch64::kInstructionSize);
     REQUIRE(shadow.bytes == off.bytes);
     REQUIRE(count(off, "br") == 0);
     REQUIRE(count(l1, "br") == 1);
     REQUIRE(count(l1, "ret") == 0);
     REQUIRE(count(l1, "cmp") == count(off, "cmp") + 1);
+    REQUIRE(count(l1, "ccmp") == count(off, "ccmp") + 1);
     REQUIRE(count(l1, "csel") == 1);
     REQUIRE(count(l1, "bfi") == count(off, "bfi") + 1);
     REQUIRE(count(l1, "ldp") == count(off, "ldp") + 1);
@@ -8894,7 +8895,8 @@ TEST_CASE("indirect L1 and lean shadow stack select compatible return paths") {
     const auto call_l1 = run(true, false, Shape::Call, false, false);
     const auto call_shadow = run(false, true, Shape::Call, false, false);
     const auto call_both = run(true, true, Shape::Call, false, false);
-    REQUIRE(call_l1.bytes == call_off.bytes);
+    REQUIRE(call_l1.bytes ==
+            call_off.bytes + vixl::aarch64::kInstructionSize);
     REQUIRE(call_shadow.bytes ==
             call_off.bytes - 2 * vixl::aarch64::kInstructionSize);
     REQUIRE(call_both.bytes == call_l1.bytes);
@@ -8905,7 +8907,7 @@ TEST_CASE("indirect L1 and lean shadow stack select compatible return paths") {
     const auto ret_shadow = run(false, true, Shape::Return, false, false);
     const auto ret_both = run(true, true, Shape::Return, false, false);
     REQUIRE(ret_l1.bytes ==
-            ret_off.bytes - 4 * vixl::aarch64::kInstructionSize);
+            ret_off.bytes - 3 * vixl::aarch64::kInstructionSize);
     REQUIRE(ret_shadow.bytes ==
             ret_off.bytes - vixl::aarch64::kInstructionSize);
     REQUIRE(ret_both.bytes == ret_l1.bytes);

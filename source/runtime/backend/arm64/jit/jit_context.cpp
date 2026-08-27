@@ -806,15 +806,16 @@ JitContext::ForwardIndirectL1(const Register& location, Label* miss) {
     }
 
     __ Cmp(index, location);
+    __ Ccmp(entry, xzr, ZFlag, eq);
     if (miss) {
-        __ B(miss, ne);
+        __ B(miss, eq);
     } else if (ContinuationActive()) {
         Label hit;
-        __ B(&hit, eq);
+        __ B(&hit, ne);
         ReturnHost();
         __ Bind(&hit);
     } else {
-        __ Csel(entry, entry, x30, eq);
+        __ Csel(entry, entry, x30, ne);
     }
     __ Br(entry);
     return {fault_begin, fault_end};
@@ -825,6 +826,7 @@ void JitContext::ForwardContinuation(const Register& location, Label* miss) {
     const auto predicted = GetTmpX();
     const auto continuation = GetTmpX();
     __ Ldp(predicted, continuation, MemOperand(rsb_ptr, 16, PostIndex));
+    __ Cbz(continuation, miss);
     __ Cmp(predicted, location);
     __ B(miss, ne);
     __ Br(continuation);
