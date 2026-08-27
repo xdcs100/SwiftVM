@@ -1876,6 +1876,26 @@ peepholes.
   provided by `631e0a7` and its hot boundary is tightened by `0783986`; the remaining
   `0x4026ca` narrow compare/carry chain is reduced by `736d04d`. Further work should start from a
   new live FEX join rather than extending this list.
+- `661a995` follows that live join and closes the remaining flags cost on the largest block. The
+  same-input FEX refresh still reports `0x4024c0` at 124 host / 86 guest instructions; SwiftVM's
+  `0x402580` was 23 / 5 and the largest projected weighted gap at about 10.08M. Targets already
+  published a generation-safe `call_pending_flags_host_pc`, but indirect calls cached only the
+  canonical call entry and therefore paid a three-instruction full NZCV merge before every hit.
+  AddressSpace now owns a separately invalidated pending-call L1 table. A proved full-NZCV call
+  probes that table without publishing flags; a miss performs the merge in the grouped cold path
+  and returns through the deferred-location dispatcher publisher. Signal redirects both call tables
+  to the inaccessible interrupt mapping, and SMC clears both canonical and pending entries. Cold
+  merge scratch is selected explicitly away from the dynamic target; this is required because a
+  shared scratch can otherwise replace the target with the host NZCV value before miss recovery.
+  Against `0783986`, the 4.2-second CoreMark 2k comparison covers 99.999863% of retained host weight,
+  all top-30 PCs, and moves `364,386,782 -> 363,110,076` (`-1,276,706`, `-0.350371%`) with no
+  common growth. `0x402580` shrinks `23 -> 21`; CoreMark 20k returns `crcfinal=0x382f` on Mac and
+  Orb. The bounded Orb smallpt run completes in 3.861 seconds with zero spills and SHA-256
+  `542db87b61af7a5cfff84083696082819f8608dc9c3ffaeda04b1db5b3210635`. Mac/Orb runtime interrupt,
+  pending-table SMC, direct-link without stress, function and guarded-return focuses pass. No probe,
+  diagnostic path, environment switch or stress run remains. Applying the measured post-refresh
+  reductions to the last formal FEX denominator estimates the remaining CoreMark gap at about 3.5%;
+  this remains an estimate until the next full guest-instruction denominator refresh.
 
 ## Orb loop
 
