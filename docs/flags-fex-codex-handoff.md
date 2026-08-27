@@ -2240,6 +2240,22 @@ peepholes.
   SQLite exits normally, CoreMark 20k retains `crcfinal=0x382f`, and smallpt retains SHA-256
   `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. No stress run, retained
   probe, diagnostic source path or new environment switch remains.
+- `b3c30f8` moves cycle-poll resume-location publication from every generated cold recovery stub
+  into the existing fault metadata path. Each poll fault already has an exact serialized
+  `guest_start`; resolution now changes that field to the architectural resume location, and the
+  runtime signal handler writes `state->current_loc` before entering the flags/halt recovery code.
+  Backedge stubs retain the source block and directed-cycle stubs retain their edge target, while
+  the repeated two-instruction guest-PC materialization and state store disappear. Against
+  `3c5a67a`, bounded SQLite `main/10` keeps all 1,995 units and moves `463,553 -> 436,665`
+  (`-26,888`, `-5.800415%`), with 1,421 shrinking units and no growth. `0x4a5518` moves
+  `980 -> 896`, `0x4a5470` moves `656 -> 581`, `0x4e8720` moves `837 -> 783`, and
+  `get_common_cache_info` moves `1,146 -> 1,080`. From the pre-division `9ac80fd` shape, the
+  cumulative movement is `467,641 -> 436,665` (`-30,976`, `-6.623885%`). Mac and Orb pass the
+  non-stress signal group, local-cycle SMC, directed-cycle interrupt, disabled-latch, production
+  SMC ring, guarded-return and disk-cache fault-site round-trip focuses. Bounded SQLite exits
+  normally, CoreMark 20k retains `crcfinal=0x382f`, and smallpt retains SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. No stress run, retained
+  probe, diagnostic source path or new environment switch remains.
 
 ## Orb loop
 
