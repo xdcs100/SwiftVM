@@ -142,6 +142,30 @@ void JitTranslator::EmitSub(ir::Inst* inst) {
     if (MatchPreIndexMemoryUpdate(inst)) {
         return;
     }
+    if (auto plan = narrow_compares.find(inst); plan != narrow_compares.end()) {
+        const auto reproved = MatchNarrowCompare(inst);
+        ASSERT_MSG(reproved && *reproved == plan->second,
+                   "narrow compare proof diverged at IR {}", inst->Id());
+        auto pseudo_flags = GetPseudoFlags(inst);
+        pseudo_flags.set = ir::Flags::Carry;
+        const auto result = FlagsResultRegister(inst, pseudo_flags);
+        const auto left = context.W(plan->second.left);
+        if (!pseudo_flags.branch_only) {
+            BeginFlagsTokenProducer(pseudo_flags);
+        }
+        if (plan->second.right) {
+            __ Cmp(left, context.W(*plan->second.right));
+        } else {
+            __ Cmp(left, plan->second.immediate);
+        }
+        const auto guest_nzcv = pseudo_flags.set & ir::Flags::NZCV;
+        if (!pseudo_flags.branch_only) {
+            SaveHostFlags(GuestNZCVToHost(guest_nzcv), guest_nzcv);
+        }
+        FinishFlagsTokenProducer(
+                result, inst->ReturnType(), pseudo_flags, inst);
+        return;
+    }
     auto pinned_w = [&](ir::Value value) -> std::optional<WRegister> {
         return ResolvePinnedGPRWUse(value, inst);
     };

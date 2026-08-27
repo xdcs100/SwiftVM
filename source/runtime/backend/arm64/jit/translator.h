@@ -227,6 +227,19 @@ private:
     MatchNarrowFlagsInput(ir::Inst* extract);
     [[nodiscard]] ir::Value ResolveNarrowFlagsInput(ir::Value value,
                                                     ir::Inst* consumer);
+    struct NarrowComparePlan {
+        ir::Value left{};
+        std::optional<ir::Value> right{};
+        ir::Inst* immediate_load{};
+        u32 immediate{};
+        u8 width{};
+
+        bool operator==(const NarrowComparePlan&) const = default;
+    };
+    [[nodiscard]] bool IsNarrowZeroExtended(ir::Value value, u32 width) const;
+    [[nodiscard]] std::optional<NarrowComparePlan>
+    MatchNarrowCompare(ir::Inst* inst);
+    void PrepareNarrowCompares(ir::Block* block);
     struct NarrowCarryFusion {
         ir::Inst* carry_test{};
         ir::Inst* carry_add{};
@@ -680,6 +693,7 @@ private:
     std::map<ir::Inst*, u16> fused_pin_gpr_reads{};
     std::map<ir::Inst*, u16> pinned_memory_values{};
     std::map<ir::Inst*, ir::Value> narrow_flags_inputs{};
+    std::map<ir::Inst*, NarrowComparePlan> narrow_compares{};
     std::map<ir::Inst*, NarrowCarryFusion> narrow_carry_fusions{};
     std::map<ir::Inst*, u16> pinned_gpr_values{};
     std::map<std::pair<ir::Inst*, const ir::Inst*>, u16> pinned_gpr_use_homes{};
