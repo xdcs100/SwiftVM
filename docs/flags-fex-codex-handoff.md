@@ -2297,6 +2297,19 @@ peepholes.
   `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. A reserve of one produces
   the same SQLite shape as reserve two, so the less aggressive reserve remains canonical. No stress
   run, retained probe, diagnostic source path or new environment switch remains.
+- `2d74b5b` replaces SSE4.2 string comparison's generic packed-flag expansion with a dedicated IR
+  publication. The shared result layout now places SF/ZF/CF/OF in a reversible nibble, the flags
+  pass deletes dead publications and narrows surviving ones to the live subset, and the AArch64
+  backend writes that subset directly into the flags carrier. `Sse42Str` omits flag calculation
+  entirely when the publication is dead. The exact SQLite `main/10` in-memory A/B keeps the same
+  2,065 PCs and versions with 100% host and entry coverage, 14 shrinking units and no growth.
+  Static host instructions move `445,666 -> 444,836` (`-830`, `-0.186238%`);
+  `__strcspn_sse42` moves `737 -> 645`, and the remaining 13 reductions cover the same glibc
+  SSE4.2 string family. Timing-normalized SQLite output is byte-identical. The 16,255-assertion
+  Rosetta/SDM differential, aliasing, memory-boundary, scratch-contract and flag-elimination cases
+  pass locally and on Orb. Bounded smallpt retains SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. No stress run, retained
+  probe, diagnostic source path or new environment switch remains.
 
 ## Orb loop
 
