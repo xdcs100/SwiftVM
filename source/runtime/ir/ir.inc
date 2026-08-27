@@ -85,6 +85,7 @@ INST(Sbb, Value, Value, Operand)
 // Mul & Div
 INST(Mul, Value, Value, Operand)
 INST(Div, Value, Value, Operand)
+INST(SignedDiv64, U64, Value, Value)
 INST(ZeroExtend32, U32, Value)
 // Zero-extend the low 32 bits and retain a U64 result. This is distinct from
 // changing ZeroExtend32's return type: backends must still perform the 32-bit

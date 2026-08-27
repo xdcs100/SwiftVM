@@ -490,6 +490,20 @@ void Interpreter::RunDiv(ir::Inst* inst, InterpStack& stack) {
     WriteScalar(stack, inst, result);
 }
 
+void Interpreter::RunSignedDiv64(ir::Inst* inst, InterpStack& stack) {
+    const auto dividend = static_cast<s64>(
+            ReadScalar(stack, inst->GetArg<ir::Value>(0)));
+    const auto divisor = static_cast<s64>(
+            ReadScalar(stack, inst->GetArg<ir::Value>(1)));
+    u64 result{};
+    if (divisor == -1) {
+        result = u64(0) - static_cast<u64>(dividend);
+    } else if (divisor != 0) {
+        result = static_cast<u64>(dividend / divisor);
+    }
+    WriteScalar(stack, inst, result);
+}
+
 void Interpreter::RunZeroExtend32(ir::Inst* inst, InterpStack& stack) {
     // Slots already hold zero-extended values; the write masks to U32.
     WriteScalar(stack, inst, ReadScalar(stack, inst->GetArg<ir::Value>(0)));

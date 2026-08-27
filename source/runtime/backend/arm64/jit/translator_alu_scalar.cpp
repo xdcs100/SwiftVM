@@ -836,6 +836,13 @@ void JitTranslator::EmitDiv(ir::Inst* inst) {
     }
 }
 
+void JitTranslator::EmitSignedDiv64(ir::Inst* inst) {
+    auto dividend = context.R(inst->GetArg<ir::Value>(0), true);
+    auto divisor = context.R(inst->GetArg<ir::Value>(1), true);
+    ASSERT(dividend.Is64Bits() && divisor.Is64Bits());
+    __ Sdiv(context.X(ir::Value{inst}), dividend.X(), divisor.X());
+}
+
 void JitTranslator::EmitMul(ir::Inst* inst) {
     auto left = inst->GetArg<ir::Value>(0);
     auto right = inst->GetArg<ir::Operand>(1);

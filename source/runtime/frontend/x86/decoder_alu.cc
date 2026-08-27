@@ -85,6 +85,28 @@ static u64 DivRS64(u64 hi, u64 lo, u64 den) {
     return static_cast<u64>(num % sden);
 }
 
+struct DivResult {
+    ir::Value quotient;
+    ir::Value remainder;
+};
+
+static DivResult Divide64(ir::Assembler* assembler,
+                          ir::Value numerator,
+                          ir::Value denominator,
+                          bool sign) {
+    auto quotient = sign
+            ? assembler->SignedDiv64(numerator, denominator)
+            : assembler->Div(numerator, ir::Operand{denominator});
+    auto product = assembler->Mul(quotient, ir::Operand{denominator});
+    auto remainder = assembler->Sub(numerator, ir::Operand{product});
+    remainder = assembler
+                        ->Select(assembler->TestNotZero(denominator),
+                                 remainder,
+                                 assembler->LoadImm(ir::Imm(u64(0))))
+                        .SetType(ir::ValueType::U64);
+    return {quotient, remainder};
+}
+
 // Compute the product of a and b at the given width and return the low half.
 // If out_hi is non null the upper half is stored there. Flags: CF/OF are set
 // exactly (product does not fit in `width` bits); PF comes from the low
@@ -612,9 +634,6 @@ void X64Decoder::DecodeDiv(_DInst& insn, bool sign) {
     auto& op0 = insn.ops[0];
     auto src = ToValue(Src(insn, op0));
 
-    auto div_q = sign ? &DivQS64 : &DivQU64;
-    auto div_r = sign ? &DivRS64 : &DivRU64;
-
     // Divide the 2*width dividend (composed into a 128 bit hi:lo pair) by the
     // sign/zero extended divisor; quotient goes to (R)AX, remainder to (R)DX.
     switch (op0.size) {
@@ -622,12 +641,10 @@ void X64Decoder::DecodeDiv(_DInst& insn, bool sign) {
             auto ax = R(_RegisterType::R_AX);
             auto num = sign ? __ SignExtend(ax).SetType(ir::ValueType::U64)
                             : __ ZeroExtend64(__ ZeroExtend32(ax));
-            auto hi = sign ? __ AsrImm(num, ir::Imm(63u)) : __ LoadImm(ir::Imm(u64(0)));
             auto den = Extend(src, ir::ValueType::U64, sign);
-            auto quot = __ CallHostUniformPureFPFree(div_q, hi, num, den);
-            auto rem = __ CallHostUniformPureFPFree(div_r, hi, num, den);
-            R(_RegisterType::R_AL, quot);
-            R(_RegisterType::R_AH, rem);
+            auto result = Divide64(assembler, num, den, sign);
+            R(_RegisterType::R_AL, result.quotient);
+            R(_RegisterType::R_AH, result.remainder);
             break;
         }
         case 16: {
@@ -636,31 +653,28 @@ void X64Decoder::DecodeDiv(_DInst& insn, bool sign) {
             auto num32 = __ Or(__ LslImm(hi16, ir::Imm(16u)), ir::Operand{lo});
             auto num = sign ? __ SignExtend(num32).SetType(ir::ValueType::U64)
                             : __ ZeroExtend64(num32);
-            auto hi = sign ? __ AsrImm(num, ir::Imm(63u)) : __ LoadImm(ir::Imm(u64(0)));
             auto den = Extend(src, ir::ValueType::U64, sign);
-            auto quot = __ CallHostUniformPureFPFree(div_q, hi, num, den);
-            auto rem = __ CallHostUniformPureFPFree(div_r, hi, num, den);
-            R(_RegisterType::R_AX, quot);
-            R(_RegisterType::R_DX, rem);
+            auto result = Divide64(assembler, num, den, sign);
+            R(_RegisterType::R_AX, result.quotient);
+            R(_RegisterType::R_DX, result.remainder);
             break;
         }
         case 32: {
             auto lo = __ ZeroExtend64(R(_RegisterType::R_EAX));
             auto hi32 = __ ZeroExtend64(R(_RegisterType::R_EDX));
             auto num = __ Or(__ LslImm(hi32, ir::Imm(32u)), ir::Operand{lo});
-            auto hi = sign ? __ AsrImm(num.SetType(ir::ValueType::U64), ir::Imm(63u))
-                           : __ LoadImm(ir::Imm(u64(0)));
             auto den = Extend(src, ir::ValueType::U64, sign);
-            auto quot = __ CallHostUniformPureFPFree(div_q, hi, num, den);
-            auto rem = __ CallHostUniformPureFPFree(div_r, hi, num, den);
-            R(_RegisterType::R_EAX, quot);
-            R(_RegisterType::R_EDX, rem);
+            auto result = Divide64(assembler, num, den, sign);
+            R(_RegisterType::R_EAX, result.quotient);
+            R(_RegisterType::R_EDX, result.remainder);
             break;
         }
         case 64: {
             auto lo = R(_RegisterType::R_RAX);
             auto hi = R(_RegisterType::R_RDX);
             auto den = Extend(src, ir::ValueType::U64, sign);
+            auto div_q = sign ? &DivQS64 : &DivQU64;
+            auto div_r = sign ? &DivRS64 : &DivRU64;
             auto quot = __ CallHostUniformPureFPFree(div_q, hi, lo, den);
             auto rem = __ CallHostUniformPureFPFree(div_r, hi, lo, den);
             R(_RegisterType::R_RAX, quot);
