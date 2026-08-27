@@ -2405,6 +2405,20 @@ peepholes.
   producer/pseudo physical-register contract and failed during early SQLite execution. Do not retry
   this direction until that ownership is represented explicitly in RA. No implementation remains.
 
+- Region-internal cycle coverage now uses only the exact DFS backedges already computed by
+  `PrepareRegionEdges`; the total-order descending cut remains only on linkable external edges,
+  whose LinkManager sites are synchronously detached by SMC invalidation. Exact local backedge and
+  external direct-cycle stubs now contribute to the same function-wide reason-tail sharing decision.
+  An exact SQLite `main/10` static-only A/B keeps all 1,999 units at 100% coverage and moves
+  `379,445 -> 350,638` host instructions (`-28,807`, `-7.591878%`), with 933 shrinking and 34
+  growing units. `0x4a5470` moves `482 -> 440`, `0x428280` moves `828 -> 775`, and
+  `sqlite3_randomness` at `0x423620` moves `1,358 -> 1,273`. Timing-normalized SQLite output is
+  byte-identical, and bounded smallpt retains SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. Mac and Orb each pass
+  123 assertions across exact region-cycle invalidation, external direct-link rings, conditional
+  rings, pending interrupts and the disabled latch. No stress run, probe, diagnostic source path or
+  environment switch remains.
+
 ## Orb loop
 
 ```
