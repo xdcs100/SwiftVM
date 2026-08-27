@@ -139,7 +139,7 @@ struct Runtime::Impl final {
         state->indirect_l1_code_cache = l1_code_cache.Data();
         state->indirect_call_l1_code_cache =
                 address_space->GetCallCodeCacheTable().Data();
-        profile_interface.pending_call_l1_code_cache =
+        state->pending_call_l1_code_cache =
                 address_space->GetPendingCallCodeCacheTable().Data();
         ASSERT_MSG(reinterpret_cast<std::uintptr_t>(l1_code_cache.Data()) %
                                    l1_code_cache.DataAlignment() == 0,
@@ -711,7 +711,7 @@ void Runtime::SignalInterrupt() {
     impl->PublishIndirectL1Base(GetInterruptL1Mapping().Data());
     std::atomic_ref<void*>(impl->state->indirect_call_l1_code_cache)
             .store(GetInterruptL1Mapping().Data(), std::memory_order_release);
-    std::atomic_ref<void*>(impl->profile_interface.pending_call_l1_code_cache)
+    std::atomic_ref<void*>(impl->state->pending_call_l1_code_cache)
             .store(GetInterruptL1Mapping().Data(), std::memory_order_release);
     impl->state_storage.Arm();
 }
@@ -725,7 +725,7 @@ void Runtime::ClearInterrupt() {
     std::atomic_ref<void*>(impl->state->indirect_call_l1_code_cache)
             .store(impl->address_space->GetCallCodeCacheTable().Data(),
                    std::memory_order_release);
-    std::atomic_ref<void*>(impl->profile_interface.pending_call_l1_code_cache)
+    std::atomic_ref<void*>(impl->state->pending_call_l1_code_cache)
             .store(impl->address_space->GetPendingCallCodeCacheTable().Data(),
                    std::memory_order_release);
     std::atomic_ref<u64>(impl->state->exit_request)

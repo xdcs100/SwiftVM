@@ -900,8 +900,6 @@ TEST_CASE("Runtime preserves an interrupt between Run calls") {
     bool pending_call_restored = true;
     auto* const empty_rsb = runtime.GetState()->rsb_pointer;
     bool continuation_reset = empty_rsb != nullptr;
-    auto* profile = static_cast<RuntimeProfileInterface*>(
-            runtime.GetState()->interface);
     auto* pending_call_table =
             address_space.GetPendingCallCodeCacheTable().Data();
     for (unsigned iteration = 0; iteration < 1000; ++iteration) {
@@ -913,7 +911,7 @@ TEST_CASE("Runtime preserves an interrupt between Run calls") {
         request_published &=
                 (runtime.GetState()->exit_request & kBackedgeSignalRequest) != 0;
         pending_call_redirected &=
-                profile->pending_call_l1_code_cache != pending_call_table;
+                runtime.GetState()->pending_call_l1_code_cache != pending_call_table;
         interrupt_seen &= runtime.Run() == HaltReason::Signal;
         runtime.GetState()->rsb_pointer = empty_rsb - 1;
         runtime.ClearInterrupt();
@@ -921,7 +919,7 @@ TEST_CASE("Runtime preserves an interrupt between Run calls") {
         request_cleared &=
                 (runtime.GetState()->exit_request & kBackedgeSignalRequest) == 0;
         pending_call_restored &=
-                profile->pending_call_l1_code_cache == pending_call_table;
+                runtime.GetState()->pending_call_l1_code_cache == pending_call_table;
         resumed_miss &= runtime.Run() == HaltReason::CodeMiss;
     }
     REQUIRE(initial_miss);

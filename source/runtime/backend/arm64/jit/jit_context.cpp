@@ -847,9 +847,8 @@ JitContext::ForwardIndirectCall(const Register& location,
     const auto index = GetTmpX();
     const auto entry = GetTmpX();
     if (pending_flags) {
-        __ Ldr(entry, MemOperand(state, state_offset_exec_profile_ptr));
         __ Ldr(entry,
-               MemOperand(entry, profile_offset_pending_call_l1_code_cache));
+               MemOperand(state, state_offset_pending_call_l1_code_cache));
     } else {
         __ Ldr(entry,
                MemOperand(state, state_offset_indirect_call_l1_code_cache));

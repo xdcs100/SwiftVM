@@ -79,7 +79,6 @@ struct RuntimeProfileInterface {
     void* l1_code_cache{};
     // 仅 SVM_EXEC_TRACE 使用；每个 Runtime 独占，信号处理器只读。
     ExecutionTraceBuffer* execution_trace{};
-    void* pending_call_l1_code_cache{};
 };
 
 union CPUFlags {
@@ -111,6 +110,7 @@ struct State {
     // a signal request is pending.
     void* indirect_l1_code_cache{};
     void* indirect_call_l1_code_cache{};
+    void* pending_call_l1_code_cache{};
     void* interface{};
     HaltReason halt_reason{HaltReason::None};
     RSBFrame* rsb_pointer{};
@@ -161,6 +161,9 @@ static_assert(state_offset_indirect_l1_code_cache == sizeof(u64));
 constexpr u32 state_offset_indirect_call_l1_code_cache =
         offsetof(State, indirect_call_l1_code_cache);
 static_assert(state_offset_indirect_call_l1_code_cache == 2 * sizeof(u64));
+constexpr u32 state_offset_pending_call_l1_code_cache =
+        offsetof(State, pending_call_l1_code_cache);
+static_assert(state_offset_pending_call_l1_code_cache == 3 * sizeof(u64));
 static_assert(alignof(State) >= 2 * alignof(u64));
 constexpr u32 state_offset_spill_area = offsetof(State, spill_area);
 // FLAGS_REGS park: PSTATE and x12 last_result. Occupies spill_area[0..1]
@@ -230,7 +233,5 @@ constexpr u32 profile_offset_l1_code_cache =
         offsetof(RuntimeProfileInterface, l1_code_cache);
 constexpr u32 profile_offset_execution_trace =
         offsetof(RuntimeProfileInterface, execution_trace);
-constexpr u32 profile_offset_pending_call_l1_code_cache =
-        offsetof(RuntimeProfileInterface, pending_call_l1_code_cache);
 
 }  // namespace swift::runtime::backend
