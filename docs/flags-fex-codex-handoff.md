@@ -1909,6 +1909,23 @@ peepholes.
   environment switch or stress run remains. Applying this reduction to the last formal FEX
   denominator estimates the remaining CoreMark gap at about 3.0%; refresh both engines before
   treating it as a formal ratio.
+- `48014ae` replaces cycle-cover `LDAR + CBNZ` checks with a one-instruction fault-backed poll.
+  Each Runtime owns a page immediately before its aligned State payload; generated cycle edges load
+  the page through a fixed negative State offset, while Signal and SMC request publication protect
+  it. Existing fault metadata resumes at the corresponding cold exit stub, so flags, spills,
+  `current_loc` and the SMC generation are committed by the same path as before. Clearing the last
+  request restores read access. Continuation entry is now also rejected unless the Runtime has an
+  initialized ReturnStackBuffer, closing the latent x25 dependency exposed by the new State
+  placement. An exact same-build `a283c6e` / candidate CoreMark 2k A/B completes in 3.764/4.674
+  seconds and covers 99.997693% of host weight and 99.997997% of entries. Common weighted work moves
+  `313,535,840 -> 298,205,802` (`-15,330,038`, `-4.889405%`) with no growth; every changed hot PC
+  loses one instruction, including `0x4034b0`, `0x4033bb`, `0x403552`, `0x403630` and `0x403688`.
+  Mac/Orb direct-link without stress pass 817/771 assertions, SMC focuses pass 446/401, function
+  passes 252/252 and guarded return passes 5/5. CoreMark 20k returns `crcfinal=0x382f` on both, while
+  bounded Orb smallpt retains zero spills and SHA-256
+  `542db87b61af7a5cfff84083696082819f8608dc9c3ffaeda04b1db5b3210635`. No stress run, probe,
+  diagnostic path or environment switch remains. This reduction is larger than the previous 3.0%
+  estimated gap, so refresh the live FEX denominator before claiming parity or a lead.
 
 ## Orb loop
 
