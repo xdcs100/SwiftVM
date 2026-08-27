@@ -560,7 +560,8 @@ XRegister JitContext::GetSharedTmpX() {
 
 bool JitContext::ForwardStatic(ir::Location location,
                                Label* cycle_exit,
-                               LinkSiteKind direct_link_kind) {
+                               LinkSiteKind direct_link_kind,
+                               DirectLinkFlagsBypass flags_bypass) {
     // Same-module only, like the BlockLink path in Forward(): a slot filled by
     // another module outlives this module's view of it. The lookup also keeps
     // dispatch slots (a finite shared table) from being reserved for addresses
@@ -578,7 +579,7 @@ bool JitContext::ForwardStatic(ir::Location location,
         __ Ldar(ip0, MemOperand(state, state_offset_exit_request));
         __ Cbnz(ip0, cycle_exit);
     }
-    if (EmitDirectLink(location, direct_link_kind)) {
+    if (EmitDirectLink(location, direct_link_kind, flags_bypass)) {
         return true;
     }
     const u32 dispatcher_index = target_module->GetDispatchIndex(location);

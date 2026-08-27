@@ -148,6 +148,25 @@ void* TranslatePendingFlagsSource(const std::shared_ptr<Module>& module,
     return TranslateIR(module, function);
 }
 
+void* TranslatePendingFlagsStaticSource(const std::shared_ptr<Module>& module,
+                                        VAddr guest,
+                                        VAddr target) {
+    HIRBuilder builder{1, true};
+    auto* function = builder.AppendFunction(Location{guest}, Location{guest + 2});
+    auto* body = builder.LinkBlock(terminal::LinkBlock{Location{guest + 1}});
+    builder.SetCurBlock(body);
+    const auto value = function->LoadUniform(
+            Uniform{8, ValueType::U8}).SetType(ValueType::U8);
+    const auto one = function->LoadImm(Imm{u8{1}}).SetType(ValueType::U8);
+    const auto result = function->Sub(value, Operand{one}).SetType(ValueType::U8);
+    function->SaveFlags(result, Flags::All);
+    function->AdvancePC(Imm{u64{1}});
+    function->SetLocation(Lambda{Imm{target}});
+    function->EndBlock(terminal::ReturnToDispatch{});
+    function->EndFunction();
+    return TranslateIR(module, function);
+}
+
 struct ProductionSite {
     u8* rx{};
     LinkSiteKey key{};
@@ -1095,6 +1114,76 @@ TEST_CASE("production direct links bypass a shared full flags merge",
     REQUIRE(munmap(guest_memory, guest_size) == 0);
 #else
     SUCCEED("production flags bypass execution requires an AArch64 host");
+#endif
+}
+
+TEST_CASE("static forwards register their flags bypass",
+          "[direct-link][production][flags]") {
+#if defined(__aarch64__)
+    ScopedEnvironment disk_cache{"SVM_JIT_CACHE", ""};
+    ScopedEnvironment flags_regs{"SVM_FLAGS_REGS", "1"};
+
+    const size_t page_size = static_cast<size_t>(getpagesize());
+    const size_t guest_size = 8 * page_size;
+    void* guest_memory = mmap(nullptr,
+                              guest_size,
+                              PROT_READ | PROT_WRITE,
+                              MAP_PRIVATE | MAP_ANON,
+                              -1,
+                              0);
+    REQUIRE(guest_memory != MAP_FAILED);
+    {
+        const VAddr source_guest = page_size + 0x100;
+        const VAddr target_guest = 5 * page_size + 0x100;
+        Config config{
+                .loc_start = 0,
+                .loc_end = guest_size,
+                .enable_jit = true,
+                .enable_asm_interp = false,
+                .has_local_operation = false,
+                .backend_isa = kArm64,
+                .uniform_buffer_size = 64,
+                .global_opts = Optimizations::BlockLink,
+                .region_edges = true,
+                .memory_base = guest_memory,
+                .guest_addr_mask = guest_size - 1,
+        };
+        AddressSpace space{config};
+        auto module = space.GetDefaultModule();
+
+        auto* target_code = TranslateFlagsKillingTarget(module, target_guest);
+        REQUIRE(target_code != nullptr);
+        space.PushCodeCache(Location{target_guest}, target_code);
+        const auto target = space.GetLinkManager().QueryTarget(target_guest);
+        REQUIRE(target);
+        REQUIRE(target->pending_flags_host_pc != nullptr);
+
+        auto* source_code = static_cast<u8*>(TranslatePendingFlagsStaticSource(
+                module, source_guest, target_guest));
+        REQUIRE(source_code != nullptr);
+        space.PushCodeCache(Location{source_guest}, source_code);
+        const auto region = module->GetCodeRegion(source_code);
+        REQUIRE(region);
+        const auto sites = FindProductionSites(space, *region, source_code, 512);
+        REQUIRE(sites.size() == 1);
+        const auto& site = sites.front();
+        REQUIRE(site.record.guest_target == target_guest);
+        REQUIRE(site.record.flags_bypass_offset != UINT32_MAX);
+        auto* bypass = region->rx_base + site.record.flags_bypass_offset;
+        REQUIRE(DecodeBranchTarget(bypass, LoadInsn(bypass)) ==
+                reinterpret_cast<uintptr_t>(bypass + 3 * sizeof(u32)));
+
+        Runtime runtime{&space};
+        runtime.SetLocation(source_guest);
+        REQUIRE(runtime.Run() == HaltReason::CallHost);
+        REQUIRE(space.GetLinkManager().QuerySite(site.key)->state ==
+                LinkSiteState::Linked);
+        REQUIRE(DecodeBranchTarget(site.rx, LoadInsn(site.rx)) ==
+                reinterpret_cast<uintptr_t>(target->pending_flags_host_pc));
+    }
+    REQUIRE(munmap(guest_memory, guest_size) == 0);
+#else
+    SUCCEED("production static flags bypass requires an AArch64 host");
 #endif
 }
 

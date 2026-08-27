@@ -127,7 +127,8 @@ public:
     [[nodiscard]] bool ForwardStatic(ir::Location location,
                                      Label* cycle_exit = nullptr,
                                      LinkSiteKind direct_link_kind =
-                                             LinkSiteKind::Unconditional);
+                                             LinkSiteKind::Unconditional,
+                                     DirectLinkFlagsBypass flags_bypass = {});
     // Polls the sticky signal request, then checks only the first slot of the
     // existing per-Runtime L1 table. A key mismatch or cleared value returns
     // through the unchanged dispatcher, which performs the complete L1

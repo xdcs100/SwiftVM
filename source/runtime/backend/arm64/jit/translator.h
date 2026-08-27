@@ -761,7 +761,8 @@ private:
     std::optional<u64> static_next_loc{};
     // Emits the inline dispatch for `static_next_loc`; returns false when no
     // static target is known and the caller must Ret to the dispatcher.
-    bool EmitStaticForward(LinkSiteKind direct_link_kind);
+    bool EmitStaticForward(LinkSiteKind direct_link_kind,
+                           DirectLinkFlagsBypass flags_bypass = {});
     // Dynamic SetLocation is remembered through the no-op PopRSB marker while
     // it remains the final semantic body value. The terminal can reuse its
     // register without extending an SSA lifetime or reloading State::current_loc.

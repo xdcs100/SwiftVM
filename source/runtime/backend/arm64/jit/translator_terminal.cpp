@@ -23,21 +23,31 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
         if constexpr (std::is_same_v<T, ir::terminal::Invalid>) {
             // Flat decoded blocks have no explicit terminal; their trailing
             // SetLocation supplies the next dispatch location.
-            MergeNZCV(FlagsRegsAuditMergeCause::TerminalDispatcher,
-                      FlagsRegsAuditEdgeKind::Dispatcher);
+            const auto local_flags_bypass = MergeNZCV(
+                    FlagsRegsAuditMergeCause::TerminalDispatcher,
+                    FlagsRegsAuditEdgeKind::Dispatcher);
             context.RecordExecCounter(static_next_loc ? exec_offset_exit_direct
                                                       : exec_offset_exit_indirect);
-            if (!EmitStaticForward(direct_link_kind) && !EmitIndirectForward()) {
+            if (!EmitStaticForward(
+                        direct_link_kind,
+                        local_flags_bypass.Valid() ? local_flags_bypass
+                                                   : flags_bypass) &&
+                !EmitIndirectForward()) {
                 __ Ret();
             }
         } else if constexpr (std::is_same_v<T, ir::terminal::ReturnToDispatch>) {
-            MergeNZCV(FlagsRegsAuditMergeCause::TerminalDispatcher,
-                      FlagsRegsAuditEdgeKind::Dispatcher);
+            const auto local_flags_bypass = MergeNZCV(
+                    FlagsRegsAuditMergeCause::TerminalDispatcher,
+                    FlagsRegsAuditEdgeKind::Dispatcher);
             context.RecordExecCounter(
                     cur_block_is_call ? exec_offset_exit_call
                                       : (static_next_loc ? exec_offset_exit_direct
                                                          : exec_offset_exit_indirect));
-            if (!EmitStaticForward(direct_link_kind) && !EmitIndirectForward()) {
+            if (!EmitStaticForward(
+                        direct_link_kind,
+                        local_flags_bypass.Valid() ? local_flags_bypass
+                                                   : flags_bypass) &&
+                !EmitIndirectForward()) {
                 __ Ret();
             }
         } else if constexpr (std::is_same_v<T, ir::terminal::ReturnToHost>) {
@@ -386,7 +396,8 @@ bool JitTranslator::RecordLocalCondition(ir::Inst* inst, ir::Cond cond) {
 // BlockLink path already branch through, with the same safety property: SMC
 // invalidation (SmcTracker::ClearDispatchSlots) zeroes the slot, so a stale
 // translation degrades to the Cbz fallback rather than to a wild branch.
-bool JitTranslator::EmitStaticForward(LinkSiteKind direct_link_kind) {
+bool JitTranslator::EmitStaticForward(LinkSiteKind direct_link_kind,
+                                      DirectLinkFlagsBypass flags_bypass) {
     if (!static_next_loc) {
         return false;
     }
@@ -394,7 +405,8 @@ bool JitTranslator::EmitStaticForward(LinkSiteKind direct_link_kind) {
     const u32 link_before = context.CurrentBufferSize();
     const auto location = ir::Location{target};
     const bool emitted = context.ForwardStatic(
-            location, GetDirectCycleExit(location), direct_link_kind);
+            location, GetDirectCycleExit(location), direct_link_kind,
+            flags_bypass);
     if (emitted) {
         static_next_loc.reset();
     } else {
