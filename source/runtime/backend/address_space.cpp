@@ -129,6 +129,11 @@ u32 AddressSpace::PushCallCodeCache(ir::Location location, void* cache) {
     return call_code_cache.Put(location.Value(), reinterpret_cast<size_t>(cache));
 }
 
+u32 AddressSpace::PushPendingCallCodeCache(ir::Location location, void* cache) {
+    return pending_call_code_cache.Put(location.Value(),
+                                       reinterpret_cast<size_t>(cache));
+}
+
 u32 AddressSpace::GetCodeCacheIndex(ir::Location location) {
     return code_cache.GetOrPut(location.Value(), 0);
 }

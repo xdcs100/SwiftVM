@@ -68,9 +68,8 @@ struct ExecutionTraceBuffer {
     std::array<ExecutionTraceEntry, kExecutionTraceEntryCount> entries{};
 };
 
-// Both execution-side probes share State::interface. ExecProfileCounters is
-// deliberately first so SVM_EXEC_PROF's existing offsets and generated code
-// remain byte-identical when the W71 probe is off.
+// Runtime-private data accessed by generated code shares State::interface.
+// ExecProfileCounters stays first so its existing offsets remain stable.
 struct RuntimeProfileInterface {
     ExecProfileCounters exec{};
     u64* hot_coalesce_counters{};
@@ -80,6 +79,7 @@ struct RuntimeProfileInterface {
     void* l1_code_cache{};
     // 仅 SVM_EXEC_TRACE 使用；每个 Runtime 独占，信号处理器只读。
     ExecutionTraceBuffer* execution_trace{};
+    void* pending_call_l1_code_cache{};
 };
 
 union CPUFlags {
@@ -230,5 +230,7 @@ constexpr u32 profile_offset_l1_code_cache =
         offsetof(RuntimeProfileInterface, l1_code_cache);
 constexpr u32 profile_offset_execution_trace =
         offsetof(RuntimeProfileInterface, execution_trace);
+constexpr u32 profile_offset_pending_call_l1_code_cache =
+        offsetof(RuntimeProfileInterface, pending_call_l1_code_cache);
 
 }  // namespace swift::runtime::backend

@@ -42,6 +42,7 @@ public:
 
     u32 PushCodeCache(ir::Location location, void* cache);
     u32 PushCallCodeCache(ir::Location location, void* cache);
+    u32 PushPendingCallCodeCache(ir::Location location, void* cache);
 
     u32 GetCodeCacheIndex(ir::Location location);
 
@@ -75,6 +76,9 @@ public:
     [[nodiscard]] TranslateTable& GetCallCodeCacheTable() {
         return call_code_cache;
     }
+    [[nodiscard]] TranslateTable& GetPendingCallCodeCacheTable() {
+        return pending_call_code_cache;
+    }
 
     // JIT disk cache (SVM_JIT_CACHE=<dir>, off by default). Null when the
     // switch is unset or the environment cannot support it; every caller must
@@ -103,6 +107,7 @@ private:
     std::unique_ptr<Trampolines> trampolines;
     TranslateTable code_cache{code_cache_bits};
     TranslateTable call_code_cache{18, TranslateTableHash::Direct};
+    TranslateTable pending_call_code_cache{18, TranslateTableHash::Direct};
     // mutable: SMC page records are tracking metadata, mutated through the
     // signal-handler / const-access paths (same pattern as GetTrampolines).
     mutable SmcTracker smc_tracker;

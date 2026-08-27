@@ -23,9 +23,15 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
         if constexpr (std::is_same_v<T, ir::terminal::Invalid>) {
             // Flat decoded blocks have no explicit terminal; their trailing
             // SetLocation supplies the next dispatch location.
-            const auto local_flags_bypass = MergeNZCV(
-                    FlagsRegsAuditMergeCause::TerminalDispatcher,
-                    FlagsRegsAuditEdgeKind::Dispatcher);
+            constexpr auto merge_cause =
+                    FlagsRegsAuditMergeCause::TerminalDispatcher;
+            const bool pending_call_flags =
+                    CanUseIndirectCallContinuation() &&
+                    CanDeferFullNZCVMerge(merge_cause);
+            const auto local_flags_bypass = pending_call_flags
+                    ? DirectLinkFlagsBypass{}
+                    : MergeNZCV(merge_cause,
+                                FlagsRegsAuditEdgeKind::Dispatcher);
             context.RecordExecCounter(static_next_loc ? exec_offset_exit_direct
                                                       : exec_offset_exit_indirect);
             if (!EmitStaticForward(
@@ -34,14 +40,20 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
                         local_flags_bypass.Valid() ? local_flags_bypass
                                                    : flags_bypass) &&
                 !(CanUseIndirectCallContinuation()
-                          ? EmitIndirectCallForward()
+                          ? EmitIndirectCallForward(pending_call_flags)
                           : EmitIndirectForward())) {
                 context.ReturnHost();
             }
         } else if constexpr (std::is_same_v<T, ir::terminal::ReturnToDispatch>) {
-            const auto local_flags_bypass = MergeNZCV(
-                    FlagsRegsAuditMergeCause::TerminalDispatcher,
-                    FlagsRegsAuditEdgeKind::Dispatcher);
+            constexpr auto merge_cause =
+                    FlagsRegsAuditMergeCause::TerminalDispatcher;
+            const bool pending_call_flags =
+                    CanUseIndirectCallContinuation() &&
+                    CanDeferFullNZCVMerge(merge_cause);
+            const auto local_flags_bypass = pending_call_flags
+                    ? DirectLinkFlagsBypass{}
+                    : MergeNZCV(merge_cause,
+                                FlagsRegsAuditEdgeKind::Dispatcher);
             context.RecordExecCounter(
                     cur_block_is_call ? exec_offset_exit_call
                                       : (static_next_loc ? exec_offset_exit_direct
@@ -52,7 +64,7 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
                         local_flags_bypass.Valid() ? local_flags_bypass
                                                    : flags_bypass) &&
                 !(CanUseIndirectCallContinuation()
-                          ? EmitIndirectCallForward()
+                          ? EmitIndirectCallForward(pending_call_flags)
                           : EmitIndirectForward())) {
                 context.ReturnHost();
             }
@@ -481,19 +493,21 @@ bool JitTranslator::CanUseIndirectCallContinuation() const {
            !backedge_flags_plan && vec_nan_cold_sites.empty();
 }
 
-bool JitTranslator::EmitIndirectCallForward() {
+bool JitTranslator::EmitIndirectCallForward(bool pending_flags) {
     if (!CanUseIndirectCallContinuation()) {
         return false;
     }
     const auto location = context.X(*dynamic_next_loc);
     dynamic_next_loc.reset();
-    auto& miss_site = indirect_exit_miss_sites[location.GetCode()];
+    auto& miss_site = (pending_flags ? pending_call_miss_sites
+                                     : indirect_exit_miss_sites)[location.GetCode()];
     if (!miss_site.label) {
         miss_site.label = std::make_unique<Label>();
         miss_site.guest_start = cur_block->GetStartLocation().Value();
     }
     const u32 link_before = context.CurrentBufferSize();
-    const auto fault = context.ForwardIndirectCall(location, miss_site.label.get());
+    const auto fault = context.ForwardIndirectCall(
+            location, miss_site.label.get(), pending_flags);
     indirect_l1_fault_metadata.push_back({
             .guest_start = cur_block->GetStartLocation().Value(),
             .host_begin = fault.begin,
@@ -501,6 +515,10 @@ bool JitTranslator::EmitIndirectCallForward() {
             .recovery_reg = dynamic_location_miss ? location.GetCode()
                                                   : UINT32_MAX,
     });
+    if (pending_flags && !flags_token_keep) {
+        nzcv_dirty = false;
+        nzcv_requested = {};
+    }
     dynamic_location_miss = nullptr;
     RecordBoundaryRange(BoundarySubsequence::LinkTail, link_before,
                         context.CurrentBufferSize());
@@ -508,6 +526,21 @@ bool JitTranslator::EmitIndirectCallForward() {
 }
 
 void JitTranslator::EmitIndirectExitColdPaths() {
+    for (u32 reg = 0; reg < pending_call_miss_sites.size(); ++reg) {
+        auto& site = pending_call_miss_sites[reg];
+        if (!site.label) {
+            continue;
+        }
+        __ Bind(site.label.get());
+        const XRegister location{reg};
+        const XRegister scratch = location == ip0 ? ip1 : ip0;
+        EmitNZCVMerge(static_cast<u64>(HostFlags::NZCV),
+                      scratch);
+        auto* recovery = terminal_location_publication.MissLabel(location);
+        ASSERT(recovery);
+        __ B(recovery);
+        site = {};
+    }
     for (u32 reg = 0; reg < indirect_exit_miss_sites.size(); ++reg) {
         auto& site = indirect_exit_miss_sites[reg];
         if (!site.label) {

@@ -243,24 +243,40 @@ void JitTranslator::EmitNZCVMerge(u64 requested,
     __ Orr(flags, flags, scratch);
 }
 
-DirectLinkFlagsBypass JitTranslator::MergeNZCV(
-        FlagsRegsAuditMergeCause cause,
-        FlagsRegsAuditEdgeKind edge) {
-    DirectLinkFlagsBypass flags_bypass{};
+std::optional<u64> JitTranslator::PendingNZCVMergeMask(
+        FlagsRegsAuditMergeCause cause) const {
     const bool force_ret_pstate =
             FlagsRegsEnabled() && !nzcv_dirty && !True(nzcv_requested) &&
             BlockIsFlagsTransparent(cur_block) &&
             (cause == FlagsRegsAuditMergeCause::HostExit ||
              (cause == FlagsRegsAuditMergeCause::TerminalDispatcher &&
               region_edges_active));
-    if ((save_in_nzcv && nzcv_dirty) || force_ret_pstate) {
+    if (!(save_in_nzcv && nzcv_dirty) && !force_ret_pstate) {
+        return std::nullopt;
+    }
+    return force_ret_pstate ? static_cast<u64>(HostFlags::NZCV)
+                            : static_cast<u64>(nzcv_requested);
+}
+
+bool JitTranslator::CanDeferFullNZCVMerge(
+        FlagsRegsAuditMergeCause cause) const {
+    const auto requested = PendingNZCVMergeMask(cause);
+    return FlagsRegsEnabled() && region_edges_active && requested &&
+           *requested == static_cast<u64>(HostFlags::NZCV);
+}
+
+DirectLinkFlagsBypass JitTranslator::MergeNZCV(
+        FlagsRegsAuditMergeCause cause,
+        FlagsRegsAuditEdgeKind edge) {
+    DirectLinkFlagsBypass flags_bypass{};
+    const auto requested = PendingNZCVMergeMask(cause);
+    if (requested) {
         const u32 begin = context.CurrentBufferSize();
         // Only merge the NZCV bits that SaveFlags actually requested.
         // Bits NOT requested (e.g. C/V when only SF/ZF were saved) keep
         // their existing value in the flags register, so a ClearFlags(CF)
         // between two flag-setting instructions is not overwritten.
-        const u64 req = force_ret_pstate ? static_cast<u64>(HostFlags::NZCV)
-                                         : static_cast<u64>(nzcv_requested);
+        const u64 req = *requested;
         EmitNZCVMerge(req, context.GetSharedTmpX());
         const u32 merge_end = context.CurrentBufferSize();
         if (FlagsRegsEnabled() && region_edges_active &&

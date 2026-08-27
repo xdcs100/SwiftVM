@@ -233,6 +233,8 @@ TEST_CASE("SMC range invalidation redirects the L1 value used by inline indirect
     auto token = fixture.Tracker().RegisterRuntime(l1);
     constexpr std::uintptr_t kGuest = 0x180;
     constexpr std::size_t kFakeCode = 0x1234'5678;
+    constexpr std::size_t kFakeCallCode = 0x2345'6780;
+    constexpr std::size_t kFakePendingCallCode = 0x3456'7800;
     constexpr std::size_t kSafeL2Continuation = 0x8765'4320;
     l1.SetInvalidValue(kSafeL2Continuation);
 
@@ -241,9 +243,17 @@ TEST_CASE("SMC range invalidation redirects the L1 value used by inline indirect
     fixture.Publish(kGuest);
     fixture.Space().PushCodeCache(Location{kGuest},
                                   reinterpret_cast<void*>(kFakeCode));
+    fixture.Space().PushCallCodeCache(
+            Location{kGuest}, reinterpret_cast<void*>(kFakeCallCode));
+    fixture.Space().PushPendingCallCodeCache(
+            Location{kGuest}, reinterpret_cast<void*>(kFakePendingCallCode));
     REQUIRE(l1.Put(kGuest, kFakeCode));
     REQUIRE(l1.Lookup(kGuest) == kFakeCode);
     REQUIRE(fixture.Space().GetCodeCacheTable().Lookup(kGuest) == kFakeCode);
+    REQUIRE(fixture.Space().GetCallCodeCacheTable().Lookup(kGuest) ==
+            kFakeCallCode);
+    REQUIRE(fixture.Space().GetPendingCallCodeCacheTable().Lookup(kGuest) ==
+            kFakePendingCallCode);
 
     fixture.Tracker().InvalidateRange(
             fixture.Space(), &l1, kGuest, kGuest + 1);
@@ -251,6 +261,8 @@ TEST_CASE("SMC range invalidation redirects the L1 value used by inline indirect
     // L2 continuation rather than a reclaimed host pointer or zero branch.
     REQUIRE(l1.Lookup(kGuest) == kSafeL2Continuation);
     REQUIRE(fixture.Space().GetCodeCacheTable().Lookup(kGuest) == 0);
+    REQUIRE(fixture.Space().GetCallCodeCacheTable().Lookup(kGuest) == 0);
+    REQUIRE(fixture.Space().GetPendingCallCodeCacheTable().Lookup(kGuest) == 0);
     REQUIRE_FALSE(fixture.HasNode(kGuest));
 
     fixture.Tracker().UnregisterRuntime(token);

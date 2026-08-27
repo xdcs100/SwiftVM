@@ -895,6 +895,12 @@ TEST_CASE("Runtime preserves an interrupt between Run calls") {
     bool resumed_miss = true;
     bool request_published = true;
     bool request_cleared = true;
+    bool pending_call_redirected = true;
+    bool pending_call_restored = true;
+    auto* profile = static_cast<RuntimeProfileInterface*>(
+            runtime.GetState()->interface);
+    auto* pending_call_table =
+            address_space.GetPendingCallCodeCacheTable().Data();
     for (unsigned iteration = 0; iteration < 1000; ++iteration) {
         initial_miss &= runtime.Run() == HaltReason::CodeMiss;
         // Deliberately publish after Run has returned and before the next Run:
@@ -903,10 +909,14 @@ TEST_CASE("Runtime preserves an interrupt between Run calls") {
         runtime.SignalInterrupt();
         request_published &=
                 (runtime.GetState()->exit_request & kBackedgeSignalRequest) != 0;
+        pending_call_redirected &=
+                profile->pending_call_l1_code_cache != pending_call_table;
         interrupt_seen &= runtime.Run() == HaltReason::Signal;
         runtime.ClearInterrupt();
         request_cleared &=
                 (runtime.GetState()->exit_request & kBackedgeSignalRequest) == 0;
+        pending_call_restored &=
+                profile->pending_call_l1_code_cache == pending_call_table;
         resumed_miss &= runtime.Run() == HaltReason::CodeMiss;
     }
     REQUIRE(initial_miss);
@@ -914,6 +924,8 @@ TEST_CASE("Runtime preserves an interrupt between Run calls") {
     REQUIRE(resumed_miss);
     REQUIRE(request_published);
     REQUIRE(request_cleared);
+    REQUIRE(pending_call_redirected);
+    REQUIRE(pending_call_restored);
 }
 
 TEST_CASE("Test block ir print") {

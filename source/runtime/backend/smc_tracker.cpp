@@ -276,6 +276,7 @@ void SmcTracker::ClearDispatchSlots(AddressSpace& space,
     auto clear_location = [&](VAddr location) {
         space.GetCodeCacheTable().Zero(location);
         space.GetCallCodeCacheTable().Zero(location);
+        space.GetPendingCallCodeCacheTable().Zero(location);
         if (extra_l1) {
             extra_l1->Zero(location);
         }

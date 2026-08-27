@@ -134,6 +134,8 @@ struct Runtime::Impl final {
         state->indirect_l1_code_cache = l1_code_cache.Data();
         state->indirect_call_l1_code_cache =
                 address_space->GetCallCodeCacheTable().Data();
+        profile_interface.pending_call_l1_code_cache =
+                address_space->GetPendingCallCodeCacheTable().Data();
         ASSERT_MSG(reinterpret_cast<std::uintptr_t>(l1_code_cache.Data()) %
                                    l1_code_cache.DataAlignment() == 0,
                    "runtime L1 cache does not satisfy its address-formation alignment");
@@ -690,6 +692,8 @@ void Runtime::SignalInterrupt() {
     impl->PublishIndirectL1Base(GetInterruptL1Mapping().Data());
     std::atomic_ref<void*>(impl->state->indirect_call_l1_code_cache)
             .store(GetInterruptL1Mapping().Data(), std::memory_order_release);
+    std::atomic_ref<void*>(impl->profile_interface.pending_call_l1_code_cache)
+            .store(GetInterruptL1Mapping().Data(), std::memory_order_release);
 }
 
 void Runtime::ClearInterrupt() {
@@ -697,6 +701,9 @@ void Runtime::ClearInterrupt() {
     impl->PublishIndirectL1Base(impl->l1_code_cache.Data());
     std::atomic_ref<void*>(impl->state->indirect_call_l1_code_cache)
             .store(impl->address_space->GetCallCodeCacheTable().Data(),
+                   std::memory_order_release);
+    std::atomic_ref<void*>(impl->profile_interface.pending_call_l1_code_cache)
+            .store(impl->address_space->GetPendingCallCodeCacheTable().Data(),
                    std::memory_order_release);
     std::atomic_ref<u64>(impl->state->exit_request)
             .fetch_and(kBackedgeSmcRequestMask, std::memory_order_acq_rel);
@@ -1058,6 +1065,10 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
                 mutable_address_space.PushCodeCache(guest, buffer.exec_data + offset);
                 if (call_host_pc) {
                     mutable_address_space.PushCallCodeCache(guest, call_host_pc);
+                }
+                if (call_pending_flags_host_pc) {
+                    mutable_address_space.PushPendingCallCodeCache(
+                            guest, call_pending_flags_host_pc);
                 }
             }
             cache_blocks.push_back({
