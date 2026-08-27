@@ -1937,6 +1937,21 @@ peepholes.
   ABI-local flags enabled and object-code caching disabled. This closes the five-item CoreMark
   target but is not evidence of parity across other workloads; the next tranche should begin with
   fresh bounded joins for smallpt and at least one branch-heavy workload.
+- `5652b11` closes two target-validity holes exposed by the first bounded c-ray refresh. An empty
+  continuation frame could match a zero guest return target and branch through a zero host
+  continuation; an indirect-L1 key match could likewise select a cleared zero value. Continuation
+  hits now require a nonzero host continuation, and the L1 condition combines key and value
+  validity before selecting either the cached target or miss path. Temporary RSB-empty and
+  zero-key-table prototypes were removed because neither covered both failure modes. The repaired
+  c-ray `-j 1 -s 1 -d 4x3` shape completes in 10.5 seconds with 8,259 PCs; its live join covers
+  97.286718% of entries and 96.183129% of SwiftVM host weight, measuring SwiftVM `2.695852` versus
+  FEX `3.382138`, or `0.797085x`. The necessary checks cost CoreMark 2k
+  `298,224,015 -> 300,772,945` (`+2,548,930`, `+0.854703%`) at 100% PC/entry coverage. The refreshed
+  live ratio remains ahead: SwiftVM `1.804829` versus FEX `1.860078`, or `0.970297x` and a 2.9703%
+  lead. Mac/Orb focused return, L1 and call-link tests pass 47/47 assertions, CoreMark 20k returns
+  `crcfinal=0x382f`, and bounded smallpt retains zero spills and SHA-256
+  `542db87b61af7a5cfff84083696082819f8608dc9c3ffaeda04b1db5b3210635`. No stress run, probe,
+  diagnostic path or environment switch remains.
 
 ## Orb loop
 
