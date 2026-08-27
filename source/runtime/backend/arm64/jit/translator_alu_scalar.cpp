@@ -856,7 +856,8 @@ void JitTranslator::EmitDiv128(ir::Inst* inst) {
     EmitPreserveAllPairCall(inst,
                             reinterpret_cast<VAddr>(target),
                             args,
-                            ir::OpCode::Div128Remainder);
+                            ir::OpCode::Div128Remainder,
+                            ir::HostRegisterEffect::GeneralOnly);
 }
 
 void JitTranslator::EmitDiv128Remainder(ir::Inst*) {}
