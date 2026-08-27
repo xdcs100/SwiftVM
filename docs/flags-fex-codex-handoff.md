@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Product code tip: **`aa4ed1b`** `perf: extend flags bypass to static forwards`
+- Product code tip: **`a298238`** `perf: load pending call cache from state`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -2016,6 +2016,19 @@ peepholes.
   and 13.83% of SwiftVM host weight because FEX emitted multiblock roots while SwiftVM emitted
   per-block roots, so its apparent weighted ratio is rejected. No diagnostic probe, temporary
   source path, environment switch, or benchmark stress run remains.
+- `a298238` removes the remaining profile-interface hop from the pending-flags indirect-call hit
+  boundary. The pending call-L1 base now lives beside the canonical indirect-call bases in `State`,
+  so `0x402580` loads it directly from x28 instead of loading `RuntimeProfileInterface` first.
+  Against the post-SQLite CoreMark 2k shape, all 3,695 PCs and versions match at 100% host and entry
+  coverage; weighted host work moves `305,945,562 -> 305,307,232` (`-638,330`, `-0.208642%`).
+  `0x402580` contributes `-638,328` and shrinks `16 -> 15`; two cold one-entry blocks contribute the
+  remaining two instructions. The final tracked-source resync reproduces `305,307,232` exactly with
+  `crcfinal=0x4983`. Mac and Orb interrupt and indirect-call-L1 focuses pass 8 and 29 assertions.
+  The bounded default SQLite run exits in 1.61 seconds with `TOTAL 0.983s`, and the one-second
+  OpenSSL SHA command exits normally. Replacing the existing flags-bypass branch with NOPs was
+  rejected without implementation: the three NOPs would still execute, so removing that remaining
+  branch requires a different code layout and must not introduce per-site cold growth. No stress
+  run, probe, diagnostic path or environment switch remains.
 
 ## Orb loop
 
