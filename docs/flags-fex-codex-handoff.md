@@ -1971,6 +1971,21 @@ peepholes.
   (`+464`, `+0.000154%`). Mac and Orb flags, indirect-L1 and continuation focuses pass 119, 19 and
   2 assertions respectively. No stress run, full suite, diagnostic path or environment switch
   remains.
+- `ac3c3de` closes the value and region-cycle failures uncovered by the bounded OpenSSL refresh.
+  Full-width aliases of a value already published in a pinned guest GPR now resolve directly to
+  that fixed home in scalar Add, so glibc `strtol` computes `acc * 10 + digit` instead of reading an
+  unmaterialized SSA allocation. The alias matcher also rejects non-`BitExtract` consumers before
+  querying their return width. Backedge labels now cover both hot pending-flags cuts and cold
+  dead-successor cuts, cold-path poll faults are resolved before label release, and direct-cycle
+  stubs are emitted after all cold edges have declared their targets. OpenSSL now honors
+  `-seconds 1` and completes its SHA run without a translation assertion. Mac and Orb pinned,
+  fixed-home and region focuses pass 93, 40 and 264 assertions; CoreMark 2k retains
+  `crcfinal=0x4983`. A same-input static setup region measures 634 SwiftVM host instructions versus
+  597 in FEX, a 6.20% local gap. The SHA body is not statically comparable because FEX compiles a
+  2,604-instruction multiblock from `0x8b9340`, while SwiftVM compiles only the two reached regions.
+  A six-second counter run was stopped without output, and no profiler path or temporary probe is
+  retained. OpenSSL still reports `infk` because its elapsed-time denominator is zero; do not use
+  that throughput as code-generation evidence.
 
 ## Orb loop
 
