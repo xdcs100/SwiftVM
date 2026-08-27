@@ -35,6 +35,49 @@ void JitTranslator::EmitSse42Str(ir::Inst* inst) {
             }
         }
     }
+    if (imm == 0x3au && a.GetCode() == b.GetCode()) {
+        const auto length = context.GetTmpX();
+        const auto scalar = context.GetTmpX();
+        const auto zero = context.GetTmpV();
+        __ Cmeq(zero.V16B(), a.V16B(), 0);
+        __ Shrn(zero.V8B(), zero.V8H(), 4);
+        __ Fmov(length, zero.D());
+        __ Rbit(length, length);
+        __ Clz(length, length);
+        __ Lsr(length, length, 2);
+
+        __ Mov(result, 1);
+        __ Lsl(result, result, length.W());
+        __ Sub(result, result, 1);
+        __ Eor(result, result, all);
+        __ Orr(result, result, Operand{length.W(), LSL, 16});
+
+        const auto length_flags = publish_flags &
+                (ir::Flags::Negate | ir::Flags::Zero | ir::Flags::Carry);
+        if (True(length_flags)) {
+            __ Cmp(length.W(), n);
+            __ Cset(scalar.W(), lt);
+            if (True(length_flags & ir::Flags::Negate)) {
+                __ Orr(result, result,
+                       Operand{scalar.W(), LSL, sse42str::kSignBit});
+            }
+            if (True(length_flags & ir::Flags::Zero)) {
+                __ Orr(result, result,
+                       Operand{scalar.W(), LSL, sse42str::kZeroBit});
+            }
+            if (True(length_flags & ir::Flags::Carry)) {
+                __ Orr(result, result,
+                       Operand{scalar.W(), LSL, sse42str::kCarryBit});
+            }
+        }
+        if (True(publish_flags & ir::Flags::Overflow)) {
+            __ Cmp(length.W(), 0);
+            __ Cset(scalar.W(), eq);
+            __ Orr(result, result,
+                   Operand{scalar.W(), LSL, sse42str::kOverflowBit});
+        }
+        return;
+    }
     auto len1 = context.GetTmpX();
     auto len2 = context.GetTmpX();
     auto scalar = context.GetTmpX();
