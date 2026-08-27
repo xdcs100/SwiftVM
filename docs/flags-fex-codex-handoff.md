@@ -2093,6 +2093,19 @@ peepholes.
   `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`, and the one-second
   OpenSSL SHA command exits normally. No stress run, retained probe, diagnostic path or environment
   switch remains.
+- The post-`e0f9d58` live FEX refresh uses the same measurement binary and smallest-containing-range
+  join as the prior report. Replaying the retained pre-refresh SwiftVM profile reproduces the old
+  result to rounding: SwiftVM `2.004543`, FEX `1.860013`, `1.077704x`. The current CoreMark 2k
+  profile measures SwiftVM `1.749840` versus FEX `1.860484`, or `0.940530x`, at 99.999986% guest
+  and 99.999973% SwiftVM-host coverage. CoreMark is therefore no longer the workload-level gap to
+  optimize, even though isolated blocks still exceed FEX's multiblock-density estimate. A bounded
+  smallpt join also favors SwiftVM on the 98.45% comparable guest path, but FEX produces a different
+  PPM, so that result is only an exclusion signal and not a parity claim. SQLite remains the next
+  branch-heavy audit target. Its full entry-instrumented run did not finish inside either the six-
+  or eight-second cap and was terminated; SIGINT did not produce a partial profile. Do not extend
+  those runs or add a profiler exit mechanism. Use a bounded representative testset or inspect the
+  remaining multiblock/dispatch formation directly. No new profiler, probe, environment switch or
+  source path was retained.
 
 ## Orb loop
 
