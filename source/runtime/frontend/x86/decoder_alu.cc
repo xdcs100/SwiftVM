@@ -1354,33 +1354,34 @@ void X64Decoder::DecodeRotate(_DInst& insn, bool left) {
     // Rotates affect only CF and OF; N/Z/P/AF are left unchanged. A zero masked
     // count leaves the flags untouched (a full-width rotate has a non-zero masked
     // count, so it still updates CF even though the value is the identity).
+    const bool dynamic_count = constant_count == UINT32_MAX;
+    const bool static_zero_count = constant_count == 0;
     ir::Value skip_flags;
-    if (!compact) {
+    if (dynamic_count) {
         skip_flags = __ NotGoto(__ TestNotZero(count_masked));
     }
-    // CF = last bit rotated out: ROL -> result bit 0, ROR -> result MSB. Holds
-    // for any non-zero count.
-    auto msb = __ And(__ LsrImm(result, ir::Imm(u64(width - 1))), ir::Operand{ir::Imm(u64(1))});
-    ir::Value cf = left ? __ And(result, ir::Operand{ir::Imm(u64(1))}) : msb;
-    __ SetCarry(cf);
-    // OF is defined only for count == 1 (undefined, harmless otherwise):
-    //   ROL: CF XOR MSB(result);  ROR: MSB(result) XOR next-MSB(result).
-    ir::Value of;
-    if (left) {
-        of = __ Xor(cf, ir::Operand{msb});
-    } else {
-        auto msb2 =
-                __ And(__ LsrImm(result, ir::Imm(u64(width - 2))), ir::Operand{ir::Imm(u64(1))});
-        of = __ Xor(msb, ir::Operand{msb2});
+    if (!static_zero_count) {
+        auto msb = __ And(__ LsrImm(result, ir::Imm(u64(width - 1))),
+                          ir::Operand{ir::Imm(u64(1))});
+        ir::Value cf = left ? __ And(result, ir::Operand{ir::Imm(u64(1))}) : msb;
+        __ SetCarry(cf);
+        ir::Value of;
+        if (left) {
+            of = __ Xor(cf, ir::Operand{msb});
+        } else {
+            auto msb2 = __ And(
+                    __ LsrImm(result, ir::Imm(u64(width - 2))),
+                    ir::Operand{ir::Imm(u64(1))});
+            of = __ Xor(msb, ir::Operand{msb2});
+        }
+        __ SetOverflow(of);
+        StorePolarity(false);
     }
-    __ SetOverflow(of);
-    StorePolarity(false);  // CF becomes Direct only when the update executes
-    if (!compact) {
+    if (dynamic_count) {
         __ BindLabel(skip_flags);
         // Count zero preserves the incoming representation; nonzero sets Direct.
         MergeConditionalCarryPolarity();
-    } else {
-        // The immediate compact form is statically non-zero and stores direct CF.
+    } else if (!static_zero_count) {
         carry_ = CarryPolarity::Direct;
     }
 
