@@ -2365,6 +2365,20 @@ peepholes.
   function-SMC cycle, pending-interrupt, disabled-latch and W81 focused paths. No stress run, probe,
   diagnostic source path or environment switch remains.
 
+- Implicit byte-form `PCMPISTRI` with immediate `0x3a` and identical physical operands now uses its
+  reduced SDM semantics directly. Equal-each produces all ones, masked-negative leaves exactly the
+  invalid suffix, the index is the shared first-zero length, SF/ZF/CF are `length < 16`, and OF is
+  `length == 0`; one length scan therefore replaces the generic dual-length, aggregation and
+  movemask pipeline. An exact SQLite `main/10` static-only A/B keeps all 1,999 units at 100%
+  coverage and moves `379,915 -> 379,667` host instructions (`-248`, `-0.065278%`), with seven
+  shrinking glibc SSE4.2 units and no growth. `__strcspn_sse42` moves `610 -> 548`; the other six
+  roots each lose 31 instructions. Timing-normalized SQLite output remains byte-identical with
+  SHA-256 `efb4bea2cec1e324d746acc11d14f62c8c742fcd98f1a52f4b75a7e44a864a25`, and bounded smallpt
+  retains `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. Mac and Orb pass the
+  16,255-assertion Rosetta/SDM differential, the 512-assertion scratch contract, four memory-boundary
+  assertions and 27 alias/REX assertions. No stress run, probe, diagnostic source path or
+  environment switch remains.
+
 ## Orb loop
 
 ```
