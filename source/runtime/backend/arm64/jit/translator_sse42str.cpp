@@ -177,14 +177,7 @@ void JitTranslator::EmitSse42Str(ir::Inst* inst) {
         __ Addv(acc.H(), acc.V8H());
         __ Umov(result, acc.V8H(), 0);
     } else {
-        emit_u128(row, 0x8040201008040201ull, 0x8040201008040201ull);
-        __ And(acc.V16B(), acc.V16B(), row.V16B());
-        __ Ext(aux.V16B(), acc.V16B(), acc.V16B(), 8);
-        __ Addv(acc.B(), acc.V8B());
-        __ Addv(aux.B(), aux.V8B());
-        __ Umov(result, acc.V16B(), 0);
-        __ Umov(scalar.W(), aux.V16B(), 0);
-        __ Orr(result, result, Operand{scalar.W(), LSL, 8});
+        EmitByteMovMask(acc, result, acc, row);
     }
 
     const auto emit_valid_bits = [&](const XRegister& length, const Register& out) {

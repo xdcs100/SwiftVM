@@ -127,6 +127,10 @@ public:
 
 private:
     void EmitExecutionTrace(u64 guest_rip);
+    void EmitByteMovMask(const VRegister& source,
+                         const WRegister& result,
+                         const VRegister& work,
+                         const VRegister& packed);
     [[nodiscard]] bool CanUseZeroStoreRegister(ir::Value value);
     [[nodiscard]] bool IsZeroStoreValue(ir::Value value);
     [[nodiscard]] bool HasOnlyZeroStoreUses(ir::Inst* definition);

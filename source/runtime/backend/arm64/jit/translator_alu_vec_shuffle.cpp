@@ -415,6 +415,20 @@ void JitTranslator::EmitVecInsert16(ir::Inst* inst) {
     __ Ins(result.V8H(), lane, value);
 }
 
+void JitTranslator::EmitByteMovMask(const VRegister& source,
+                                    const WRegister& result,
+                                    const VRegister& work,
+                                    const VRegister& packed) {
+    __ Ushr(work.V16B(), source.V16B(), 7);
+    __ Usra(work.V8H(), work.V8H(), 7);
+    __ Xtn(packed.V8B(), work.V8H());
+    __ Usra(packed.V4H(), packed.V4H(), 6);
+    __ Xtn(work.V8B(), packed.V8H());
+    __ Usra(work.V4H(), work.V4H(), 4);
+    __ Xtn(packed.V8B(), work.V8H());
+    __ Umov(result, packed.V8H(), 0);
+}
+
 void JitTranslator::EmitVecMovMask(ir::Inst* inst) {
     auto src = context.V(inst->GetArg<ir::Value>(0));
     auto result = context.W(ir::Value{inst});
@@ -422,14 +436,7 @@ void JitTranslator::EmitVecMovMask(ir::Inst* inst) {
     if (lane_bits == 8) {
         auto packed = context.GetTmpV();
         auto work = context.GetTmpV();
-        __ Ushr(work.V16B(), src.V16B(), 7);
-        __ Usra(work.V8H(), work.V8H(), 7);
-        __ Xtn(packed.V8B(), work.V8H());
-        __ Usra(packed.V4H(), packed.V4H(), 6);
-        __ Xtn(work.V8B(), packed.V8H());
-        __ Usra(work.V4H(), work.V4H(), 4);
-        __ Xtn(packed.V8B(), work.V8H());
-        __ Umov(result, packed.V8H(), 0);
+        EmitByteMovMask(src, result, work, packed);
         return;
     }
     if (lane_bits == 32) {
