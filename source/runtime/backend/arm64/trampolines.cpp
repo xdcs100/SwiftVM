@@ -225,6 +225,7 @@ void TrampolinesArm64::Build() {
 
 void TrampolinesArm64::BuildRuntimeEntry(MacroAssembler& assembler) {
     Label go_guest;
+    Label go_guest_flags_ready;
     Label code_dispatcher;
     Label go_interp;
     Label code_cache_miss;
@@ -321,7 +322,7 @@ void TrampolinesArm64::BuildRuntimeEntry(MacroAssembler& assembler) {
     // never restores them, so skipping this on the fast path would run blocks
     // with stale host values in statically-mapped guest registers.
     BuildRestoreStaticUniform(assembler);
-    __ Cbnz(forward, &go_guest);
+    __ Cbnz(forward, &go_guest_flags_ready);
 
     // align loc
     __ Bind(&code_dispatcher);
@@ -376,6 +377,10 @@ void TrampolinesArm64::BuildRuntimeEntry(MacroAssembler& assembler) {
     __ Stp(loc_reg, forward, MemOperand(l1_start, -0x10));
 
     __ Bind(&go_guest);
+    if (FlagsRegsEnabled()) {
+        __ Msr(NZCV, flags);
+    }
+    __ Bind(&go_guest_flags_ready);
     if (config.enable_asm_interp) {
         __ Tbz(forward, 63, &jump_guest);
         __ Bind(&go_interp);

@@ -13,6 +13,7 @@
 #include "runtime/backend/arm64/defines.h"
 #include "runtime/backend/context.h"
 #include "runtime/common/backedge_control.h"
+#include "runtime/common/svm_config.h"
 
 
 namespace swift::runtime::backend::arm64 {
@@ -806,6 +807,9 @@ JitContext::ForwardIndirectL1(const Register& location, Label* miss) {
         __ Ccmp(entry, xzr, ZFlag, eq);
         __ B(&miss, eq);
         RecordHotCounter(HotCoalesceCounter::IndirectL1Hit);
+        if (FlagsRegsEnabled()) {
+            __ Msr(NZCV, flags);
+        }
         __ Br(entry);
         __ Bind(&miss);
         RecordHotCounter(HotCoalesceCounter::IndirectL1Miss);
@@ -824,6 +828,9 @@ JitContext::ForwardIndirectL1(const Register& location, Label* miss) {
         __ Bind(&hit);
     } else {
         __ Csel(entry, entry, x30, ne);
+    }
+    if (FlagsRegsEnabled()) {
+        __ Msr(NZCV, flags);
     }
     __ Br(entry);
     return {fault_begin, fault_end};
@@ -931,6 +938,9 @@ void JitContext::EmitRSBPop(std::optional<XRegister> actual_target) {
         __ B(&rsb_miss, ne);
         __ Cbz(slot, &rsb_miss);
         RecordExecCounter(exec_offset_rsb_hit);
+        if (FlagsRegsEnabled()) {
+            __ Msr(NZCV, flags);
+        }
         __ Br(slot);
         __ Bind(&rsb_miss);
         RecordExecCounter(exec_offset_rsb_miss);
@@ -963,6 +973,9 @@ void JitContext::EmitRSBPop(std::optional<XRegister> actual_target) {
     // Commit the pop and jump directly to the target's compiled code.
     __ Add(rsb_ptr, rsb_ptr, 16);
     RecordExecCounter(exec_offset_rsb_hit);
+    if (FlagsRegsEnabled()) {
+        __ Msr(NZCV, flags);
+    }
     __ Br(ip2);
     __ Bind(&rsb_miss);
     __ Add(rsb_ptr, rsb_ptr, 16);
@@ -1256,6 +1269,9 @@ void JitContext::SetCurrent(ir::Block* block, bool split_backedge_entry,
     if (!defer_published_entry && !label->IsBound()) {
         __ Bind(label);
     } else if (defer_published_entry) {
+        if (!split_backedge_entry && !label->IsBound()) {
+            __ Bind(label);
+        }
         auto* counted = GetCountedEntryLabel(block->GetStartLocation().Value());
         if (!counted->IsBound()) {
             __ Bind(counted);

@@ -5,6 +5,7 @@
 #include "aarch64/macro-assembler-aarch64.h"
 #include "runtime/backend/arm64/fpcr_mode.h"
 #include "runtime/common/alignment.h"
+#include "runtime/common/svm_config.h"
 #include "runtime/externals/vixl/svm-vixl-prof.h"
 
 namespace swift::runtime::backend::arm64 {
@@ -198,6 +199,9 @@ RegionLinkTrampolineCode BuildRegionLinkTrampoline(
     // cache maintenance performed on another core. The first slow traversal
     // performs context synchronization before entering the selected target.
     masm.Isb();
+    if (FlagsRegsEnabled()) {
+        masm.Msr(NZCV, x26);
+    }
     masm.Br(x16);
     const u32 return_offset =
             static_cast<u32>(masm.GetBuffer()->GetSizeInBytes());
