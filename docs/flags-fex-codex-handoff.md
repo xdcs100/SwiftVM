@@ -2338,6 +2338,20 @@ peepholes.
   direct-link, continuation, guarded-return and flags focuses pass 169 assertions across nine
   cases. No stress run, probe, diagnostic source path or environment switch remains.
 
+- `CQO`-formed signed `Div128` pairs now lower through native `SDIV + MSUB` when the optimized
+  operand chain still proves that the high half is `ASR(low, 63)`. Plain `GetOperand` and `BitCast`
+  wrappers are resolved without accepting shifted, extended or composite operands; all other
+  128/64 divisions retain the integer-only paired helper. The quotient uses a scratch register
+  reserved after the paired remainder output, preventing the remainder home from aliasing and
+  destroying the quotient. An exact SQLite `main/10` static-only A/B keeps all 1,999 units at 100%
+  coverage and moves `384,068 -> 383,923` host instructions (`-145`, `-0.037754%`), with four
+  shrinking units and no growth. `0x4a5518` moves `748 -> 678`; `0x4d8ce0`, `0x42327e` and
+  `0x41099c` each lose 25 instructions. Timing-normalized SQLite output remains byte-identical with
+  SHA-256 `efb4bea2cec1e324d746acc11d14f62c8c742fcd98f1a52f4b75a7e44a864a25`, and bounded smallpt
+  retains `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. Mac and Orb pass
+  fixed seeds 101/424242 with 100 random DIV/IDIV iterations plus directed `CQO; IDIV` cases. No
+  stress run, probe, diagnostic source path or environment switch remains.
+
 ## Orb loop
 
 ```
