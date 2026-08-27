@@ -2419,6 +2419,15 @@ peepholes.
   rings, pending interrupts and the disabled latch. No stress run, probe, diagnostic source path or
   environment switch remains.
 
+- The function-wide cycle reason tail now shares at its exact two-stub break-even instead of waiting
+  for five candidates. Against the exact-cycle baseline, SQLite keeps all 1,999 units and moves
+  `350,638 -> 344,221` host instructions (`-6,417`, `-1.830093%`), with 303 shrinking units and no
+  growth. `0x425378` moves `1,032 -> 919`, while `0x4a882e` moves `855 -> 766`. Timing-normalized
+  SQLite output remains byte-identical, bounded smallpt retains SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`, and Mac/Orb repeat the
+  same 123 cycle/SMC assertions. No stress run, probe, diagnostic source path or environment switch
+  remains.
+
 ## Orb loop
 
 ```
