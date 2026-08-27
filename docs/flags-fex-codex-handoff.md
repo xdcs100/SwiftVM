@@ -2182,6 +2182,20 @@ peepholes.
   the scratch-contract and PMOVMSKB directed gates; bounded smallpt retains SHA-256
   `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. No stress run, probe,
   diagnostic path or environment switch remains.
+- `4994d73` replaces the separate quotient and remainder helpers for 128/64 DIV/IDIV with
+  one `Div128` operation whose AArch64 helper returns both ABI results. The shared arithmetic moved
+  out of the x86 decoder, and the interpreter consumes the same implementation. A remainder pseudo
+  gives register allocation an independent second result without extending the IR to a general
+  tuple type. Function mode exposed one backend boundary: a spilled pseudo result requested while
+  emitting its producer was treated as an old spill-slot read. `RForWrite` now allocates that
+  destination and schedules its normal writeback. Default function mode and `SVM_FUNC_BASE=0` both
+  complete bounded SQLite `main/10`; fixed-seed 101 and 424242 DIV/IDIV fuzz pass on Mac and Orb.
+  Against `9ac80fd`, the 1,995-unit static set moves `467,641 -> 465,921` (`-1,720`,
+  `-0.367804%`), with 26 shrinking units and one growing unit. `sqlite3VdbeExec` at `0x4a5518`
+  shrinks `1,110 -> 980`, and `get_common_cache_info` at `0x4d8ce0` shrinks `1,594 -> 1,498`.
+  Bounded smallpt retains SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. No stress run, retained
+  probe, diagnostic source path or new environment switch remains.
 
 ## Orb loop
 
