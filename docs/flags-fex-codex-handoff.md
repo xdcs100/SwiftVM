@@ -2256,6 +2256,20 @@ peepholes.
   normally, CoreMark 20k retains `crcfinal=0x382f`, and smallpt retains SHA-256
   `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. No stress run, retained
   probe, diagnostic source path or new environment switch remains.
+- `c7107cd` lowers 32/64-bit x86 ROL/ROR value paths through the existing native `RorImm` and
+  `RorValue` IR instead of synthesizing two shifts and an OR. Immediate left rotates use the
+  complementary right-rotate count, dynamic left rotates use the low-width negated count, and
+  zero counts retain the original value and flag-preservation path. The 8/16-bit lowering and all
+  CF/OF construction remain unchanged. Against `b3c30f8`, bounded SQLite `main/10` keeps all 1,995
+  units and moves `436,665 -> 435,777` (`-888`, `-0.203360%`), with eight shrinking units and no
+  growth. `sqlite3_randomness` at `0x423620` moves `2,300 -> 1,765`, and its alternate root at
+  `0x4236c0` moves `637 -> 367`. From `9ac80fd`, the cumulative movement is
+  `467,641 -> 435,777` (`-31,864`, `-6.813774%`). Mac and Orb fixed-seed 101/424242 bit fuzz retain
+  their exact established rotate/BT mismatch counts with zero CMPXCHG mismatches; the narrow
+  rotate directed test passes. Bounded SQLite exits normally, CoreMark 20k retains
+  `crcfinal=0x382f`, and smallpt retains SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. No stress run, retained
+  probe, diagnostic source path or new environment switch remains.
 
 ## Orb loop
 
