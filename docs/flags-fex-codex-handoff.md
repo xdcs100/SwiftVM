@@ -1855,6 +1855,27 @@ peepholes.
   temporary environment switch or debug path remains. Applying the three measured post-refresh
   reductions to the last live FEX denominator estimates the remaining CoreMark host-instruction gap
   at about 5.4%; refresh both engines before treating that estimate as a new formal ratio.
+- `0783986` removes the remaining concentrated indirect-call and fixed-home width costs. The
+  call-L1 base now lives directly in `State`, so an indirect call no longer loads the profile
+  interface first; signal publication switches this state slot to the existing inaccessible guard
+  table. Call-return terminals always defer `current_loc` to their cold physical-register publisher.
+  Separately, an exact same-home `GetHostGPR(U32) -> ZeroExtend32To64 -> SetHostGPR` may keep its
+  post-publication U64 address aliases in the pinned register. Composite `GetOperand` aliases are
+  accepted only when every result use is an ordinary memory address, and the materializer now
+  observes the same pinned-value map as direct operands. Against the detached pre-stage Release
+  shape, the 5.4-second CoreMark 2k comparison keeps all 3,631 PCs / 5,001 versions, 100% host and
+  entry coverage, and moves `369,759,990 -> 364,387,280` (`-5,372,710`, `-1.453026%`) with no
+  growth. `0x403630` and `0x403688` each shrink `19 -> 17`, while `0x402580` shrinks `25 -> 23`.
+  CoreMark 20k returns `crcfinal=0x382f` on Mac and Orb. Mac/Orb pinned-GPR, direct-link without
+  stress, guarded-return, function and indirect-L1 focuses pass 93/93, 1,113/771, 5/5, 252/252
+  and 13/13 assertions. The bounded Orb smallpt screen completes in 4.949 seconds with zero spills;
+  no stress run, diagnostic, temporary environment switch or probe remains.
+- The requested five-item tranche is complete. Static-call flags bypass has generation-checked
+  pending-flags entries (`aa4ed1b`, `631e0a7`); the BL/call-entry continuation ABI is `631e0a7`;
+  return polling moved to the fault-backed L1 safepoint in `940dcfe`; call-aware indirect L1 is
+  provided by `631e0a7` and its hot boundary is tightened by `0783986`; the remaining
+  `0x4026ca` narrow compare/carry chain is reduced by `736d04d`. Further work should start from a
+  new live FEX join rather than extending this list.
 
 ## Orb loop
 
