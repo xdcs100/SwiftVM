@@ -175,15 +175,12 @@ bool JitTranslator::IsDirectCycleCutEdge(ir::Location source,
     if (!direct_cycle_latch || target.Value() >= source.Value()) {
         return false;
     }
-    // Guest block starts form a total order, so every non-self directed cycle
-    // has at least one descending edge. This deterministic cut is independent
-    // of translation/cache order; it may conservatively cover acyclic backward
-    // jumps. A cross-region cycle's only descending edge may itself be local to
-    // one region without forming a region-local cycle, so region mode must cover
-    // both local and external descending edges. Exact DFS cycle edges do not pay
-    // twice: EmitRegionEdge selects the DFS exit before requesting this cut.
-    // External direct edges can stay in JIT only when BlockLink owns both ends.
-    return IsRegionInternalEdge(target) || context.CanBypassDispatcher(target);
+    // PrepareRegionEdges covers internal cycles with exact DFS backedges.
+    // The total-order cut is only needed for linkable external edges.
+    if (IsRegionInternalEdge(target)) {
+        return false;
+    }
+    return context.CanBypassDispatcher(target);
 }
 
 bool JitTranslator::IsDirectCycleCutEdge(ir::Location target) const {
@@ -191,7 +188,7 @@ bool JitTranslator::IsDirectCycleCutEdge(ir::Location target) const {
            IsDirectCycleCutEdge(cur_block->GetStartLocation(), target);
 }
 
-u32 JitTranslator::CountDirectCycleExitCandidates(
+u32 JitTranslator::CountCycleExitCandidates(
         std::span<ir::Block* const> blocks) const {
     u32 count{};
     for (auto* block : blocks) {
@@ -204,6 +201,16 @@ u32 JitTranslator::CountDirectCycleExitCandidates(
                                           ir::Location{target});
         }
     }
+    std::vector<u64> local_cycle_sources;
+    local_cycle_sources.reserve(region_cycle_edges.size());
+    for (const auto& edge : region_cycle_edges) {
+        local_cycle_sources.push_back(edge.first);
+    }
+    std::sort(local_cycle_sources.begin(), local_cycle_sources.end());
+    local_cycle_sources.erase(
+            std::unique(local_cycle_sources.begin(), local_cycle_sources.end()),
+            local_cycle_sources.end());
+    count += static_cast<u32>(local_cycle_sources.size());
     return count;
 }
 
@@ -1183,11 +1190,21 @@ void JitTranslator::EmitBackedgeExitStub() {
     __ Bind(backedge_exit_label.get());
     ResolveExitPollFaults(backedge_exit_label.get(),
                           cur_block->GetStartLocation());
-    __ Ldar(ip0, MemOperand(state, state_offset_exit_request));
+    const bool shared_reason = translating_function && share_cycle_exit_reason;
+    if (!shared_reason) {
+        __ Ldar(ip0, MemOperand(state, state_offset_exit_request));
+    }
     if (backedge_flags_plan && backedge_flags_plan->optimized) {
         EmitBackedgeMaterialize(*backedge_flags_plan);
     } else if (FlagsRegsEnabled()) {
         EmitSplitFlagsPublish();
+    }
+    if (shared_reason) {
+        if (!cycle_exit_reason) {
+            cycle_exit_reason = std::make_unique<Label>();
+        }
+        __ B(cycle_exit_reason.get());
+        return;
     }
     __ Tbnz(ip0, 63, &signal);
     __ Mov(ipw1, static_cast<u32>(HaltReason::CodeMiss));
@@ -1205,11 +1222,11 @@ void JitTranslator::EmitDirectCycleExitStubs() {
     }
     Label local_reason;
     Label* reason = &local_reason;
-    if (translating_function && share_direct_cycle_exit_reason) {
-        if (!direct_cycle_exit_reason) {
-            direct_cycle_exit_reason = std::make_unique<Label>();
+    if (translating_function && share_cycle_exit_reason) {
+        if (!cycle_exit_reason) {
+            cycle_exit_reason = std::make_unique<Label>();
         }
-        reason = direct_cycle_exit_reason.get();
+        reason = cycle_exit_reason.get();
     }
     for (auto it = direct_cycle_exits.begin(); it != direct_cycle_exits.end(); ++it) {
         auto& [target, label] = *it;
@@ -1219,18 +1236,18 @@ void JitTranslator::EmitDirectCycleExitStubs() {
         if (FlagsRegsEnabled()) {
             EmitSplitFlagsPublish();
         }
-        if ((translating_function && share_direct_cycle_exit_reason) ||
+        if ((translating_function && share_cycle_exit_reason) ||
             std::next(it) != direct_cycle_exits.end()) {
             __ B(reason);
         }
     }
-    if (!translating_function || !share_direct_cycle_exit_reason) {
-        EmitDirectCycleExitReasonTail(reason);
+    if (!translating_function || !share_cycle_exit_reason) {
+        EmitCycleExitReasonTail(reason);
     }
     direct_cycle_exits.clear();
 }
 
-void JitTranslator::EmitDirectCycleExitReasonTail(Label* reason) {
+void JitTranslator::EmitCycleExitReasonTail(Label* reason) {
     ASSERT(reason);
     Label signal;
     Label publish;

@@ -458,7 +458,7 @@ private:
     [[nodiscard]] bool IsDirectCycleCutEdge(ir::Location source,
                                             ir::Location target) const;
     [[nodiscard]] bool IsDirectCycleCutEdge(ir::Location target) const;
-    [[nodiscard]] u32 CountDirectCycleExitCandidates(
+    [[nodiscard]] u32 CountCycleExitCandidates(
             std::span<ir::Block* const> blocks) const;
     [[nodiscard]] Label* GetDirectCycleExit(ir::Location target);
     [[nodiscard]] bool CanUseRegionSuccessorLayout(ir::Location target) const;
@@ -478,7 +478,7 @@ private:
     [[nodiscard]] Label* LocalBranchTarget(ir::Location target) const;
     void EmitBackedgeExitStub();
     void EmitDirectCycleExitStubs();
-    void EmitDirectCycleExitReasonTail(Label* reason);
+    void EmitCycleExitReasonTail(Label* reason);
     void RecordExitPollFault(std::optional<JitContext::FaultRange> fault,
                              Label* recovery);
     void ResolveExitPollFaults(Label* recovery, ir::Location resume_location);
@@ -859,8 +859,8 @@ private:
     std::unique_ptr<Label> backedge_exit_label{};
     bool backedge_exit_referenced{};
     std::map<u64, std::unique_ptr<Label>> direct_cycle_exits{};
-    std::unique_ptr<Label> direct_cycle_exit_reason{};
-    bool share_direct_cycle_exit_reason{};
+    std::unique_ptr<Label> cycle_exit_reason{};
+    bool share_cycle_exit_reason{};
     u32 direct_cycle_cut_edges{};
     std::unique_ptr<BackedgeFlagsPlan> backedge_flags_plan{};
     std::unique_ptr<Label> loop_hoist_body_entry{};
