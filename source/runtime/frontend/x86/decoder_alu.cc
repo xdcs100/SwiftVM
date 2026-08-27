@@ -1324,15 +1324,29 @@ void X64Decoder::DecodeRotate(_DInst& insn, bool left) {
         if (width < 32) {
             count = __ And(count, ir::Operand{ir::Imm(u64(width - 1))});
         }
-        // rol(v,c) = (v << c) | (v >> (width - c)); ror swaps the directions.
-        // The complementary shift amount is masked to the width, which also
-        // makes c == 0 come out as the identity (v | v).
-        auto back = __ And(__ Sub(__ LoadImm(ir::Imm(u64(width))), ir::Operand{count}),
-                           ir::Operand{ir::Imm(mask)});
-        auto fwd = left ? __ LslValue(src, count) : __ LsrValue(src, count);
-        auto bwd = left ? __ LsrValue(src, back) : __ LslValue(src, back);
-        result = __ Or(fwd, ir::Operand{bwd});
-        if (width < 64) {
+        if (width >= 32) {
+            if (constant_count != UINT32_MAX) {
+                const u32 ror = (left ? width - constant_count
+                                      : constant_count) & mask;
+                result = ror == 0
+                        ? src
+                        : __ RorImm(src, ir::Imm(u64(ror)))
+                                  .SetType(GetSize(width));
+            } else {
+                auto ror = left
+                        ? __ Sub(__ LoadImm(ir::Imm(u64(0))),
+                                 ir::Operand{count})
+                        : count;
+                result = __ RorValue(src, ror).SetType(GetSize(width));
+            }
+        } else {
+            auto back = __ And(
+                    __ Sub(__ LoadImm(ir::Imm(u64(width))),
+                           ir::Operand{count}),
+                    ir::Operand{ir::Imm(mask)});
+            auto fwd = left ? __ LslValue(src, count) : __ LsrValue(src, count);
+            auto bwd = left ? __ LsrValue(src, back) : __ LslValue(src, back);
+            result = __ Or(fwd, ir::Operand{bwd});
             result = __ And(result, ir::Operand{ir::Imm((u64(1) << width) - 1)});
         }
     }
