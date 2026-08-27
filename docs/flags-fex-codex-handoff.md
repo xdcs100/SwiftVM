@@ -2400,6 +2400,11 @@ peepholes.
   focused allocation cases with 12 assertions. No stress run, probe, diagnostic source path or
   environment switch remains.
 
+- A reverse producer-to-low32-view remap was evaluated and rejected. Keeping the producer's old
+  register reserved moved `379,445 -> 379,283` but grew 21 units; releasing it exposed an unmodelled
+  producer/pseudo physical-register contract and failed during early SQLite execution. Do not retry
+  this direction until that ownership is represented explicitly in RA. No implementation remains.
+
 ## Orb loop
 
 ```
