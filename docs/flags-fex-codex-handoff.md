@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Product code tip: **`a298238`** `perf: load pending call cache from state`
+- Product code tip: **`3e58efb`** `perf: compact linked flags publication`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -2028,6 +2028,28 @@ peepholes.
   OpenSSL SHA command exits normally. Replacing the existing flags-bypass branch with NOPs was
   rejected without implementation: the three NOPs would still execute, so removing that remaining
   branch requires a different code layout and must not introduce per-site cold growth. No stress
+  run, probe, diagnostic path or environment switch remains.
+- `3e58efb` removes the linked static-forward branch without turning the skipped merge into executed
+  NOPs. Continuation-mode static forwards emit one `BL` to a unit-shared cold publisher keyed by
+  scratch/token registers; the publisher performs the full NZCV merge, parity-byte publication and
+  `RET`. A generation-compatible link atomically replaces that `BL` with the parity `BFXIL`, while
+  incompatible publication and SMC restore the finalized internal `BL`. Link metadata now accepts
+  either the existing skip branch or the parity instruction, and disk-cache format 11 serializes
+  both the unlinked and linked words. The production test covers compatible linking, invalidation,
+  incompatible recompilation and real cold-publisher execution. An early prototype captured the
+  forward `BL` before VIXL label finalization and restored `BL .`; the final path refreshes this
+  instruction after `FinalizeCode`, and no self-loop fallback remains.
+  The exact CoreMark 2k screen keeps all 3,695 PCs/versions, 100% host and entry coverage and
+  `crcfinal=0x4983`; hot-shape weight moves `305,307,232 -> 299,985,184` (`-5,322,048`,
+  `-1.743178%`) with no growing PC. `0x403552`, `0x402830` and `0x403550` each remove the three
+  inline merge instructions and contribute `-3,696,000`, `-1,098,000` and `-528,000`. This static
+  number is not a runtime instruction claim: after the old runtime skip patch, the strict linked
+  path improves by one executed instruction per compatible traversal. Across 291 common emitted
+  units, shared cold publishers add 324 total bytes (`282,848 -> 283,172`, `+0.1146%`). Mac and
+  Orb flags-link, serializer, indirect-L1, call-continuation, interrupt and guarded-return focuses
+  pass 168 assertions each. Bounded smallpt retains oracle
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`; default SQLite exits in
+  1.59 seconds with `TOTAL 0.974s`, and the one-second OpenSSL SHA command exits normally. No stress
   run, probe, diagnostic path or environment switch remains.
 
 ## Orb loop
