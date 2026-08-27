@@ -254,6 +254,8 @@ private:
     ResolvePinnedGPRValue(ir::Value value) const;
     [[nodiscard]] std::optional<WRegister>
     ResolvePinnedGPRWUse(ir::Value value, const ir::Inst* consumer) const;
+    [[nodiscard]] std::optional<Register>
+    ResolvePinnedGPRUse(ir::Value value, const ir::Inst* consumer) const;
     [[nodiscard]] std::optional<u16>
     MatchPinnedMemoryAddress(ir::Inst* address) const;
     struct PinnedMemorySource {

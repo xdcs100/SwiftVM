@@ -23,11 +23,13 @@ bool IsMemoryAddressUse(ir::Inst& inst, ir::Inst* definition) {
 bool IsLowAluAlias(ir::Block* block,
                    ir::Inst* alias,
                    ir::Inst* definition) {
-    const u32 width = ir::GetValueSizeByte(alias->ReturnType());
     if (alias->GetOp() != ir::OpCode::BitExtract ||
         alias->GetArg<ir::Value>(0).Def() != definition ||
-        alias->GetArg<ir::Imm>(1).Get() != 0 ||
-        alias->GetArg<ir::Imm>(2).Get() != width * 8 ||
+        alias->GetArg<ir::Imm>(1).Get() != 0) {
+        return false;
+    }
+    const u32 width = ir::GetValueSizeByte(alias->ReturnType());
+    if (alias->GetArg<ir::Imm>(2).Get() != width * 8 ||
         (width != sizeof(u8) && width != sizeof(u16) &&
          width != sizeof(u32)) ||
         alias->GetUses() != 1) {
@@ -393,6 +395,18 @@ JitTranslator::ResolvePinnedGPRWUse(ir::Value value,
     return pinned == fused_pin_gpr_reads.end()
             ? std::nullopt
             : std::optional<WRegister>{WRegister(pinned->second)};
+}
+
+std::optional<Register>
+JitTranslator::ResolvePinnedGPRUse(ir::Value value,
+                                   const ir::Inst* consumer) const {
+    if (const auto pinned = ResolvePinnedGPRValue(value)) {
+        return Register{*pinned};
+    }
+    if (const auto pinned = ResolvePinnedGPRWUse(value, consumer)) {
+        return Register{*pinned};
+    }
+    return std::nullopt;
 }
 
 void JitTranslator::PreparePinnedGPRCopies(ir::Block* block) {

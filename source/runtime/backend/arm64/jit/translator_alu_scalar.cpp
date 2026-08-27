@@ -37,11 +37,11 @@ void JitTranslator::EmitAdd(ir::Inst* inst) {
     auto left = inst->GetArg<ir::Value>(0);
     auto left_input = ResolveNarrowFlagsInput(left, inst);
     auto right = inst->GetArg<ir::Operand>(1);
-    auto pinned_w = [&](ir::Value value) -> std::optional<WRegister> {
-        return ResolvePinnedGPRWUse(value, inst);
+    auto pinned = [&](ir::Value value) -> std::optional<Register> {
+        return ResolvePinnedGPRUse(value, inst);
     };
     auto right_pinned = right.GetLeft().IsValue()
-            ? pinned_w(right.GetLeft().value)
+            ? pinned(right.GetLeft().value)
             : std::nullopt;
     const auto induction_immediate = MatchInductionImmediate(inst);
     auto right_operand = induction_immediate
@@ -49,7 +49,7 @@ void JitTranslator::EmitAdd(ir::Inst* inst) {
             : (right_pinned ? Operand{*right_pinned} : EmitOperand(right));
     auto pseudo_flags = GetPseudoFlags(inst);
     auto result = FlagsResultRegister(inst, pseudo_flags);
-    auto left_pinned = pinned_w(left_input);
+    auto left_pinned = pinned(left_input);
     Register left_register = left_pinned ? Register{*left_pinned}
                                          : context.R(left_input, true);
 

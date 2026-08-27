@@ -36,6 +36,7 @@ enum class PinnedReadShape {
     LoadU8Flags,
     LoadU8SavedFlags,
     LoadNarrowSubtract,
+    FullAddAlias,
     OverwrittenWrite,
     OverwrittenWriteFault,
     MemoryAddress,
@@ -125,6 +126,18 @@ std::vector<std::string> EmitPinnedRead(PinnedReadShape shape, bool reuse_read,
         } else {
             block->SaveFlags(result, Flags::Zero | Flags::Parity);
         }
+    } else if (shape == PinnedReadShape::FullAddAlias) {
+        auto narrow = block->GetHostGPR(HostRegIndex(29), Imm{0u})
+                              .SetType(ValueType::U8);
+        auto extended = block->ZeroExtend32(narrow).SetType(ValueType::U32);
+        auto published = block->ZeroExtend32To64(extended)
+                                 .SetType(ValueType::U64);
+        block->SetHostGPR(published, HostRegIndex(29), Imm{0u});
+        auto alias = block->BitCast(published).SetType(ValueType::U64);
+        auto left = block->GetHostGPR(HostRegIndex(0), Imm{0u})
+                            .SetType(ValueType::U64);
+        auto result = block->Add(left, Operand{alias}).SetType(ValueType::U64);
+        block->StoreUniform(Uniform{64, ValueType::U64}, result);
     } else if (shape == PinnedReadShape::Or) {
         auto right = block->GetHostGPR(HostRegIndex(29), Imm{0u})
                              .SetType(type);
@@ -332,6 +345,11 @@ TEST_CASE("a published fixed home owns later uses after the source is overwritte
     REQUIRE(Count(lines, "mov w22, w20", "") == 1);
     REQUIRE(Count(lines, "eor w", "w22, w29") == 1);
     REQUIRE(Count(lines, "eor w", "w20, w29") == 0);
+}
+
+TEST_CASE("a published narrow value feeds a full-width add from its fixed home") {
+    const auto lines = EmitPinnedRead(PinnedReadShape::FullAddAlias, false);
+    REQUIRE(Count(lines, "add x", ", x29") == 1);
 }
 
 TEST_CASE("a pinned narrow copy zero-extends directly between fixed homes") {

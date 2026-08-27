@@ -237,7 +237,7 @@ void JitTranslator::EmitRegionEdge(ir::Location target,
                        ? backedge_exit_label != nullptr
                        : ordered_cycle_exit != nullptr);
         context.RecordExecCounter(exec_offset_region_cycle_polls);
-        if (region_cycle) {
+        if (region_cycle || pending_flags_cycle) {
             backedge_exit_referenced = true;
         }
         ++region_block_cycles;
@@ -861,6 +861,9 @@ bool JitTranslator::EmitBackedgeFlagsTerminal(const ir::Terminal& terminal) {
     }
     plan.cold_referenced = true;
     if (plan.dead_successor) {
+        backedge_exit_referenced |=
+                IsRegionCycleEdge(plan.cold_target) ||
+                IsDirectCycleCutEdge(plan.cold_target);
         // The target's prefix proves the incoming six arithmetic flags dead
         // before every observer. Keep the pending host NZCV only through the
         // terminal branch; a cycle poll still routes its cold arm through the
@@ -1171,8 +1174,6 @@ void JitTranslator::EmitBackedgeExitStub() {
     __ Bind(&publish);
     __ Str(ipw1, MemOperand(state, state_offset_halt_reason));
     context.ReturnHost();
-    backedge_exit_label.reset();
-    backedge_exit_referenced = false;
 }
 
 void JitTranslator::EmitDirectCycleExitStubs() {

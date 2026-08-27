@@ -793,8 +793,10 @@ JitTranslator::PrepareBlockState(ir::Block* block) {
                              HasRegionCycleEdgeFromCurrent() ||
                              (backedge_flags_plan &&
                               backedge_flags_plan->dead_successor &&
-                              IsDirectCycleCutEdge(
-                                      backedge_flags_plan->self_target)))
+                              (IsDirectCycleCutEdge(
+                                       backedge_flags_plan->self_target) ||
+                               IsDirectCycleCutEdge(
+                                       backedge_flags_plan->cold_target))))
                     ? std::make_unique<Label>()
                     : nullptr;
     const bool split_flags_entry = backedge_flags_plan &&
@@ -1147,10 +1149,15 @@ void JitTranslator::EmitBlockTerminalAndColdPaths(
             : 0;
     flags_audit_cold = context.FlagsRegsAuditEnabled();
     EmitBackedgeExitStub();
-    EmitDirectCycleExitStubs();
     flags_token_keep = false;
     InvalidateFlagsToken();
     EmitBackedgeColdPaths();
+    if (backedge_exit_label) {
+        ResolveExitPollFaults(backedge_exit_label.get());
+    }
+    backedge_exit_label.reset();
+    backedge_exit_referenced = false;
+    EmitDirectCycleExitStubs();
     if (density) {
         RecordBoundaryRange(BoundarySubsequence::ColdTail, boundary_cold_before,
                             context.CurrentBufferSize());
