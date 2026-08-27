@@ -82,6 +82,14 @@ public:
         u32 recovery_offset{};
     };
 
+    struct IndirectL1FaultMetadata {
+        u64 guest_start{};
+        u32 host_begin{};
+        u32 host_end{};
+        u32 recovery_offset{};
+        u32 recovery_reg{UINT32_MAX};
+    };
+
     explicit JitTranslator(JitContext& ctx);
 
     void Translate(ir::Block *block);
@@ -91,6 +99,11 @@ public:
     [[nodiscard]] const std::vector<BackedgeBlockMetadata>&
     GetBackedgeBlockMetadata() const {
         return backedge_block_metadata;
+    }
+
+    [[nodiscard]] const std::vector<IndirectL1FaultMetadata>&
+    GetIndirectL1FaultMetadata() const {
+        return indirect_l1_fault_metadata;
     }
 
     Operand EmitOperand(ir::Operand &ir_op);
@@ -777,6 +790,7 @@ private:
     u32 backedge_host_begin{};
     u32 backedge_host_end{};
     std::vector<BackedgeBlockMetadata> backedge_block_metadata{};
+    std::vector<IndirectL1FaultMetadata> indirect_l1_fault_metadata{};
     std::vector<std::unique_ptr<VecNaNColdSite>> vec_nan_cold_sites{};
     bool boundary_density_enabled{};
     bool boundary_terminal_open{};

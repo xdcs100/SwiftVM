@@ -107,8 +107,8 @@ struct State {
         void* l1_code_cache{};
         alignas(8) u64 exit_request;
     };
-    // Adjacent to exit_request so inline indirect exits can read the request
-    // and stable per-Runtime L1 base as one pair.
+    // Runtime replaces this base with the inaccessible interrupt mapping while
+    // a signal request is pending.
     void* indirect_l1_code_cache{};
     void* interface{};
     HaltReason halt_reason{HaltReason::None};

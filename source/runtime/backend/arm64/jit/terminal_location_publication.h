@@ -12,12 +12,14 @@ namespace swift::runtime::backend::arm64 {
 
 class TerminalLocationPublication {
 public:
+    using RecoveryOffsets = std::array<u32, 32>;
+
     void Prepare(std::span<ir::Block* const> blocks, JitContext& context);
     void Reset();
 
     [[nodiscard]] bool Defers(const ir::Inst* inst) const;
     [[nodiscard]] Label* MissLabel(const XRegister& target) const;
-    void EmitColdPaths(MacroAssembler& masm);
+    [[nodiscard]] RecoveryOffsets EmitColdPaths(MacroAssembler& masm);
 
 private:
     std::unordered_set<const ir::Inst*> deferred;

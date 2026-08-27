@@ -174,6 +174,13 @@ struct SerialLinkSite {
     }
 };
 
+struct SerialFaultSite {
+    u64 guest_start{};
+    u32 host_begin{};
+    u32 host_end{};
+    u32 recovery_offset{UINT32_MAX};
+};
+
 struct SerialUnit {
     u64 guest_start{};
     u64 feature_hash{};
@@ -182,6 +189,7 @@ struct SerialUnit {
     std::vector<SerialBlock> blocks{};
     std::vector<Relocation> relocs{};
     std::vector<SerialLinkSite> link_sites{};
+    std::vector<SerialFaultSite> fault_sites{};
 };
 
 // --------------------------------------------------------------------------
@@ -245,7 +253,7 @@ struct ValidityKey {
     bool operator==(const ValidityKey&) const = default;
 };
 
-constexpr u64 kCacheFormatVersion = 9;
+constexpr u64 kCacheFormatVersion = 10;
 
 u64 HashBytes(const void* data, std::size_t size, u64 seed);
 u64 HashU64(u64 value, u64 seed);

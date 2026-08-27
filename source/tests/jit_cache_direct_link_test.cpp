@@ -36,7 +36,7 @@ using namespace swift::runtime::ir;
 constexpr const char* kPhaseEnv = "DIRECT_LINK_CACHE_PHASE";
 constexpr const char* kDirEnv = "DIRECT_LINK_CACHE_DIR";
 constexpr const char* kRoundTripTest =
-        "disk cache v9 round trips direct-link sites across processes";
+        "disk cache v10 round trips direct-link sites across processes";
 
 IntrusivePtr<Block> BuildTarget(VAddr guest, u64 fingerprint) {
     IntrusivePtr<Block> block{new Block(0, Location{guest})};
@@ -424,7 +424,7 @@ TEST_CASE("disk cache scanner keeps move-wide constants and rejects PC-relative 
     }
 }
 
-TEST_CASE("disk cache v9 serializes flags contracts and link-site records",
+TEST_CASE("disk cache v10 serializes link and fault-site records",
           "[direct-link][jit-cache][serializer]") {
     SerialUnit input{};
     input.guest_start = 0x1000;
@@ -440,6 +440,7 @@ TEST_CASE("disk cache v9 serializes flags contracts and link-site records",
              24, 36, kMergeHead},
             {52, 0x4000, static_cast<u8>(LinkSiteKind::SwitchArm)},
     };
+    input.fault_sites = {{0x1000, 4, 8, 56}};
     BlobWriter writer;
     WriteUnit(writer, input);
     BlobReader reader{writer.Data().data(), writer.Size()};
@@ -464,6 +465,11 @@ TEST_CASE("disk cache v9 serializes flags contracts and link-site records",
         REQUIRE(output.link_sites[i].flags_bypass_instruction ==
                 input.link_sites[i].flags_bypass_instruction);
     }
+    REQUIRE(output.fault_sites.size() == 1);
+    REQUIRE(output.fault_sites[0].guest_start == 0x1000);
+    REQUIRE(output.fault_sites[0].host_begin == 4);
+    REQUIRE(output.fault_sites[0].host_end == 8);
+    REQUIRE(output.fault_sites[0].recovery_offset == 56);
 }
 
 TEST_CASE(kRoundTripTest, "[direct-link][jit-cache][production][smc]") {

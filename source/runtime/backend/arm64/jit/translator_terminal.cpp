@@ -426,7 +426,13 @@ bool JitTranslator::EmitIndirectForward() {
     auto* miss = dynamic_location_miss;
     dynamic_location_miss = nullptr;
     const u32 link_before = context.CurrentBufferSize();
-    context.ForwardIndirectL1(location, miss);
+    const auto fault = context.ForwardIndirectL1(location, miss);
+    indirect_l1_fault_metadata.push_back({
+            .guest_start = cur_block->GetStartLocation().Value(),
+            .host_begin = fault.begin,
+            .host_end = fault.end,
+            .recovery_reg = miss ? location.GetCode() : UINT32_MAX,
+    });
     RecordBoundaryRange(BoundarySubsequence::LinkTail, link_before,
                         context.CurrentBufferSize());
     return true;

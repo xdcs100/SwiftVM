@@ -19,6 +19,7 @@
 #include "runtime/backend/arm64/fpcr_mode.h"
 #include "runtime/backend/context.h"
 #include "runtime/backend/guarded_return_stack.h"
+#include "runtime/backend/interrupt_l1_mapping.h"
 #include "runtime/backend/interp/interpreter.h"
 #include "runtime/backend/runtime.h"
 #include "runtime/backend/signal_handler.h"
@@ -58,6 +59,12 @@ struct alignas(16) RuntimeNamedVectorConstants {
             0x0C0306090306090CULL,
     };
 };
+
+backend::InterruptL1Mapping& GetInterruptL1Mapping() {
+    static backend::InterruptL1Mapping mapping{
+            (size_t{1} << l1_cache_bits) * sizeof(TranslateEntry)};
+    return mapping;
+}
 
 static_assert(sizeof(RuntimeNamedVectorConstants) == 16);
 static_assert(sizeof(RuntimeNamedVectorConstants) <= 256);
@@ -135,11 +142,8 @@ struct Runtime::Impl final {
                 ? 0
                 : reinterpret_cast<size_t>(
                           address_space->GetTrampolines().GetIndirectL1Miss()));
-        // The inline indirect-L1 signal safepoint is a per-module feature, so
-        // the request word must be valid even when the optional backedge/SMC
-        // latch is disabled for this AddressSpace. The L1 base has its own
-        // stable State slot and no generated ARM64 path needs the legacy union
-        // alias any more.
+        // Inline indirect-L1 faults use this request word even when the
+        // optional backedge/SMC latch is disabled.
         state->exit_request = 0;
         if (address_space->ExitLatchEnabled()) {
             state->interface = &profile_interface;
@@ -306,11 +310,25 @@ struct Runtime::Impl final {
             self->DumpExecutionTrace(uctx, sig, info);
         }
         const auto host_pc = reinterpret_cast<u8*>(backend::SignalHandler::GetContextPC(uctx));
+        const auto fault_addr = reinterpret_cast<std::uintptr_t>(info->si_addr);
         backend::FaultEntry entry{};
+        if (GetInterruptL1Mapping().Contains(fault_addr)) {
+            const auto request = std::atomic_ref<u64>(self->state->exit_request)
+                                         .load(std::memory_order_acquire);
+            if ((request & kBackedgeSignalRequest) == 0) {
+                return false;
+            }
+            const bool has_entry = self->address_space->LookupFault(host_pc, entry);
+            const auto recovery_pc = has_entry && entry.recovery
+                    ? reinterpret_cast<std::uintptr_t>(entry.recovery)
+                    : reinterpret_cast<std::uintptr_t>(
+                              self->address_space->GetTrampolines().GetReturnHost());
+            backend::SignalHandler::SetContextPC(uctx, recovery_pc);
+            return true;
+        }
         if (!self->address_space->LookupFault(host_pc, entry)) {
             return false;  // fault PC not in any JIT code buffer
         }
-        const auto fault_addr = reinterpret_cast<std::uintptr_t>(info->si_addr);
         if (self->return_stack && self->return_stack->Recover(uctx, fault_addr)) {
             return true;
         }
@@ -633,6 +651,11 @@ struct Runtime::Impl final {
     // Keep a lock-free copy alongside an active marker for that boundary.
     mutable std::atomic<u64> jit_host_fpcr{};
     mutable std::atomic_bool jit_guest_fpcr_active{false};
+
+    void PublishIndirectL1Base(void* base) {
+        std::atomic_ref<void*>(state->indirect_l1_code_cache)
+                .store(base, std::memory_order_release);
+    }
 };
 
 Runtime::Runtime(Instance* instance)
@@ -664,17 +687,16 @@ HaltReason Runtime::Step() { return HaltReason::None; }
 
 void Runtime::SignalInterrupt() {
     impl->running.store(false, std::memory_order_release);
-    // Publish the reason before the sticky request bit. An inline-L1 LDAR that
-    // observes the bit therefore also observes Signal, and its cold Ret can use
-    // the unchanged trampoline return path. Backedge-latch users keep the same
-    // bit and acquire/release contract; the low SMC counter is disjoint.
+    // The fault handler acquire-loads the request before it consumes Signal.
     impl->state->halt_reason = HaltReason::Signal;
     std::atomic_ref<u64>(impl->state->exit_request)
             .fetch_or(kBackedgeSignalRequest, std::memory_order_release);
+    impl->PublishIndirectL1Base(GetInterruptL1Mapping().Data());
 }
 
 void Runtime::ClearInterrupt() {
     impl->state->halt_reason = HaltReason::None;
+    impl->PublishIndirectL1Base(impl->l1_code_cache.Data());
     std::atomic_ref<u64>(impl->state->exit_request)
             .fetch_and(kBackedgeSmcRequestMask, std::memory_order_acq_rel);
     impl->running.store(true, std::memory_order_release);
@@ -705,7 +727,8 @@ void RecordJitCacheUnit(const std::shared_ptr<backend::Module>& module,
                         bool is_function,
                         const std::vector<SerialBlock>& blocks,
                         const CodeBuffer& buffer,
-                        const backend::arm64::JitContext& context) {
+                        const backend::arm64::JitContext& context,
+                        const backend::arm64::JitTranslator& translator) {
     auto* cache = module->GetAddressSpace().GetJitDiskCache();
     if (!cache) {
         return;
@@ -720,6 +743,16 @@ void RecordJitCacheUnit(const std::shared_ptr<backend::Module>& module,
                               site.flags_bypass.resume_offset,
                               site.flags_bypass_instruction});
     }
+    std::vector<SerialFaultSite> fault_sites;
+    fault_sites.reserve(translator.GetIndirectL1FaultMetadata().size());
+    for (const auto& fault : translator.GetIndirectL1FaultMetadata()) {
+        fault_sites.push_back({fault.guest_start,
+                               fault.host_begin,
+                               fault.host_end,
+                               fault.recovery_offset == 0
+                                       ? UINT32_MAX
+                                       : fault.recovery_offset});
+    }
     cache->RecordUnit(module,
                       guest_start,
                       is_function,
@@ -727,7 +760,23 @@ void RecordJitCacheUnit(const std::shared_ptr<backend::Module>& module,
                       buffer.rw_data,
                       static_cast<u32>(buffer.size),
                       blocks,
-                      link_sites);
+                      link_sites,
+                      fault_sites);
+}
+
+void PublishIndirectL1Faults(
+        const std::shared_ptr<backend::Module>& module,
+        const CodeBuffer& buffer,
+        const backend::arm64::JitTranslator& translator) {
+    for (const auto& fault : translator.GetIndirectL1FaultMetadata()) {
+        module->AddFaultEntry(buffer.exec_data + fault.host_begin,
+                              buffer.exec_data + fault.host_end,
+                              fault.guest_start,
+                              buffer.exec_data,
+                              fault.recovery_offset
+                                      ? buffer.exec_data + fault.recovery_offset
+                                      : nullptr);
+    }
 }
 
 // PassPipeline::BuildDefault builds a nine-entry vector of std::function
@@ -1058,12 +1107,19 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
                                       buffer.exec_data + buffer.size,
                                       func_start);
             }
+            PublishIndirectL1Faults(module, buffer, *emitted_translator);
         }
         if (dump_ir) fmt::print(stderr, "[func-compile] {:#x} entries-ready\n", func_start);
         {
             PerfScope2 perf_pub_disk{GetPerfStats2().publish_disk};
             RecordJitCacheUnit(
-                    module, func_start, true, cache_blocks, buffer, *emitted_context);
+                    module,
+                    func_start,
+                    true,
+                    cache_blocks,
+                    buffer,
+                    *emitted_context,
+                    *emitted_translator);
         }
 
         // Release the function's IR. Block mode has always done this (the
@@ -1244,6 +1300,7 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module,
                                                   : nullptr);
                 }
             }
+            PublishIndirectL1Faults(module, buffer, *emitted_translator);
         }
         jit_state.jit_state = backend::JitState::Cached;
         jit_state.cache_id = idx;
@@ -1288,7 +1345,13 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module,
                      .code_offset = 0,
                      .guest_bytes_hash = 0}};
             RecordJitCacheUnit(
-                    module, start, false, cache_blocks, buffer, *emitted_context);
+                    module,
+                    start,
+                    false,
+                    cache_blocks,
+                    buffer,
+                    *emitted_context,
+                    *emitted_translator);
         }
         perf_pub_total.Stop();
         PerfScope2 perf_free_detail{GetPerfStats2().ir_free};

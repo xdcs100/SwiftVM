@@ -65,7 +65,8 @@ public:
                     const u8* rw_data,
                     u32 code_size,
                     const std::vector<SerialBlock>& blocks,
-                    const std::vector<SerialLinkSite>& link_sites);
+                    const std::vector<SerialLinkSite>& link_sites,
+                    const std::vector<SerialFaultSite>& fault_sites);
 
     // Flush to disk (atomic rename). Called from ~AddressSpace.
     void Save();

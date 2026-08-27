@@ -88,16 +88,20 @@ Label* TerminalLocationPublication::MissLabel(const XRegister& target) const {
     return miss_labels[target.GetCode()].get();
 }
 
-void TerminalLocationPublication::EmitColdPaths(MacroAssembler& masm) {
+TerminalLocationPublication::RecoveryOffsets
+TerminalLocationPublication::EmitColdPaths(MacroAssembler& masm) {
+    RecoveryOffsets offsets{};
     for (u32 reg = 0; reg < miss_labels.size(); ++reg) {
         if (!miss_labels[reg]) {
             continue;
         }
+        offsets[reg] = masm.GetBuffer()->GetSizeInBytes();
         masm.Bind(miss_labels[reg].get());
         masm.Str(XRegister(reg), MemOperand(state, state_offset_current_loc));
         masm.Ret();
     }
     Reset();
+    return offsets;
 }
 
 }  // namespace swift::runtime::backend::arm64

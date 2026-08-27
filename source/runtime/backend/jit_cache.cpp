@@ -199,7 +199,8 @@ void JitDiskCache::RecordUnit(const std::shared_ptr<Module>& module,
                               const u8* rw_data,
                               u32 code_size,
                               const std::vector<SerialBlock>& blocks,
-                              const std::vector<SerialLinkSite>& link_sites) {
+                              const std::vector<SerialLinkSite>& link_sites,
+                              const std::vector<SerialFaultSite>& fault_sites) {
     stats.units_compiled.fetch_add(1, std::memory_order_relaxed);
     if (!enabled || !exec_data || !rw_data || code_size == 0 || blocks.empty()) {
         return;
@@ -218,6 +219,7 @@ void JitDiskCache::RecordUnit(const std::shared_ptr<Module>& module,
     unit.feature_hash = HashFeatureSet(resolved_features);
     unit.is_function = is_function ? 1 : 0;
     unit.link_sites = link_sites;
+    unit.fault_sites = fault_sites;
     std::sort(unit.link_sites.begin(), unit.link_sites.end(),
               [](const auto& left, const auto& right) {
                   return left.code_offset < right.code_offset;
@@ -448,6 +450,18 @@ bool JitDiskCache::ReviveUnit(const std::shared_ptr<Module>& module, const Seria
             }
         }
     }
+    for (const auto& site : unit.fault_sites) {
+        if ((site.host_begin & 3u) != 0 ||
+            site.host_end != site.host_begin + sizeof(u32) ||
+            site.host_end > unit.code.size() ||
+            (site.recovery_offset != UINT32_MAX &&
+             ((site.recovery_offset & 3u) != 0 ||
+              site.recovery_offset >= unit.code.size()))) {
+            stats.reject_reloc.fetch_add(1, std::memory_order_relaxed);
+            dirty = true;
+            return false;
+        }
+    }
 
     // 2. Place the code.
     auto [idx, buffer] = module->AllocCodeCache(
@@ -569,6 +583,15 @@ bool JitDiskCache::ReviveUnit(const std::shared_ptr<Module>& module, const Seria
                           buffer.exec_data + buffer.size,
                           unit.guest_start,
                           buffer.exec_data);
+    for (const auto& site : unit.fault_sites) {
+        module->AddFaultEntry(buffer.exec_data + site.host_begin,
+                              buffer.exec_data + site.host_end,
+                              site.guest_start,
+                              buffer.exec_data,
+                              site.recovery_offset == UINT32_MAX
+                                      ? nullptr
+                                      : buffer.exec_data + site.recovery_offset);
+    }
     for (size_t i = 0;
          address_space.ExitLatchEnabled() && i < unit.blocks.size();
          ++i) {

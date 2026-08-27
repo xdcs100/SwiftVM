@@ -764,21 +764,16 @@ void JitContext::ReturnToDispatcher(const Register& location) {
     __ Ret();
 }
 
-void JitContext::ForwardIndirectL1(const Register& location, Label* miss) {
+JitContext::IndirectL1FaultRange
+JitContext::ForwardIndirectL1(const Register& location, Label* miss) {
     const auto index = GetTmpX();
     const auto entry = GetTmpX();
 
-    if (!indirect_l1_prof_enabled) {
-        // The request and stable L1 base occupy one aligned pair. The shared
-        // trampoline acquire-checks the request before returning Signal.
-        __ Ldp(index, entry, MemOperand(state));
-        __ Tst(index, kBackedgeSignalRequest);
-    } else {
-        __ Ldr(entry, MemOperand(state, state_offset_indirect_l1_code_cache));
-    }
-
+    __ Ldr(entry, MemOperand(state, state_offset_indirect_l1_code_cache));
     __ Bfi(entry, location, 4, L1_CODE_CACHE_BITS);
+    const u32 fault_begin = CurrentBufferSize();
     __ Ldp(index, entry, MemOperand(entry));
+    const u32 fault_end = CurrentBufferSize();
     if (indirect_l1_prof_enabled) {
         __ Cmp(index, location);
         Label miss;
@@ -791,16 +786,17 @@ void JitContext::ForwardIndirectL1(const Register& location, Label* miss) {
         __ Bind(&miss);
         RecordHotCounter(HotCoalesceCounter::IndirectL1Miss);
         __ Ret();
-        return;
+        return {fault_begin, fault_end};
     }
 
-    __ Ccmp(index, location, NoFlag, eq);
+    __ Cmp(index, location);
     if (miss) {
         __ B(miss, ne);
     } else {
         __ Csel(entry, entry, x30, eq);
     }
     __ Br(entry);
+    return {fault_begin, fault_end};
 }
 
 // --- Return Stack Buffer (RSB) -------------------------------------------

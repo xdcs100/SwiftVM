@@ -590,6 +590,13 @@ void WriteUnit(BlobWriter& w, const SerialUnit& unit) {
         w.U32(site.flags_bypass_resume_offset);
         w.U32(site.flags_bypass_instruction);
     }
+    w.U32(static_cast<u32>(unit.fault_sites.size()));
+    for (const auto& site : unit.fault_sites) {
+        w.U64(site.guest_start);
+        w.U32(site.host_begin);
+        w.U32(site.host_end);
+        w.U32(site.recovery_offset);
+    }
 }
 
 bool ReadUnit(BlobReader& r, SerialUnit& unit) {
@@ -674,6 +681,24 @@ bool ReadUnit(BlobReader& r, SerialUnit& unit) {
         }
         previous_offset = site.code_offset;
         first = false;
+    }
+    if (!r.U32(count) || count > r.Remaining() / 20) {
+        return false;
+    }
+    unit.fault_sites.resize(count);
+    for (auto& site : unit.fault_sites) {
+        if (!r.U64(site.guest_start) || !r.U32(site.host_begin) ||
+            !r.U32(site.host_end) || !r.U32(site.recovery_offset)) {
+            return false;
+        }
+        if ((site.host_begin & 3u) != 0 ||
+            site.host_end != site.host_begin + sizeof(u32) ||
+            site.host_end > code_size ||
+            (site.recovery_offset != UINT32_MAX &&
+             ((site.recovery_offset & 3u) != 0 ||
+              site.recovery_offset >= code_size))) {
+            return false;
+        }
     }
     return true;
 }

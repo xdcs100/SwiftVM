@@ -47,6 +47,11 @@ struct DirectLinkSiteInfo {
 
 class JitContext : DeleteCopyAndMove {
 public:
+    struct IndirectL1FaultRange {
+        u32 begin{};
+        u32 end{};
+    };
+
     explicit JitContext(const std::shared_ptr<Module> &module,
                         RegAlloc& reg_alloc,
                         bool enable_direct_link = true);
@@ -129,11 +134,8 @@ public:
                                      LinkSiteKind direct_link_kind =
                                              LinkSiteKind::Unconditional,
                                      DirectLinkFlagsBypass flags_bypass = {});
-    // Polls the sticky signal request, then checks only the first slot of the
-    // existing per-Runtime L1 table. A key mismatch or cleared value returns
-    // through the unchanged dispatcher, which performs the complete L1
-    // collision-chain and L2 lookup.
-    void ForwardIndirectL1(const Register& location, Label* miss = nullptr);
+    [[nodiscard]] IndirectL1FaultRange
+    ForwardIndirectL1(const Register& location, Label* miss = nullptr);
     void ReturnToDispatcher(const Register& location);
 
     // --- Return Stack Buffer (RSB) emission --------------------------------

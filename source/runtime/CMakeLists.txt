@@ -105,6 +105,8 @@ add_library(swift_runtime STATIC
         backend/context.h
         backend/guarded_return_stack.cpp
         backend/guarded_return_stack.h
+        backend/interrupt_l1_mapping.cpp
+        backend/interrupt_l1_mapping.h
         backend/address_space.cpp
         backend/address_space.h
         backend/runtime.cpp

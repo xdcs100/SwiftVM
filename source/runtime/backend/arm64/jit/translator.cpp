@@ -1378,8 +1378,16 @@ void JitTranslator::Translate(ir::HIRFunction* function) {
         }
     }
     context.BeginColdScratch();
-    terminal_location_publication.EmitColdPaths(masm);
+    const auto recovery_offsets = terminal_location_publication.EmitColdPaths(masm);
     context.EndColdScratch();
+    for (auto& fault : indirect_l1_fault_metadata) {
+        if (fault.recovery_reg == UINT32_MAX) {
+            continue;
+        }
+        fault.recovery_offset = recovery_offsets[fault.recovery_reg];
+        ASSERT(fault.recovery_offset != 0);
+        fault.recovery_reg = UINT32_MAX;
+    }
     translating_function = false;
     PlacementPoint("unit", placement_unit_pc);
     next_region_block.reset();
