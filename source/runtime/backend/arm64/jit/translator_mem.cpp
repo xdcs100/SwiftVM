@@ -2290,6 +2290,17 @@ void JitTranslator::EmitCompareAndSwap(ir::Inst* inst) {
     }
 
     __ Bind(&aligned);
+    if (CanUseLSE()) {
+        EmitLSECompareAndSwap(type,
+                              result,
+                              context.R(expected, true),
+                              context.R(desired, true),
+                              address);
+        __ Bind(&done);
+        tso_emission_stats.Increment(tso_emission_stats.dmb_instructions);
+        __ Dmb(InnerShareable, BarrierAll);
+        return;
+    }
     __ Bind(&retry);
     switch (type) {
         case ir::ValueType::S8:
@@ -2441,6 +2452,13 @@ void JitTranslator::EmitAtomicExchange(ir::Inst* inst) {
     }
 
     __ Bind(&aligned);
+    if (CanUseLSE()) {
+        EmitLSEExchange(type, result, context.R(desired, true), address);
+        __ Bind(&done);
+        tso_emission_stats.Increment(tso_emission_stats.dmb_instructions);
+        __ Dmb(InnerShareable, BarrierAll);
+        return;
+    }
     __ Bind(&retry);
     switch (type) {
         case ir::ValueType::S8:
@@ -2508,6 +2526,13 @@ void JitTranslator::EmitAtomicFetchAdd(ir::Inst* inst) {
     }
 
     __ Bind(&aligned);
+    if (CanUseLSE()) {
+        EmitLSEFetchAdd(type, result, context.R(addend, true), address);
+        __ Bind(&done);
+        tso_emission_stats.Increment(tso_emission_stats.dmb_instructions);
+        __ Dmb(InnerShareable, BarrierAll);
+        return;
+    }
     __ Bind(&retry);
     switch (type) {
         case ir::ValueType::S8:

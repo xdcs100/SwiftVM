@@ -579,6 +579,20 @@ private:
     // With a 32-bit window this is one instruction — the same Add the
     // unbounded path emitted — because UXTW does the truncation for free.
     void EmitGuestToHost(const Register &dst, const Register &guest_addr);
+    [[nodiscard]] bool CanUseLSE() const;
+    void EmitLSECompareAndSwap(ir::ValueType type,
+                               const Register& result,
+                               const Register& expected,
+                               const Register& desired,
+                               const Register& address);
+    void EmitLSEExchange(ir::ValueType type,
+                         const Register& result,
+                         const Register& desired,
+                         const Register& address);
+    void EmitLSEFetchAdd(ir::ValueType type,
+                         const Register& result,
+                         const Register& addend,
+                         const Register& address);
 
     // Host C-ABI call helper (saves/restores caller-saved allocated GPRs)
     void EmitHostCall(const ir::Lambda &lambda,
