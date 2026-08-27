@@ -3,6 +3,7 @@ add_executable(swift_test
         link_manager_test.cpp
         region_link_trampoline_test.cpp
         guarded_return_stack_test.cpp
+        indirect_target_preservation_test.cpp
         region_edges_test.cpp
         direct_link_production_test.cpp
         flags_merge_test.cpp

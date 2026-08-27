@@ -1112,28 +1112,18 @@ ir::Value X64Decoder::Sse42StrLength(ir::Value raw, u32 elements) {
 // ---------------------------------------------------------------------------
 // The six flags
 // ---------------------------------------------------------------------------
-// Same recipe as DecodePopf, which is the only other place in this front end
-// that has to write all six from computed 0/1 values:
-//   PF  a value with ODD low-byte parity spells PF = 0
-//   ZF  SaveFlags(v, Zero) sets ZF from v == 0, so the bit is inverted first
-//   SF  SaveFlags(v, Negate) reads v's sign bit, so the bit is shifted to 63
-//   AF  0xF + 0 carries out of bit 3 exactly when the added bit is 1
-//   CF / OF  SetCarry / SetOverflow write the flag bit directly
 void X64Decoder::Sse42StrFlags(ir::Value packed) {
     const auto bit = [&](u32 position) {
         return __ And(__ LsrImm(packed, ir::Imm(position)), ir::Operand{ir::Imm(u64(1))})
                 .SetType(kU64);
     };
+    __ ClearFlags(ir::Flags::Parity | ir::Flags::AuxiliaryCarry);
     auto one = __ LoadImm(ir::Imm(u64(1))).SetType(kU64);
     auto zero = __ LoadImm(ir::Imm(u64(0))).SetType(kU64);
-    // PF and AF are architecturally 0 for all four instructions.
-    __ SaveFlags(__ Or(one, ir::Operand{ir::Imm(u64(0))}), ir::Flags::Parity);
     auto zf = __ Select(__ TestNotZero(bit(kResZfBit)), zero, one).SetType(kU64);
     __ SaveFlags(__ Or(zf, ir::Operand{ir::Imm(u64(0))}), ir::Flags::Zero);
     auto sf = __ LslImm(bit(kResSfBit), ir::Imm(63u)).SetType(kU64);
     __ SaveFlags(__ Or(sf, ir::Operand{ir::Imm(u64(0))}), ir::Flags::Negate);
-    __ SaveFlags(__ Add(__ LoadImm(ir::Imm(u64(0xF))), ir::Operand{ir::Imm(u64(0))}),
-                 ir::Flags::AuxiliaryCarry);
     __ SetCarry(bit(kResCfBit));
     __ SetOverflow(bit(kResOfBit));
     carry_ = CarryPolarity::Direct;

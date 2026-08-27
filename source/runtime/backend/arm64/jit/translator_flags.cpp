@@ -58,7 +58,25 @@ void JitTranslator::BeginFlagsTokenProducer(const PseudoFlags& pseudo) {
         return;
     }
     if (FlagsRegsEnabled()) {
-        InvalidateFlagsToken();
+        const auto overwritten = pseudo.set | pseudo.clear;
+        if (flags_token_valid) {
+            if (True(overwritten & ir::Flags::Parity)) {
+                InvalidateFlagsToken();
+            } else {
+                PublishFlagsToken();
+            }
+        }
+        if (nzcv_dirty) {
+            const auto overwritten_nzcv =
+                    GuestNZCVToHost(overwritten & ir::Flags::NZCV);
+            if (True(nzcv_requested & ~overwritten_nzcv)) {
+                MergeNZCV(FlagsRegsAuditMergeCause::ClearOrPartialWrite,
+                          flags_audit_block_edge);
+            } else {
+                nzcv_dirty = false;
+                nzcv_requested = {};
+            }
+        }
         return;
     }
     MergeNZCV();

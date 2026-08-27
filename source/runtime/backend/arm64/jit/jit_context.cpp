@@ -782,6 +782,7 @@ void JitContext::ReturnHost() {
 
 JitContext::FaultRange
 JitContext::ForwardIndirectL1(const Register& location, Label* miss) {
+    ReserveTmpX(XRegister{location.GetCode()});
     const auto index = GetTmpX();
     const auto entry = GetTmpX();
 
@@ -823,6 +824,7 @@ JitContext::ForwardIndirectL1(const Register& location, Label* miss) {
 
 void JitContext::ForwardContinuation(const Register& location, Label* miss) {
     ASSERT(miss);
+    ReserveTmpX(XRegister{location.GetCode()});
     const auto predicted = GetTmpX();
     const auto continuation = GetTmpX();
     __ Ldp(predicted, continuation, MemOperand(rsb_ptr, 16, PostIndex));
@@ -837,6 +839,7 @@ JitContext::ForwardIndirectCall(const Register& location,
                                 Label* miss,
                                 bool pending_flags) {
     ASSERT(miss);
+    ReserveTmpX(XRegister{location.GetCode()});
     const auto index = GetTmpX();
     const auto entry = GetTmpX();
     if (pending_flags) {
