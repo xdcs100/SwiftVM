@@ -2210,6 +2210,17 @@ peepholes.
   and bounded smallpt retains SHA-256
   `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. No stress run, fallback,
   retained probe, diagnostic source path or new environment switch remains.
+- `58e8d58` detects FEAT_LSE through the existing host-feature bitmap and lowers aligned scalar
+  CMPXCHG, XCHG and XADD to CASAL, SWPAL and LDADDAL. The capability is already part of ConfigHash,
+  so cached code cannot cross into a non-LSE host shape. Misaligned x86 atomics keep the required
+  serialized plain-access path; only the aligned exclusive retry loops are removed. Against
+  `3f38207`, bounded SQLite `main/10` keeps all 1,995 units and moves `464,464 -> 464,305`
+  (`-159`, `-0.034233%`), with 25 shrinking units and no growth. `__run_exit_handlers` moves
+  `1,010 -> 986`; its ten aligned atomic sites become four CASAL and six SWPAL instructions, while
+  the static unaligned lock paths remain. Fixed-seed 101 and 424242 bit-operation fuzz on Mac and
+  Orb report zero CMPXCHG mismatches; only the established unrelated rotate/bit families remain.
+  Bounded SQLite exits normally. No stress run, probe, diagnostic source path or new environment
+  switch remains.
 
 ## Orb loop
 
