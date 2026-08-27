@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Product code tip: **`1dff969`** `perf: streamline return continuation hits`
+- Product code tip: **`e0f9d58`** `perf: fault invalid indirect call targets`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -2073,6 +2073,26 @@ peepholes.
   `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`, and the one-second
   OpenSSL SHA command exits normally. No stress run, probe, diagnostic path or environment switch
   remains.
+- `e0f9d58` removes the nonzero host-entry check from every continuation indirect-call hit. The hot
+  probe is now `LDR base; BFI address; LDP key/entry; CMP key; B.ne miss; BLR entry`, six
+  instructions. Ordinary key mismatches still branch to the existing grouped cold path. Only a
+  matching entry whose value was atomically invalidated to zero reaches `BLR 0`; x30 identifies the
+  exact source instruction, an `IndirectCallMiss` fault record resumes that same cold path, and x25
+  is left unchanged because no continuation frame was pushed. Interrupt-table faults retain their
+  existing lookup recovery. Disk-cache format 13 serializes and validates the new recovery kind.
+  The exact CoreMark 2k join keeps all 3,695 PCs/versions, 100% host and entry coverage, all top-20
+  PCs and `crcfinal=0x4983`; weighted host work moves `292,339,525 -> 291,701,194`
+  (`-638,331`, `-0.218353%`) with no growth. `0x402580` shrinks `15 -> 14` and contributes
+  `-638,328`. Across 291 common emitted units, code size moves `279,760 -> 279,652` (`-108` bytes),
+  with 18 shrinking and none growing. A same-build Orb SQLite A/B is neutral within run noise:
+  baseline wall `1.836/1.623/1.589s`, candidate `1.704/1.678/1.620s`; tracing the candidate records
+  zero SIGSEGV/SIGBUS, confirming ordinary misses do not use the new recovery. Mac/Orb function,
+  direct-link without stress, guarded-return and interrupt focuses pass 252/252, 1,099/807, 5/5
+  and 8/8 assertions; the new invalidated-entry recovery passes 11/11 and the v13 serializer focus
+  passes 41/41. Bounded smallpt retains oracle
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`, and the one-second
+  OpenSSL SHA command exits normally. No stress run, retained probe, diagnostic path or environment
+  switch remains.
 
 ## Orb loop
 
