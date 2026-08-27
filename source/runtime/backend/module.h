@@ -40,6 +40,11 @@ struct ModuleConfig {
 
 struct NoneAddressNode {};
 
+enum class FaultRecoveryKind : u8 {
+    GuestFault,
+    ContinuationMiss,
+};
+
 // JIT fault table entry. Function units may contribute one subrange per
 // emitted guest block; owner_start keeps all entries tied to the allocation
 // that must be retired together. recovery is optional and defaults to the
@@ -50,6 +55,7 @@ struct FaultEntry {
     u8* owner_start{};
     u8* recovery{};
     VAddr guest_loc{};
+    FaultRecoveryKind recovery_kind{FaultRecoveryKind::GuestFault};
 
     [[nodiscard]] bool Contains(const u8* host_pc) const {
         return host_pc >= host_start && host_pc < host_end;
@@ -163,7 +169,9 @@ public:
                        u8* host_end,
                        VAddr guest_loc,
                        u8* owner_start = nullptr,
-                       u8* recovery = nullptr);
+                       u8* recovery = nullptr,
+                       FaultRecoveryKind recovery_kind =
+                               FaultRecoveryKind::GuestFault);
 
     // Finds the fault entry whose host range contains host_pc. Called from
     // the host signal handler; takes the cache lock shared.

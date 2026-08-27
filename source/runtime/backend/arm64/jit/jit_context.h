@@ -148,7 +148,8 @@ public:
                   DirectLinkFlagsBypass flags_bypass = {});
     [[nodiscard]] FaultRange
     ForwardIndirectL1(const Register& location, Label* miss = nullptr);
-    void ForwardContinuation(const Register& location, Label* miss);
+    [[nodiscard]] FaultRange
+    ForwardContinuation(const Register& location, Label* miss);
     [[nodiscard]] FaultRange
     ForwardIndirectCall(const Register& location,
                         Label* miss,

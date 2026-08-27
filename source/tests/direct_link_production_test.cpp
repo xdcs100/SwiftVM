@@ -19,6 +19,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include "runtime/common/svm_config.h"
 #include "runtime/backend/address_space.h"
+#include "runtime/backend/context.h"
 #include "runtime/backend/link_manager.h"
 #include "runtime/backend/runtime.h"
 #include "runtime/common/cast_utils.h"
@@ -81,6 +82,21 @@ IntrusivePtr<Block> BuildStaticForwardSource(VAddr guest, VAddr target) {
     block->SetTerminal(terminal::ReturnToDispatch{});
     block->ReIdInstr();
     return block;
+}
+
+void* TranslateContinuationReturnSource(
+        const std::shared_ptr<Module>& module,
+        VAddr guest) {
+    HIRBuilder builder{1, true};
+    auto* function = builder.AppendFunction(Location{guest}, Location{guest + 1});
+    const auto target = function
+                                ->LoadUniform<TypedValue<ValueType::U64>>(
+                                        Uniform{0, ValueType::U64})
+                                .SetType(ValueType::U64);
+    function->SetLocation(Lambda{target});
+    function->EndBlock(terminal::PopRSBHint{});
+    function->EndFunction();
+    return TranslateIR(module, function);
 }
 
 IntrusivePtr<Block> BuildConditionalSource(VAddr guest,
@@ -1197,6 +1213,80 @@ TEST_CASE("static forwards register their flags bypass",
     REQUIRE(munmap(guest_memory, guest_size) == 0);
 #else
     SUCCEED("production static flags bypass requires an AArch64 host");
+#endif
+}
+
+TEST_CASE("fault-backed continuation rejects empty and mismatched frames",
+          "[direct-link][continuation][fault]") {
+#if defined(__aarch64__)
+    ScopedEnvironment disk_cache{"SVM_JIT_CACHE", ""};
+    ScopedEnvironment flags_regs{"SVM_FLAGS_REGS", "1"};
+
+    const bool mismatch = GENERATE(false, true);
+    CAPTURE(mismatch);
+    const size_t page_size = static_cast<size_t>(getpagesize());
+    const size_t guest_size = 8 * page_size;
+    void* guest_memory = mmap(nullptr,
+                              guest_size,
+                              PROT_READ | PROT_WRITE,
+                              MAP_PRIVATE | MAP_ANON,
+                              -1,
+                              0);
+    REQUIRE(guest_memory != MAP_FAILED);
+    {
+        const VAddr source_guest = page_size + 0x180;
+        const VAddr target_guest = mismatch ? 5 * page_size + 0x180 : 0;
+        constexpr u64 kFingerprint = 0x1234'5678'9abc'def0ull;
+        Config config{
+                .loc_start = 0,
+                .loc_end = guest_size,
+                .enable_jit = true,
+                .enable_asm_interp = false,
+                .has_local_operation = false,
+                .backend_isa = kArm64,
+                .uniform_buffer_size = 64,
+                .global_opts = Optimizations::BlockLink |
+                               Optimizations::ReturnStackBuffer,
+                .region_edges = true,
+                .memory_base = guest_memory,
+                .guest_addr_mask = guest_size - 1,
+        };
+        AddressSpace space{config};
+        auto module = space.GetDefaultModule();
+
+        auto target_block = BuildTarget(target_guest, kFingerprint);
+        auto* target_code = TranslateIR(module, target_block);
+        REQUIRE(target_code != nullptr);
+        space.PushCodeCache(Location{target_guest}, target_code);
+        auto* source_code = TranslateContinuationReturnSource(module, source_guest);
+        REQUIRE(source_code != nullptr);
+        space.PushCodeCache(Location{source_guest}, source_code);
+
+        Runtime runtime{&space};
+        auto* empty = runtime.GetState()->rsb_pointer;
+        REQUIRE(empty != nullptr);
+        if (mismatch) {
+            auto* frame = empty - 1;
+            frame->guest_location = target_guest + 1;
+            frame->dispatch_index = reinterpret_cast<u64>(target_code);
+            runtime.GetState()->rsb_pointer = frame;
+        }
+        std::memcpy(runtime.GetUniformBuffer().data(),
+                    &target_guest,
+                    sizeof(target_guest));
+        runtime.SetLocation(source_guest);
+        REQUIRE(runtime.Run() ==
+                (mismatch ? HaltReason::CallHost : HaltReason::CodeMiss));
+        if (mismatch) {
+            u64 result{};
+            std::memcpy(&result, runtime.GetUniformBuffer().data(), sizeof(result));
+            REQUIRE(result == kFingerprint);
+        }
+        REQUIRE(runtime.GetState()->rsb_pointer == empty);
+    }
+    REQUIRE(munmap(guest_memory, guest_size) == 0);
+#else
+    SUCCEED("fault-backed continuation recovery requires an AArch64 host");
 #endif
 }
 

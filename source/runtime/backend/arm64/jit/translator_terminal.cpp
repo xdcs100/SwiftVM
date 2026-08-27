@@ -482,12 +482,44 @@ bool JitTranslator::EmitContinuationForward() {
         miss_site.label = std::make_unique<Label>();
         miss_site.guest_start = cur_block->GetStartLocation().Value();
     }
+    miss_site.reset_return_stack = true;
     dynamic_location_miss = nullptr;
     const u32 link_before = context.CurrentBufferSize();
-    context.ForwardContinuation(location, miss_site.label.get());
+    const auto fault = context.ForwardContinuation(
+            location, miss_site.label.get());
+    RecordContinuationFault(fault, miss_site.label.get());
     RecordBoundaryRange(BoundarySubsequence::LinkTail, link_before,
                         context.CurrentBufferSize());
     return true;
+}
+
+void JitTranslator::RecordContinuationFault(
+        JitContext::FaultRange fault,
+        Label* recovery) {
+    ASSERT(recovery);
+    const size_t index = fault_metadata.size();
+    fault_metadata.push_back({
+            .guest_start = cur_block->GetStartLocation().Value(),
+            .host_begin = fault.begin,
+            .host_end = fault.end,
+            .recovery_kind = FaultRecoveryKind::ContinuationMiss,
+    });
+    pending_continuation_faults.push_back({index, recovery});
+}
+
+void JitTranslator::ResolveContinuationFaults(Label* recovery) {
+    ASSERT(recovery && recovery->IsBound());
+    const u32 offset = static_cast<u32>(recovery->GetLocation());
+    for (auto it = pending_continuation_faults.begin();
+         it != pending_continuation_faults.end();) {
+        if (it->recovery != recovery) {
+            ++it;
+            continue;
+        }
+        ASSERT(it->metadata_index < fault_metadata.size());
+        fault_metadata[it->metadata_index].recovery_offset = offset;
+        it = pending_continuation_faults.erase(it);
+    }
 }
 
 bool JitTranslator::CanUseCallContinuation() const {
@@ -560,6 +592,10 @@ void JitTranslator::EmitIndirectExitColdPaths() {
             continue;
         }
         __ Bind(site.label.get());
+        ResolveContinuationFaults(site.label.get());
+        if (site.reset_return_stack) {
+            __ Ldr(rsb_ptr, MemOperand(state, state_offset_rsb_empty));
+        }
         const XRegister location{reg};
         auto* recovery = terminal_location_publication.MissLabel(location);
         const auto fault = context.ForwardIndirectL1(location, recovery);

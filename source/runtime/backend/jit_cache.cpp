@@ -594,7 +594,8 @@ bool JitDiskCache::ReviveUnit(const std::shared_ptr<Module>& module, const Seria
                               buffer.exec_data,
                               site.recovery_offset == UINT32_MAX
                                       ? nullptr
-                                      : buffer.exec_data + site.recovery_offset);
+                                      : buffer.exec_data + site.recovery_offset,
+                              static_cast<FaultRecoveryKind>(site.recovery_kind));
     }
     for (size_t i = 0;
          address_space.ExitLatchEnabled() && i < unit.blocks.size();

@@ -1393,6 +1393,7 @@ void JitTranslator::Translate(ir::HIRFunction* function) {
             function->GetFunction()->GetStartLocation().Value());
     context.BeginColdScratch();
     EmitIndirectExitColdPaths();
+    ASSERT(pending_continuation_faults.empty());
     const auto recovery_offsets = terminal_location_publication.EmitColdPaths(context);
     context.EndColdScratch();
     EmitDeferredNZCVMergeStubs();

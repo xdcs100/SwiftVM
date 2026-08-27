@@ -396,14 +396,16 @@ void Module::AddFaultEntry(u8* host_start,
                            u8* host_end,
                            VAddr guest_loc,
                            u8* owner_start,
-                           u8* recovery) {
+                           u8* recovery,
+                           FaultRecoveryKind recovery_kind) {
     ASSERT(host_start < host_end);
     std::unique_lock guard(cache_lock);
     FaultEntry entry{host_start,
                      host_end,
                      owner_start ? owner_start : host_start,
                      recovery,
-                     guest_loc};
+                     guest_loc,
+                     recovery_kind};
     auto it = std::lower_bound(fault_table.begin(),
                                fault_table.end(),
                                host_start,

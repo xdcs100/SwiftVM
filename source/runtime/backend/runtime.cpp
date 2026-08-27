@@ -177,6 +177,7 @@ struct Runtime::Impl final {
         if (True(address_space->GetConfig().global_opts & Optimizations::ReturnStackBuffer)) {
             return_stack.emplace();
             state->rsb_pointer = return_stack->Empty();
+            state->rsb_empty = return_stack->Empty();
         }
         jit_entry = address_space->GetTrampolines().GetRuntimeEntry();
         // Claim this thread for host-side SMC fault recovery (see OwnerSlot).
@@ -341,8 +342,34 @@ struct Runtime::Impl final {
             backend::SignalHandler::SetContextPC(uctx, recovery_pc);
             return true;
         }
-        if (!self->address_space->LookupFault(host_pc, entry)) {
-            return false;  // fault PC not in any JIT code buffer
+        bool has_entry = host_pc &&
+                self->address_space->LookupFault(host_pc, entry);
+        if (!has_entry && !host_pc && fault_addr == 0) {
+            const auto link_register =
+                    backend::SignalHandler::GetContextGPR(uctx, 30);
+            if (link_register >= sizeof(u32)) {
+                has_entry = self->address_space->LookupFault(
+                        reinterpret_cast<u8*>(link_register - sizeof(u32)),
+                        entry);
+                has_entry &= entry.recovery_kind ==
+                        backend::FaultRecoveryKind::ContinuationMiss;
+            }
+        }
+        if (!has_entry) {
+            return false;
+        }
+        if (entry.recovery_kind == backend::FaultRecoveryKind::ContinuationMiss) {
+            if (fault_addr != 0 || !entry.recovery || !self->return_stack ||
+                !backend::SignalHandler::SetContextGPR(
+                        uctx,
+                        25,
+                        reinterpret_cast<std::uintptr_t>(
+                                self->return_stack->Empty()))) {
+                return false;
+            }
+            backend::SignalHandler::SetContextPC(
+                    uctx, reinterpret_cast<std::uintptr_t>(entry.recovery));
+            return true;
         }
         if (self->return_stack && self->return_stack->Recover(uctx, fault_addr)) {
             return true;
@@ -784,7 +811,8 @@ void RecordJitCacheUnit(const std::shared_ptr<backend::Module>& module,
                                fault.host_end,
                                fault.recovery_offset == 0
                                        ? UINT32_MAX
-                                       : fault.recovery_offset});
+                                       : fault.recovery_offset,
+                               static_cast<u8>(fault.recovery_kind)});
     }
     cache->RecordUnit(module,
                       guest_start,
@@ -808,7 +836,8 @@ void PublishIndirectL1Faults(
                               buffer.exec_data,
                               fault.recovery_offset
                                       ? buffer.exec_data + fault.recovery_offset
-                                      : nullptr);
+                                      : nullptr,
+                              fault.recovery_kind);
     }
 }
 

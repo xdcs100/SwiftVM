@@ -195,6 +195,7 @@ struct SerialFaultSite {
     u32 host_begin{};
     u32 host_end{};
     u32 recovery_offset{UINT32_MAX};
+    u8 recovery_kind{};
 };
 
 struct SerialUnit {
@@ -269,7 +270,7 @@ struct ValidityKey {
     bool operator==(const ValidityKey&) const = default;
 };
 
-constexpr u64 kCacheFormatVersion = 11;
+constexpr u64 kCacheFormatVersion = 12;
 
 u64 HashBytes(const void* data, std::size_t size, u64 seed);
 u64 HashU64(u64 value, u64 seed);

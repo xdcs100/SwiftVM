@@ -114,6 +114,7 @@ struct State {
     void* interface{};
     HaltReason halt_reason{HaltReason::None};
     RSBFrame* rsb_pointer{};
+    RSBFrame* rsb_empty{};
     ir::Location current_loc{0};
     ir::Location prev_loc{0};
     void* pt{};
@@ -183,6 +184,7 @@ constexpr u32 state_offset_current_loc = offsetof(State, current_loc);
 constexpr u32 state_offset_prev_loc = offsetof(State, prev_loc);
 constexpr u32 state_offset_pt = offsetof(State, pt);
 constexpr u32 state_offset_rsb_pointer = offsetof(State, rsb_pointer);
+constexpr u32 state_offset_rsb_empty = offsetof(State, rsb_empty);
 constexpr u32 state_offset_host_flags = offsetof(State, host_cpu_flags);
 constexpr u32 state_offset_exec_profile_ptr = offsetof(State, interface);
 constexpr u32 exec_offset_exit_direct = offsetof(RuntimeProfileInterface, exec) +

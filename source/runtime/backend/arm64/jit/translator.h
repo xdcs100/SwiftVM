@@ -88,6 +88,7 @@ public:
         u32 host_end{};
         u32 recovery_offset{};
         u32 recovery_reg{UINT32_MAX};
+        FaultRecoveryKind recovery_kind{FaultRecoveryKind::GuestFault};
     };
 
     explicit JitTranslator(JitContext& ctx);
@@ -466,6 +467,9 @@ private:
     void RecordExitPollFault(std::optional<JitContext::FaultRange> fault,
                              Label* recovery);
     void ResolveExitPollFaults(Label* recovery);
+    void RecordContinuationFault(JitContext::FaultRange fault,
+                                 Label* recovery);
+    void ResolveContinuationFaults(Label* recovery);
 
     // Labels used by Goto / NotGoto / BindLabel
     Label *GetLocalLabel(ir::Inst *inst);
@@ -830,9 +834,15 @@ private:
         Label* recovery{};
     };
     std::vector<PendingExitPollFault> pending_exit_poll_faults{};
+    struct PendingContinuationFault {
+        size_t metadata_index{};
+        Label* recovery{};
+    };
+    std::vector<PendingContinuationFault> pending_continuation_faults{};
     struct IndirectExitMissSite {
         std::unique_ptr<Label> label{};
         u64 guest_start{};
+        bool reset_return_stack{};
     };
     std::array<IndirectExitMissSite, 32> indirect_exit_miss_sites{};
     std::array<IndirectExitMissSite, 32> pending_call_miss_sites{};
