@@ -1896,6 +1896,19 @@ peepholes.
   diagnostic path, environment switch or stress run remains. Applying the measured post-refresh
   reductions to the last formal FEX denominator estimates the remaining CoreMark gap at about 3.5%;
   this remains an estimate until the next full guest-instruction denominator refresh.
+- `a283c6e` removes hot `current_loc` publication from continuation returns. `PopRSB` terminals now
+  require the same grouped cold publisher already used by call returns, preserving miss, signal and
+  dispatcher ordering without adding a second mechanism. Against `661a995`, the 5.35-second
+  CoreMark 2k comparison keeps all 3,631 PCs / 4,838 versions, 100% host and entry coverage, and
+  moves `363,110,333 -> 361,322,158` (`-1,788,175`, `-0.492461%`) with no common growth.
+  `0x403383` shrinks `8 -> 7`, and `0x402363` shrinks `21 -> 20`; dynamic host work moves
+  `363,110,103 -> 361,321,928`. CoreMark 20k returns `crcfinal=0x382f` on Mac and Orb. Mac/Orb
+  direct-link without stress pass 1,281/789 assertions, function passes 252/252, guarded return
+  passes 5/5, and the bounded smallpt screen retains zero spills and SHA-256
+  `542db87b61af7a5cfff84083696082819f8608dc9c3ffaeda04b1db5b3210635`. No probe, diagnostic path,
+  environment switch or stress run remains. Applying this reduction to the last formal FEX
+  denominator estimates the remaining CoreMark gap at about 3.0%; refresh both engines before
+  treating it as a formal ratio.
 
 ## Orb loop
 
