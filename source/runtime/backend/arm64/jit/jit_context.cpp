@@ -1104,7 +1104,7 @@ u8* JitContext::Flush(const CodeBuffer& code_cache) {
                region.ContainsRx(pending_flags_trampoline));
         const LinkSourceOwner owner{module.get(), code_cache.exec_data};
         auto* emitted = masm.GetBuffer()->GetStartAddress<u8*>();
-        for (const auto& pending : pending_direct_link_sites) {
+        for (auto& pending : pending_direct_link_sites) {
             ASSERT(static_cast<size_t>(pending.code_offset) + sizeof(u32) <= code_cache.size);
             auto* rx_site = code_cache.exec_data + pending.code_offset;
             auto* trampoline = pending.flags_bypass.Valid()
@@ -1115,21 +1115,30 @@ u8* JitContext::Flush(const CodeBuffer& code_cache) {
             std::memcpy(emitted + pending.code_offset, &*branch, sizeof(*branch));
             LinkFlagsBypassPatch flags_bypass_patch{};
             if (pending.flags_bypass.Valid()) {
-                const auto linked_branch = EncodeB(
-                        static_cast<intptr_t>(pending.flags_bypass.resume_offset) -
-                        static_cast<intptr_t>(pending.flags_bypass.code_offset));
-                ASSERT(linked_branch);
+                if (pending.flags_bypass.linked_instruction) {
+                    std::memcpy(&pending.flags_bypass_instruction,
+                                emitted + pending.flags_bypass.code_offset,
+                                sizeof(pending.flags_bypass_instruction));
+                }
+                u32 linked_instruction = pending.flags_bypass.linked_instruction;
+                if (!linked_instruction) {
+                    const auto linked_branch = EncodeB(
+                            static_cast<intptr_t>(pending.flags_bypass.resume_offset) -
+                            static_cast<intptr_t>(pending.flags_bypass.code_offset));
+                    ASSERT(linked_branch);
+                    linked_instruction = *linked_branch;
+                }
                 flags_bypass_patch = {
                         .rx_site = code_cache.exec_data +
                                 pending.flags_bypass.code_offset,
                         .rw_site = code_cache.rw_data +
                                 pending.flags_bypass.code_offset,
                         .unlinked_instruction = pending.flags_bypass_instruction,
-                        .linked_branch = *linked_branch,
+                        .linked_instruction = linked_instruction,
                 };
                 std::memcpy(emitted + pending.flags_bypass.code_offset,
-                            &*linked_branch,
-                            sizeof(*linked_branch));
+                            &linked_instruction,
+                            sizeof(linked_instruction));
             }
             const LinkSiteKey key{
                     region.id,

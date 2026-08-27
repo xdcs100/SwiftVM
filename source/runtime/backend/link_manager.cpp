@@ -14,9 +14,12 @@ namespace {
 constexpr std::intptr_t kImm26MaxDistance = (std::intptr_t{1} << 27) - 4;
 constexpr u32 kBranchImmediateMask = 0x03FF'FFFFu;
 constexpr u32 kBranchOpcodeMask = 0x7C00'0000u;
+constexpr u32 kBranchTypeMask = 0xFC00'0000u;
 constexpr u32 kBranchOpcode = 0x1400'0000u;
 constexpr u32 kBOpcode = 0x1400'0000u;
 constexpr u32 kBLOpcode = 0x9400'0000u;
+constexpr u32 kParityPublishRegisterMask = 0x3E0u;
+constexpr u32 kParityPublishOpcode = 0xB340'1C1Au;
 constexpr u64 kSignalInvalidatingGeneration = std::numeric_limits<u64>::max();
 
 // Every atomic touched by SignalInvalidateTarget must compile to an inline,
@@ -124,11 +127,18 @@ bool LinkManager::RegisterSite(LinkSiteKey site,
     }
     if (has_flags_bypass) {
         const auto& bypass = signal_patch->flags_bypass;
+        const bool linked_branch =
+                (bypass.linked_instruction & kBranchOpcodeMask) == kBranchOpcode;
+        const bool linked_parity_publish =
+                (bypass.linked_instruction & ~kParityPublishRegisterMask) ==
+                kParityPublishOpcode;
         if (!bypass.rw_site ||
             !signal_patch->region.ContainsRx(bypass.rx_site) ||
             !signal_patch->region.ContainsRw(bypass.rw_site) ||
             SiteRxToRw(signal_patch->region, bypass.rx_site) != bypass.rw_site ||
-            (bypass.linked_branch & kBranchOpcodeMask) != kBranchOpcode) {
+            (!linked_branch && !linked_parity_publish) ||
+            (linked_parity_publish &&
+             (bypass.unlinked_instruction & kBranchTypeMask) != kBLOpcode)) {
             return false;
         }
     }

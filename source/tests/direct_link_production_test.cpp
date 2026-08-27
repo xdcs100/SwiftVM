@@ -1170,8 +1170,9 @@ TEST_CASE("static forwards register their flags bypass",
         REQUIRE(site.record.guest_target == target_guest);
         REQUIRE(site.record.flags_bypass_offset != UINT32_MAX);
         auto* bypass = region->rx_base + site.record.flags_bypass_offset;
-        REQUIRE(DecodeBranchTarget(bypass, LoadInsn(bypass)) ==
-                reinterpret_cast<uintptr_t>(bypass + 3 * sizeof(u32)));
+        REQUIRE((site.record.flags_bypass_instruction & 0xFC00'0000u) ==
+                0x9400'0000u);
+        REQUIRE((LoadInsn(bypass) & ~0x3E0u) == 0xB340'1C1Au);
 
         Runtime runtime{&space};
         runtime.SetLocation(source_guest);
@@ -1180,6 +1181,18 @@ TEST_CASE("static forwards register their flags bypass",
                 LinkSiteState::Linked);
         REQUIRE(DecodeBranchTarget(site.rx, LoadInsn(site.rx)) ==
                 reinterpret_cast<uintptr_t>(target->pending_flags_host_pc));
+
+        space.InvalidateCodeRange(target_guest, target_guest + 1);
+        auto target_block = BuildTarget(target_guest, 0x1234);
+        target_code = TranslateIR(module, target_block);
+        REQUIRE(target_code != nullptr);
+        space.PushCodeCache(Location{target_guest}, target_code);
+        REQUIRE(space.GetLinkManager()
+                        .QueryTarget(target_guest)
+                        ->pending_flags_host_pc == nullptr);
+        runtime.SetLocation(source_guest);
+        REQUIRE(runtime.Run() == HaltReason::CallHost);
+        REQUIRE(LoadInsn(bypass) == site.record.flags_bypass_instruction);
     }
     REQUIRE(munmap(guest_memory, guest_size) == 0);
 #else

@@ -521,7 +521,12 @@ private:
     // B0 tags the existing sequence only; the tags never affect emission.
     void MergeNZCV();
     DirectLinkFlagsBypass MergeNZCV(FlagsRegsAuditMergeCause cause,
-                                    FlagsRegsAuditEdgeKind edge);
+                                    FlagsRegsAuditEdgeKind edge,
+                                    bool compact_static_forward = false);
+    DirectLinkFlagsBypass EmitDeferredNZCVMerge(
+            const XRegister& scratch,
+            const XRegister& token);
+    void EmitDeferredNZCVMergeStubs();
     [[nodiscard]] std::optional<u64>
     PendingNZCVMergeMask(FlagsRegsAuditMergeCause cause) const;
     [[nodiscard]] bool
@@ -832,6 +837,12 @@ private:
     std::array<IndirectExitMissSite, 32> indirect_exit_miss_sites{};
     std::array<IndirectExitMissSite, 32> pending_call_miss_sites{};
     std::vector<std::unique_ptr<VecNaNColdSite>> vec_nan_cold_sites{};
+    struct DeferredNZCVMergeStub {
+        XRegister scratch{};
+        XRegister token{};
+        std::unique_ptr<Label> entry{};
+    };
+    std::vector<DeferredNZCVMergeStub> deferred_nzcv_merge_stubs{};
     bool boundary_density_enabled{};
     bool boundary_terminal_open{};
     u32 boundary_terminal_link_bytes{};

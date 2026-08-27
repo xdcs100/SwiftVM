@@ -525,13 +525,17 @@ bool JitDiskCache::ReviveUnit(const std::shared_ptr<Module>& module, const Seria
             }
             std::memcpy(buffer.rw_data + site.code_offset, &*branch, sizeof(*branch));
             if (has_flags_bypass) {
-                const auto linked_branch = EncodeB(
-                        static_cast<intptr_t>(site.flags_bypass_resume_offset) -
-                        static_cast<intptr_t>(site.flags_bypass_offset));
-                ASSERT(linked_branch);
+                u32 linked_instruction = site.flags_bypass_linked_instruction;
+                if (!linked_instruction) {
+                    const auto linked_branch = EncodeB(
+                            static_cast<intptr_t>(site.flags_bypass_resume_offset) -
+                            static_cast<intptr_t>(site.flags_bypass_offset));
+                    ASSERT(linked_branch);
+                    linked_instruction = *linked_branch;
+                }
                 std::memcpy(buffer.rw_data + site.flags_bypass_offset,
-                            &*linked_branch,
-                            sizeof(*linked_branch));
+                            &linked_instruction,
+                            sizeof(linked_instruction));
             }
             unlinked_bl.push_back(*branch);
         }
@@ -634,15 +638,19 @@ bool JitDiskCache::ReviveUnit(const std::shared_ptr<Module>& module, const Seria
             const LinkSiteKey key{direct_region->id, buffer.offset + site.code_offset};
             LinkFlagsBypassPatch flags_bypass_patch{};
             if (site.HasFlagsBypass()) {
-                const auto linked_branch = EncodeB(
-                        static_cast<intptr_t>(site.flags_bypass_resume_offset) -
-                        static_cast<intptr_t>(site.flags_bypass_offset));
-                ASSERT(linked_branch);
+                u32 linked_instruction = site.flags_bypass_linked_instruction;
+                if (!linked_instruction) {
+                    const auto linked_branch = EncodeB(
+                            static_cast<intptr_t>(site.flags_bypass_resume_offset) -
+                            static_cast<intptr_t>(site.flags_bypass_offset));
+                    ASSERT(linked_branch);
+                    linked_instruction = *linked_branch;
+                }
                 flags_bypass_patch = {
                         .rx_site = buffer.exec_data + site.flags_bypass_offset,
                         .rw_site = buffer.rw_data + site.flags_bypass_offset,
                         .unlinked_instruction = site.flags_bypass_instruction,
-                        .linked_branch = *linked_branch,
+                        .linked_instruction = linked_instruction,
                 };
             }
             const LinkSignalPatchSite signal_patch{

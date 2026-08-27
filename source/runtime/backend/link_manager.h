@@ -69,7 +69,7 @@ struct LinkFlagsBypassPatch {
     void* rx_site{};
     void* rw_site{};
     u32 unlinked_instruction{};
-    u32 linked_branch{};
+    u32 linked_instruction{};
 };
 
 // Fully resolved at ordinary publication time. SignalInvalidation never

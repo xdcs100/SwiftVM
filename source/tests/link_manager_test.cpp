@@ -328,18 +328,18 @@ TEST_CASE("pending flags bypass rejects incompatible linked targets",
     auto* first_rw = buffer->rw_data + 32;
     auto* second_rx = buffer->exec_data + 48;
     auto* second_rw = buffer->rw_data + 48;
-    constexpr u32 kMergeHead = 0xd53b4200;
-    const auto skip_merge = EncodeB(12);
+    constexpr u32 kLinkedPublish = 0xb3401c1a;
+    const auto cold_merge = EncodeBL((buffer->exec_data + 96) - bypass_rx);
     const auto first_bl = EncodeBL((buffer->exec_data + 128) - first_rx);
     const auto second_bl = EncodeBL((buffer->exec_data + 128) - second_rx);
     const auto first_direct = EncodeB((buffer->exec_data + 160) - first_rx);
     const auto second_direct = EncodeB((buffer->exec_data + 176) - second_rx);
-    REQUIRE(skip_merge);
+    REQUIRE(cold_merge);
     REQUIRE(first_bl);
     REQUIRE(second_bl);
     REQUIRE(first_direct);
     REQUIRE(second_direct);
-    StoreInstruction(bypass_rw, *skip_merge);
+    StoreInstruction(bypass_rw, kLinkedPublish);
     StoreInstruction(first_rw, *first_bl);
     StoreInstruction(second_rw, *second_bl);
     buffer->Flush();
@@ -355,8 +355,8 @@ TEST_CASE("pending flags bypass rejects incompatible linked targets",
     const LinkFlagsBypassPatch bypass_patch{
             .rx_site = bypass_rx,
             .rw_site = bypass_rw,
-            .unlinked_instruction = kMergeHead,
-            .linked_branch = *skip_merge,
+            .unlinked_instruction = *cold_merge,
+            .linked_instruction = kLinkedPublish,
     };
     const LinkSignalPatchSite first_patch{
             .region = region,
@@ -391,11 +391,11 @@ TEST_CASE("pending flags bypass rejects incompatible linked targets",
     REQUIRE(manager.MarkLinked(first_key, first_generation, [&](const LinkSiteRecord&) {
         return PatchDirectBranch(region, first_rx, first_rw, *first_direct);
     }));
-    REQUIRE(LoadInstruction(bypass_rx) == *skip_merge);
+    REQUIRE(LoadInstruction(bypass_rx) == kLinkedPublish);
     REQUIRE(manager.MarkLinked(second_key, second_generation, [&](const LinkSiteRecord&) {
         return PatchDirectBranch(region, second_rx, second_rw, *second_direct);
     }));
-    REQUIRE(LoadInstruction(bypass_rx) == kMergeHead);
+    REQUIRE(LoadInstruction(bypass_rx) == *cold_merge);
 
     REQUIRE(manager.SignalInvalidateTarget(kSecondTarget).linked_sites == 1);
     REQUIRE(manager.BeginTargetInvalidation(kSecondTarget).size() == 1);
@@ -409,9 +409,9 @@ TEST_CASE("pending flags bypass rejects incompatible linked targets",
     REQUIRE(manager.MarkLinked(second_key, second_generation, [&](const LinkSiteRecord&) {
         return PatchDirectBranch(region, second_rx, second_rw, *second_direct);
     }));
-    REQUIRE(LoadInstruction(bypass_rx) == *skip_merge);
+    REQUIRE(LoadInstruction(bypass_rx) == kLinkedPublish);
 
     REQUIRE(manager.SignalInvalidateTarget(kFirstTarget).linked_sites == 1);
     REQUIRE(LoadInstruction(first_rx) == *first_bl);
-    REQUIRE(LoadInstruction(bypass_rx) == *skip_merge);
+    REQUIRE(LoadInstruction(bypass_rx) == kLinkedPublish);
 }

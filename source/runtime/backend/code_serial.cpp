@@ -589,6 +589,7 @@ void WriteUnit(BlobWriter& w, const SerialUnit& unit) {
         w.U32(site.flags_bypass_offset);
         w.U32(site.flags_bypass_resume_offset);
         w.U32(site.flags_bypass_instruction);
+        w.U32(site.flags_bypass_linked_instruction);
     }
     w.U32(static_cast<u32>(unit.fault_sites.size()));
     for (const auto& site : unit.fault_sites) {
@@ -649,7 +650,7 @@ bool ReadUnit(BlobReader& r, SerialUnit& unit) {
         rel.kind = static_cast<RelocKind>(kind);
         rel.use = static_cast<RelocUse>(use);
     }
-    if (!r.U32(count) || count > r.Remaining() / 25) {
+    if (!r.U32(count) || count > r.Remaining() / 29) {
         return false;
     }
     unit.link_sites.resize(count);
@@ -659,7 +660,8 @@ bool ReadUnit(BlobReader& r, SerialUnit& unit) {
         if (!r.U32(site.code_offset) || !r.U64(site.guest_target) ||
             !r.U8(site.kind) || !r.U32(site.flags_bypass_offset) ||
             !r.U32(site.flags_bypass_resume_offset) ||
-            !r.U32(site.flags_bypass_instruction)) {
+            !r.U32(site.flags_bypass_instruction) ||
+            !r.U32(site.flags_bypass_linked_instruction)) {
             return false;
         }
         if ((site.code_offset & 3u) != 0 ||

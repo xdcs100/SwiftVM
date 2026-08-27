@@ -45,8 +45,8 @@ void LinkManager::TryEnableFlagsBypassLocked(LinkSiteRecord& record) {
               candidate.rw_site != patch_site->patch.flags_bypass.rw_site ||
               candidate.unlinked_instruction !=
                       patch_site->patch.flags_bypass.unlinked_instruction ||
-              candidate.linked_branch !=
-                      patch_site->patch.flags_bypass.linked_branch))) {
+              candidate.linked_instruction !=
+                      patch_site->patch.flags_bypass.linked_instruction))) {
             return;
         }
         if (!patch_site) {
@@ -91,8 +91,10 @@ void LinkManager::TryEnableFlagsBypassLocked(LinkSiteRecord& record) {
     }
     const auto& bypass = patch_site->patch.flags_bypass;
     if (valid) {
-        (void)PatchDirectBranch(
-                patch_site->patch.region, bypass.rx_site, bypass.rw_site, bypass.linked_branch);
+        (void)PatchCodeWord(patch_site->patch.region,
+                            bypass.rx_site,
+                            bypass.rw_site,
+                            bypass.linked_instruction);
     }
     for (auto* target : signal_targets) {
         target->linking_count.fetch_sub(1, std::memory_order_seq_cst);

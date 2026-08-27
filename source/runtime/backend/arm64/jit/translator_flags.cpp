@@ -1,5 +1,6 @@
 #include "translator.h"
 
+#include <algorithm>
 #include <bit>
 #include <optional>
 
@@ -261,6 +262,47 @@ void JitTranslator::EmitNZCVMerge(u64 requested,
     __ Orr(flags, flags, scratch);
 }
 
+DirectLinkFlagsBypass JitTranslator::EmitDeferredNZCVMerge(
+        const XRegister& scratch,
+        const XRegister& token) {
+    ASSERT(scratch != token);
+    auto stub = std::find_if(
+            deferred_nzcv_merge_stubs.begin(),
+            deferred_nzcv_merge_stubs.end(),
+            [&](const auto& candidate) {
+                return candidate.scratch == scratch && candidate.token == token;
+            });
+    if (stub == deferred_nzcv_merge_stubs.end()) {
+        deferred_nzcv_merge_stubs.push_back(
+                {scratch, token, std::make_unique<Label>()});
+        stub = std::prev(deferred_nzcv_merge_stubs.end());
+    }
+
+    const u32 begin = context.CurrentBufferSize();
+    __ Bl(stub->entry.get());
+    alignas(u32) u32 linked_instruction{};
+    Assembler encoder{reinterpret_cast<vixl::byte*>(&linked_instruction),
+                      sizeof(linked_instruction)};
+    encoder.bfi(flags, token, HostFlagsBit::ParityByte, 8);
+    encoder.FinalizeCode();
+    return {begin, context.CurrentBufferSize(), linked_instruction};
+}
+
+void JitTranslator::EmitDeferredNZCVMergeStubs() {
+    if (deferred_nzcv_merge_stubs.empty()) {
+        return;
+    }
+    context.BeginColdScratch();
+    for (auto& stub : deferred_nzcv_merge_stubs) {
+        __ Bind(stub.entry.get());
+        EmitNZCVMerge(static_cast<u64>(HostFlags::NZCV), stub.scratch);
+        __ Bfi(flags, stub.token, HostFlagsBit::ParityByte, 8);
+        __ Ret();
+    }
+    context.EndColdScratch();
+    deferred_nzcv_merge_stubs.clear();
+}
+
 std::optional<u64> JitTranslator::PendingNZCVMergeMask(
         FlagsRegsAuditMergeCause cause) const {
     const bool force_ret_pstate =
@@ -285,8 +327,10 @@ bool JitTranslator::CanDeferFullNZCVMerge(
 
 DirectLinkFlagsBypass JitTranslator::MergeNZCV(
         FlagsRegsAuditMergeCause cause,
-        FlagsRegsAuditEdgeKind edge) {
+        FlagsRegsAuditEdgeKind edge,
+        bool compact_static_forward) {
     DirectLinkFlagsBypass flags_bypass{};
+    bool deferred_merge{};
     const auto requested = PendingNZCVMergeMask(cause);
     if (requested) {
         const u32 begin = context.CurrentBufferSize();
@@ -295,9 +339,17 @@ DirectLinkFlagsBypass JitTranslator::MergeNZCV(
         // their existing value in the flags register, so a ClearFlags(CF)
         // between two flag-setting instructions is not overwritten.
         const u64 req = *requested;
-        EmitNZCVMerge(req, context.GetSharedTmpX());
+        deferred_merge = compact_static_forward && flags_token_keep &&
+                flags_token_valid &&
+                req == static_cast<u64>(HostFlags::NZCV);
+        if (deferred_merge) {
+            const auto scratch = context.GetSharedTmpX();
+            flags_bypass = EmitDeferredNZCVMerge(scratch, FlagsTokenResult());
+        } else {
+            EmitNZCVMerge(req, context.GetSharedTmpX());
+        }
         const u32 merge_end = context.CurrentBufferSize();
-        if (FlagsRegsEnabled() && region_edges_active &&
+        if (!deferred_merge && FlagsRegsEnabled() && region_edges_active &&
             req == static_cast<u64>(HostFlags::NZCV) &&
             merge_end - begin == 3 * sizeof(u32)) {
             flags_bypass = {begin, merge_end};
@@ -347,7 +399,9 @@ DirectLinkFlagsBypass JitTranslator::MergeNZCV(
                                          2);
         }
     }
-    PublishFlagsToken();
+    if (!deferred_merge) {
+        PublishFlagsToken();
+    }
     return flags_bypass;
 }
 

@@ -424,20 +424,21 @@ TEST_CASE("disk cache scanner keeps move-wide constants and rejects PC-relative 
     }
 }
 
-TEST_CASE("disk cache v10 serializes link and fault-site records",
+TEST_CASE("disk cache v11 serializes link and fault-site records",
           "[direct-link][jit-cache][serializer]") {
     SerialUnit input{};
     input.guest_start = 0x1000;
     input.feature_hash = 0x123456789abcdef0ull;
     input.code.resize(64, 0);
     input.blocks.push_back({0x1000, 0x1004, 0, 0x1234, 16, 20});
-    constexpr u32 kMergeHead = 0xd53b4200;
-    std::memcpy(input.code.data() + 24, &kMergeHead, sizeof(kMergeHead));
+    constexpr u32 kColdMerge = 0x94000004;
+    constexpr u32 kLinkedPublish = 0xb3401c1a;
+    std::memcpy(input.code.data() + 24, &kColdMerge, sizeof(kColdMerge));
     input.link_sites = {
             {40, 0x2000, static_cast<u8>(LinkSiteKind::ConditionalThen),
-             24, 36, kMergeHead},
+             24, 28, kColdMerge, kLinkedPublish},
             {44, 0x3000, static_cast<u8>(LinkSiteKind::ConditionalElse),
-             24, 36, kMergeHead},
+             24, 28, kColdMerge, kLinkedPublish},
             {52, 0x4000, static_cast<u8>(LinkSiteKind::SwitchArm)},
     };
     input.fault_sites = {{0x1000, 4, 8, 56}};
@@ -464,6 +465,8 @@ TEST_CASE("disk cache v10 serializes link and fault-site records",
                 input.link_sites[i].flags_bypass_resume_offset);
         REQUIRE(output.link_sites[i].flags_bypass_instruction ==
                 input.link_sites[i].flags_bypass_instruction);
+        REQUIRE(output.link_sites[i].flags_bypass_linked_instruction ==
+                input.link_sites[i].flags_bypass_linked_instruction);
     }
     REQUIRE(output.fault_sites.size() == 1);
     REQUIRE(output.fault_sites[0].guest_start == 0x1000);

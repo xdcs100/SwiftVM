@@ -28,15 +28,19 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
             const bool pending_call_flags =
                     CanUseIndirectCallContinuation() &&
                     CanDeferFullNZCVMerge(merge_cause);
+            const bool call_continuation = CanUseCallContinuation();
             const auto local_flags_bypass = pending_call_flags
                     ? DirectLinkFlagsBypass{}
                     : MergeNZCV(merge_cause,
-                                FlagsRegsAuditEdgeKind::Dispatcher);
+                                FlagsRegsAuditEdgeKind::Dispatcher,
+                                context.ContinuationActive() && static_next_loc &&
+                                        context.CanEmitDirectLink(
+                                                ir::Location{*static_next_loc}));
             context.RecordExecCounter(static_next_loc ? exec_offset_exit_direct
                                                       : exec_offset_exit_indirect);
             if (!EmitStaticForward(
-                        CanUseCallContinuation() ? LinkSiteKind::Call
-                                                 : direct_link_kind,
+                        call_continuation ? LinkSiteKind::Call
+                                          : direct_link_kind,
                         local_flags_bypass.Valid() ? local_flags_bypass
                                                    : flags_bypass) &&
                 !(CanUseIndirectCallContinuation()
@@ -50,17 +54,21 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
             const bool pending_call_flags =
                     CanUseIndirectCallContinuation() &&
                     CanDeferFullNZCVMerge(merge_cause);
+            const bool call_continuation = CanUseCallContinuation();
             const auto local_flags_bypass = pending_call_flags
                     ? DirectLinkFlagsBypass{}
                     : MergeNZCV(merge_cause,
-                                FlagsRegsAuditEdgeKind::Dispatcher);
+                                FlagsRegsAuditEdgeKind::Dispatcher,
+                                context.ContinuationActive() && static_next_loc &&
+                                        context.CanEmitDirectLink(
+                                                ir::Location{*static_next_loc}));
             context.RecordExecCounter(
                     cur_block_is_call ? exec_offset_exit_call
                                       : (static_next_loc ? exec_offset_exit_direct
                                                          : exec_offset_exit_indirect));
             if (!EmitStaticForward(
-                        CanUseCallContinuation() ? LinkSiteKind::Call
-                                                 : direct_link_kind,
+                        call_continuation ? LinkSiteKind::Call
+                                          : direct_link_kind,
                         local_flags_bypass.Valid() ? local_flags_bypass
                                                    : flags_bypass) &&
                 !(CanUseIndirectCallContinuation()

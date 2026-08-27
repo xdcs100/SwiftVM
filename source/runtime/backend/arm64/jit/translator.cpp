@@ -1343,6 +1343,7 @@ void JitTranslator::Translate(ir::Block* block) {
                       loop_hoist,
                       loop_hoist_prefix_ops);
     if (!translating_function) {
+        EmitDeferredNZCVMergeStubs();
         PlacementPoint("unit", block->GetStartLocation().Value());
     }
 }
@@ -1394,6 +1395,7 @@ void JitTranslator::Translate(ir::HIRFunction* function) {
     EmitIndirectExitColdPaths();
     const auto recovery_offsets = terminal_location_publication.EmitColdPaths(context);
     context.EndColdScratch();
+    EmitDeferredNZCVMergeStubs();
     for (auto& fault : fault_metadata) {
         if (fault.recovery_reg == UINT32_MAX) {
             continue;

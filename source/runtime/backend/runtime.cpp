@@ -773,7 +773,8 @@ void RecordJitCacheUnit(const std::shared_ptr<backend::Module>& module,
                               static_cast<u8>(site.kind),
                               site.flags_bypass.code_offset,
                               site.flags_bypass.resume_offset,
-                              site.flags_bypass_instruction});
+                              site.flags_bypass_instruction,
+                              site.flags_bypass.linked_instruction});
     }
     std::vector<SerialFaultSite> fault_sites;
     fault_sites.reserve(translator.GetFaultMetadata().size());

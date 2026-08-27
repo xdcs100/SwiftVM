@@ -29,6 +29,7 @@ using CPUReg = boost::variant<NoneReg, Register, VRegister>;
 struct DirectLinkFlagsBypass {
     u32 code_offset{UINT32_MAX};
     u32 resume_offset{UINT32_MAX};
+    u32 linked_instruction{};
 
     [[nodiscard]] bool Valid() const {
         return code_offset != UINT32_MAX && resume_offset != UINT32_MAX;
