@@ -2310,6 +2310,18 @@ peepholes.
   pass locally and on Orb. Bounded smallpt retains SHA-256
   `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. No stress run, retained
   probe, diagnostic source path or new environment switch remains.
+- `f7a6461` applies the existing compiler-enforced general-register-only helper contract to paired
+  128/64 division. Both signed and unsigned wrappers are integer-only; Orb's GCC 13 wrappers contain
+  no SIMD instruction, and the resolved `__divti3`, `__modti3`, `__udivti3` and `__umodti3`
+  implementations contain neither SIMD instructions nor nested calls. The JIT therefore omits
+  resident FPR snapshots while retaining the existing GPR, link and paired-result preservation.
+  The exact SQLite A/B keeps the same 2,065 PCs and versions with 100% coverage, 29 shrinking units
+  and no growth. Static host instructions move `444,836 -> 444,116` (`-720`, `-0.161857%`);
+  `sqlite3VdbeExec` at `0x4a5518` moves `896 -> 848`, and `_IO_new_file_xsputn` moves
+  `783 -> 767`. Fixed-seed 101/424242 DIV/IDIV fuzz passes locally and on Orb, timing-normalized
+  SQLite output is byte-identical, and bounded smallpt retains SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. No stress run, retained
+  probe, diagnostic source path or new environment switch remains.
 
 ## Orb loop
 
