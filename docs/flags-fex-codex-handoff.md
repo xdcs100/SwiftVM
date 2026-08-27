@@ -2388,6 +2388,18 @@ peepholes.
   the guest window has a guaranteed guard-page ABI that removes per-site bounds code, or the loop
   can be expressed with materially fewer fixed clobbers. No implementation or probe remains.
 
+- A low-32-bit `BitExtract` can now reuse the W view of its U64 source across separated or repeated
+  read-only consumers. The allocator requires the source SSA lifetime, rather than merely an
+  occupied physical register, to cover the complete view lifetime and rejects every consumer whose
+  output could overwrite either register. The emitter independently re-proves the same lifetime and
+  alias constraints before removing the `UBFX`/`LSR #0`. An exact SQLite `main/10` static-only A/B
+  keeps all 1,999 units at 100% coverage and moves `379,667 -> 379,445` host instructions (`-222`,
+  `-0.058472%`), with 136 shrinking units and no growth; the largest unit loses eight instructions.
+  Timing-normalized SQLite output is byte-identical, and bounded smallpt retains SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. Mac and Orb pass the two
+  focused allocation cases with 12 assertions. No stress run, probe, diagnostic source path or
+  environment switch remains.
+
 ## Orb loop
 
 ```
