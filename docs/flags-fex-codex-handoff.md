@@ -2001,6 +2001,21 @@ peepholes.
   `speed.c::run` from 1 to 0 while the interrupted SHA batch still failed to finish within the
   seven-second cap. Do not reactivate static call continuation until async resume bounds the
   interrupted batch without relying on the hot `current_loc` store.
+- `70049f8` restores the default pinned/UniformElim SQLite path and closes the underlying
+  caller-saved narrow-publication defect. In `sqlite3_str_vappendf` at guest `0x4250fc`, the old
+  host sequence loaded the format kind with `ldrb w2` but then executed `uxtb w9, w9; cmp w9,
+  #16`, so `%d` was classified from an unmaterialized SSA allocation and `PRAGMA threads=%d`
+  became `PRAGMA threads=`. The pinned-copy proof now admits unsigned narrow loads whose
+  `SetHostGPR` publication was already coalesced, and narrow flag/compare lowering retains and
+  resolves the proved fixed-home alias. The repaired sequence is `ldrb w2; uxtb w9, w2; cmp w9,
+  #16`; full default SQLite `--threads 1 --size 1 --testset main` exits successfully and reports
+  `TOTAL 0.973s` in a 1.58-second wall run. Mac and Orb pinned focuses pass 93 assertions each,
+  CoreMark 2k retains `crcfinal=0x4983`, and the one-second OpenSSL SHA command exits normally.
+  A same-input wall sample measured SwiftVM 1.955 seconds versus FEX 1.128 seconds, but this is not
+  a code-generation ratio. The bounded SQL-only RE=0 static join covered only 19.76% of entries
+  and 13.83% of SwiftVM host weight because FEX emitted multiblock roots while SwiftVM emitted
+  per-block roots, so its apparent weighted ratio is rejected. No diagnostic probe, temporary
+  source path, environment switch, or benchmark stress run remains.
 
 ## Orb loop
 
