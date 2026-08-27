@@ -186,6 +186,36 @@ ScratchNeed PreciseAddSubScratchBudget(const ir::Inst& inst) {
     return {need, kDefaultScratchFPR};
 }
 
+static u8 LogicalOperandScratch(const ir::Inst& inst) {
+    const auto right = inst.GetArg<ir::Operand>(1);
+    if (right.GetRight().Null()) {
+        if (!right.GetLeft().IsImm()) {
+            return 0;
+        }
+        return 1;
+    }
+
+    u8 need = right.GetLeft().IsImm() ? 1 : 0;
+    if (right.GetRight().IsImm() &&
+        (right.GetOp() == ir::OperandOp::LSL ||
+         right.GetOp() == ir::OperandOp::LSR)) {
+        return need;
+    }
+    return need + 1;
+}
+
+static ScratchNeed PreciseLogicalScratchBudget(const ir::Inst& inst) {
+    u8 need = std::max<u8>(LogicalOperandScratch(inst), 1);
+    for (auto* pseudo : const_cast<ir::Inst&>(inst).GetPseudoOperations()) {
+        if (pseudo->GetOp() == ir::OpCode::SaveFlags ||
+            pseudo->GetOp() == ir::OpCode::BranchOnlyFlags) {
+            ++need;
+            break;
+        }
+    }
+    return {need, kDefaultScratchFPR};
+}
+
 static bool ExecProfileEnabled() {
     return GetSvmConfig().exec_prof;
 }
@@ -398,9 +428,41 @@ ScratchNeed ScratchBudget(ir::OpCode op, const FeatureSet& features) {
 
 ScratchNeed ScratchBudget(const ir::Inst& inst, const FeatureSet& features) {
     auto need = ScratchBudget(inst.GetOp(), features);
-    if (ScratchPreciseRequested(features) &&
-        (inst.GetOp() == ir::OpCode::Add || inst.GetOp() == ir::OpCode::Sub)) {
-        return PreciseAddSubScratchBudget(inst);
+    if (ScratchPreciseRequested(features)) {
+        switch (inst.GetOp()) {
+            case ir::OpCode::Add:
+            case ir::OpCode::Sub:
+                return PreciseAddSubScratchBudget(inst);
+            case ir::OpCode::And:
+            case ir::OpCode::Or:
+            case ir::OpCode::Xor:
+                return PreciseLogicalScratchBudget(inst);
+            case ir::OpCode::AdvancePC:
+                need.gpr = 1;
+                break;
+            case ir::OpCode::SetCarry:
+            case ir::OpCode::SetOverflow:
+                need.gpr = 2;
+                break;
+            case ir::OpCode::LoadImm:
+            case ir::OpCode::LoadUniform:
+            case ir::OpCode::StoreUniform:
+            case ir::OpCode::GetHostGPR:
+            case ir::OpCode::SetHostGPR:
+            case ir::OpCode::ClearFlags:
+            case ir::OpCode::AsrImm:
+            case ir::OpCode::LslImm:
+            case ir::OpCode::LsrImm:
+            case ir::OpCode::RorImm:
+            case ir::OpCode::RorValue:
+            case ir::OpCode::ZeroExtend32:
+            case ir::OpCode::ZeroExtend32To64:
+            case ir::OpCode::ZeroExtend64:
+                need.gpr = 0;
+                break;
+            default:
+                break;
+        }
     }
     if (features.fpr_scratch_precise) {
         switch (inst.GetOp()) {

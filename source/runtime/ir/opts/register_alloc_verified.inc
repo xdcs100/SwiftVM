@@ -44,7 +44,8 @@ static void RunVerified(Unit* unit,
                         bool intwidth_tie = false,
                         bool induct_tie = false,
                         bool spill_evict = true,
-                        RegisterAllocPass::SpillEvictTestResult* test_result = nullptr) {
+                        RegisterAllocPass::SpillEvictTestResult* test_result = nullptr,
+                        bool known_spill_unit = false) {
     const auto finish_placement_probe = [&] {
         if (features.ra_home_perm) {
             reg_alloc->PermutePlacementProbeGPRHomes();
@@ -62,7 +63,7 @@ static void RunVerified(Unit* unit,
             reg_alloc->ReserveGPRForUnit(18);
             reg_alloc->ResetAllocations();
             RunVerified(unit, reg_alloc, features, single_block_fast_path, scalar_insert,
-                        intwidth_tie, induct_tie, spill_evict, test_result);
+                        intwidth_tie, induct_tie, spill_evict, test_result, true);
             if (RaDiagEnabled()) {
                 LOG_WARNING("RegisterAllocPass: {} initial spill(s); x18 reserved for this unit",
                             spills);
@@ -115,6 +116,38 @@ static void RunVerified(Unit* unit,
     const u32 default_gpr_reserve = backend::kDefaultScratchGPR > scratch_only
             ? backend::kDefaultScratchGPR - scratch_only
             : 0u;
+    if (known_spill_unit && backend::ScratchPreciseRequested(features) &&
+        default_gpr_reserve > 1) {
+        const u32 precise_gpr_reserve = default_gpr_reserve - 1;
+        Vector<u32> forced_spills{};
+        u32 precise_restarts = 0;
+        while (true) {
+            reg_alloc->ResetAllocations();
+            LinearScanAllocator scan{unit, reg_alloc, precise_gpr_reserve,
+                                     backend::kDefaultScratchFPR,
+                                     single_block_fast_path, scalar_insert,
+                                     intwidth_tie, induct_tie,
+                                     spill_evict ? &forced_spills : nullptr,
+                                     spill_evict, features};
+            scan.AllocateRegisters();
+            if (spill_evict && scan.HasEvictionCandidate()) {
+                forced_spills.push_back(scan.EvictionCandidate());
+                ++precise_restarts;
+                continue;
+            }
+            PerfScope2 perf_verify{GetPerfStats2().regalloc_verify};
+            const bool verified = scan.Verify();
+            perf_verify.Stop();
+            if (verified) {
+                record_shape(scan);
+                record_test_result(scan, precise_restarts, false);
+                finish_placement_probe();
+                return;
+            }
+            reg_alloc->ResetAllocations();
+            break;
+        }
+    }
     // Attempt one: the ordinary emitter shape. Every unit in the corpus stops
     // here, so nothing above this point may walk the instruction list -- the
     // whole-unit budget scan below is deliberately deferred until an escalation
