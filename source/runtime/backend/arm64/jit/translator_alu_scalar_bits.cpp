@@ -363,20 +363,60 @@ bool JitTranslator::ReproveWidthChainBridge(ir::Inst* inst) const {
     return true;
 }
 
-bool JitTranslator::ReproveLow32Copy(ir::Inst* inst) const {
-    if (!inst || !context.IsLow32CopyCoalesced(inst->Id()) ||
-        inst->GetOp() != ir::OpCode::BitExtract ||
-        ir::GetValueSizeByte(inst->ReturnType()) != sizeof(u32) ||
-        inst->GetArg<ir::Imm>(1).Get() != 0 ||
-        inst->GetArg<ir::Imm>(2).Get() != 32 || inst->GetUses() != 1) {
+bool JitTranslator::ReproveLiveLow32View(ir::Inst* inst,
+                                         ir::Value source) const {
+    const u32 source_target = context.X(source).GetCode();
+    bool has_consumer = false;
+    u32 last_use = inst->Id();
+    u32 source_last_use = inst->Id();
+    for (auto& scan : cur_block->GetInstList()) {
+        for (auto input : scan.GetValues()) {
+            if (ResolveWidthChainBitCast(input).Def() == source.Def()) {
+                source_last_use = std::max<u32>(source_last_use, scan.Id());
+            }
+        }
+        bool uses = false;
+        for (auto input : scan.GetValues()) {
+            uses |= input.Def() == inst;
+        }
+        if (!uses) {
+            continue;
+        }
+        has_consumer = true;
+        last_use = std::max<u32>(last_use, scan.Id());
+        if (context.HasAllocation(ir::Value{&scan}) &&
+            context.SharesGPR(ir::Value{inst}, ir::Value{&scan})) {
+            return false;
+        }
+        if (!context.HasAllocation(ir::Value{&scan}) &&
+            scan.GetOp() != ir::OpCode::StoreMemory &&
+            scan.GetOp() != ir::OpCode::StoreUniform &&
+            scan.GetOp() != ir::OpCode::SetHostGPR) {
+            return false;
+        }
+    }
+    if (!has_consumer || source_last_use < last_use) {
         return false;
     }
-    auto source = ResolveWidthChainBitCast(inst->GetArg<ir::Value>(0));
-    if (!source.Defined() || context.Low32CopySource(inst->Id()) != source.Id() ||
-        !context.SharesGPR(source, ir::Value{inst})) {
-        return false;
+    for (auto& scan : cur_block->GetInstList()) {
+        if (scan.Id() < inst->Id()) {
+            continue;
+        }
+        if (scan.Id() > last_use) {
+            break;
+        }
+        if (!context.DirtyGPR(scan.Id()).Get(source_target)) {
+            return false;
+        }
     }
+    return true;
+}
 
+bool JitTranslator::ReproveAdjacentLow32Copy(ir::Inst* inst,
+                                              ir::Value source) const {
+    if (inst->GetUses() != 1) {
+        return false;
+    }
     const u32 source_target = context.X(source).GetCode();
     if (!context.DirtyGPR(inst->Id()).Get(source_target)) {
         return false;
@@ -395,8 +435,24 @@ bool JitTranslator::ReproveLow32Copy(ir::Inst* inst) const {
     }
 
     return !context.IsWidthChainCoalesced(wrapper.Id()) &&
-           context.X(ir::Value{&wrapper}).GetCode() != source_target &&
            context.DirtyGPR(wrapper.Id()).Get(source_target);
+}
+
+bool JitTranslator::ReproveLow32Copy(ir::Inst* inst) const {
+    if (!inst || !context.IsLow32CopyCoalesced(inst->Id()) ||
+        inst->GetOp() != ir::OpCode::BitExtract ||
+        ir::GetValueSizeByte(inst->ReturnType()) != sizeof(u32) ||
+        inst->GetArg<ir::Imm>(1).Get() != 0 ||
+        inst->GetArg<ir::Imm>(2).Get() != 32) {
+        return false;
+    }
+    auto source = ResolveWidthChainBitCast(inst->GetArg<ir::Value>(0));
+    if (!source.Defined() || context.Low32CopySource(inst->Id()) != source.Id() ||
+        !context.SharesGPR(source, ir::Value{inst})) {
+        return false;
+    }
+    return ReproveLiveLow32View(inst, source) ||
+           ReproveAdjacentLow32Copy(inst, source);
 }
 
 void JitTranslator::EmitBitExtract(ir::Inst* inst) {
