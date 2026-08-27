@@ -1155,7 +1155,8 @@ void JitTranslator::EmitBlockTerminalAndColdPaths(
     InvalidateFlagsToken();
     EmitBackedgeColdPaths();
     if (backedge_exit_label) {
-        ResolveExitPollFaults(backedge_exit_label.get());
+        ResolveExitPollFaults(backedge_exit_label.get(),
+                              block->GetStartLocation());
     }
     backedge_exit_label.reset();
     backedge_exit_referenced = false;

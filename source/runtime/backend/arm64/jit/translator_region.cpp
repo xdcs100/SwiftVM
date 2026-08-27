@@ -1178,15 +1178,14 @@ void JitTranslator::EmitBackedgeExitStub() {
     Label signal;
     Label publish;
     __ Bind(backedge_exit_label.get());
-    ResolveExitPollFaults(backedge_exit_label.get());
+    ResolveExitPollFaults(backedge_exit_label.get(),
+                          cur_block->GetStartLocation());
     __ Ldar(ip0, MemOperand(state, state_offset_exit_request));
     if (backedge_flags_plan && backedge_flags_plan->optimized) {
         EmitBackedgeMaterialize(*backedge_flags_plan);
     } else if (FlagsRegsEnabled()) {
         EmitSplitFlagsPublish();
     }
-    __ Mov(ip1, cur_block->GetStartLocation().Value());
-    __ Str(ip1, MemOperand(state, state_offset_current_loc));
     __ Tbnz(ip0, 63, &signal);
     __ Mov(ipw1, static_cast<u32>(HaltReason::CodeMiss));
     __ B(&publish);
@@ -1213,16 +1212,11 @@ void JitTranslator::EmitDirectCycleExitStubs() {
         auto& [target, label] = *it;
         ASSERT(label);
         __ Bind(label.get());
-        ResolveExitPollFaults(label.get());
+        ResolveExitPollFaults(label.get(), ir::Location{target});
         __ Ldar(ip0, MemOperand(state, state_offset_exit_request));
-        // The poll runs after MergeNZCV and FlushSpillWrites. Publish the edge
-        // target so resuming after the guest signal continues at the committed
-        // terminal boundary rather than repeating the source block.
         if (FlagsRegsEnabled()) {
             EmitSplitFlagsPublish();
         }
-        __ Mov(ip1, target);
-        __ Str(ip1, MemOperand(state, state_offset_current_loc));
         if ((translating_function && share_direct_cycle_exit_reason) ||
             std::next(it) != direct_cycle_exits.end()) {
             __ B(reason);
@@ -1265,7 +1259,8 @@ void JitTranslator::RecordExitPollFault(
     pending_exit_poll_faults.push_back({index, recovery});
 }
 
-void JitTranslator::ResolveExitPollFaults(Label* recovery) {
+void JitTranslator::ResolveExitPollFaults(Label* recovery,
+                                          ir::Location resume_location) {
     ASSERT(recovery && recovery->IsBound());
     const u32 offset = static_cast<u32>(recovery->GetLocation());
     for (auto it = pending_exit_poll_faults.begin();
@@ -1275,7 +1270,9 @@ void JitTranslator::ResolveExitPollFaults(Label* recovery) {
             continue;
         }
         ASSERT(it->metadata_index < fault_metadata.size());
-        fault_metadata[it->metadata_index].recovery_offset = offset;
+        auto& metadata = fault_metadata[it->metadata_index];
+        metadata.guest_start = resume_location.Value();
+        metadata.recovery_offset = offset;
         it = pending_exit_poll_faults.erase(it);
     }
 }

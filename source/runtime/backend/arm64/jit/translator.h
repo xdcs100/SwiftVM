@@ -477,7 +477,7 @@ private:
     void EmitDirectCycleExitReasonTail(Label* reason);
     void RecordExitPollFault(std::optional<JitContext::FaultRange> fault,
                              Label* recovery);
-    void ResolveExitPollFaults(Label* recovery);
+    void ResolveExitPollFaults(Label* recovery, ir::Location resume_location);
     void RecordDeferredFault(JitContext::FaultRange fault,
                              Label* recovery,
                              FaultRecoveryKind recovery_kind);

@@ -327,6 +327,7 @@ struct Runtime::Impl final {
                 !entry.recovery) {
                 return false;
             }
+            self->state->current_loc = ir::Location(entry.guest_loc);
             backend::SignalHandler::SetContextPC(
                     uctx, reinterpret_cast<std::uintptr_t>(entry.recovery));
             return true;
