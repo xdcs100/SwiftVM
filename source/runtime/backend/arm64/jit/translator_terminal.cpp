@@ -487,38 +487,41 @@ bool JitTranslator::EmitContinuationForward() {
     const u32 link_before = context.CurrentBufferSize();
     const auto fault = context.ForwardContinuation(
             location, miss_site.label.get());
-    RecordContinuationFault(fault, miss_site.label.get());
+    RecordDeferredFault(fault,
+                        miss_site.label.get(),
+                        FaultRecoveryKind::ContinuationMiss);
     RecordBoundaryRange(BoundarySubsequence::LinkTail, link_before,
                         context.CurrentBufferSize());
     return true;
 }
 
-void JitTranslator::RecordContinuationFault(
+void JitTranslator::RecordDeferredFault(
         JitContext::FaultRange fault,
-        Label* recovery) {
+        Label* recovery,
+        FaultRecoveryKind recovery_kind) {
     ASSERT(recovery);
     const size_t index = fault_metadata.size();
     fault_metadata.push_back({
             .guest_start = cur_block->GetStartLocation().Value(),
             .host_begin = fault.begin,
             .host_end = fault.end,
-            .recovery_kind = FaultRecoveryKind::ContinuationMiss,
+            .recovery_kind = recovery_kind,
     });
-    pending_continuation_faults.push_back({index, recovery});
+    pending_deferred_faults.push_back({index, recovery});
 }
 
-void JitTranslator::ResolveContinuationFaults(Label* recovery) {
+void JitTranslator::ResolveDeferredFaults(Label* recovery) {
     ASSERT(recovery && recovery->IsBound());
     const u32 offset = static_cast<u32>(recovery->GetLocation());
-    for (auto it = pending_continuation_faults.begin();
-         it != pending_continuation_faults.end();) {
+    for (auto it = pending_deferred_faults.begin();
+         it != pending_deferred_faults.end();) {
         if (it->recovery != recovery) {
             ++it;
             continue;
         }
         ASSERT(it->metadata_index < fault_metadata.size());
         fault_metadata[it->metadata_index].recovery_offset = offset;
-        it = pending_continuation_faults.erase(it);
+        it = pending_deferred_faults.erase(it);
     }
 }
 
@@ -551,15 +554,18 @@ bool JitTranslator::EmitIndirectCallForward(bool pending_flags) {
         miss_site.guest_start = cur_block->GetStartLocation().Value();
     }
     const u32 link_before = context.CurrentBufferSize();
-    const auto fault = context.ForwardIndirectCall(
+    const auto faults = context.ForwardIndirectCall(
             location, miss_site.label.get(), pending_flags);
     fault_metadata.push_back({
             .guest_start = cur_block->GetStartLocation().Value(),
-            .host_begin = fault.begin,
-            .host_end = fault.end,
+            .host_begin = faults.lookup_fault.begin,
+            .host_end = faults.lookup_fault.end,
             .recovery_reg = dynamic_location_miss ? location.GetCode()
                                                   : UINT32_MAX,
     });
+    RecordDeferredFault(faults.target_fault,
+                        miss_site.label.get(),
+                        FaultRecoveryKind::IndirectCallMiss);
     if (pending_flags && !flags_token_keep) {
         nzcv_dirty = false;
         nzcv_requested = {};
@@ -577,6 +583,7 @@ void JitTranslator::EmitIndirectExitColdPaths() {
             continue;
         }
         __ Bind(site.label.get());
+        ResolveDeferredFaults(site.label.get());
         const XRegister location{reg};
         const XRegister scratch = location == ip0 ? ip1 : ip0;
         EmitNZCVMerge(static_cast<u64>(HostFlags::NZCV),
@@ -592,7 +599,7 @@ void JitTranslator::EmitIndirectExitColdPaths() {
             continue;
         }
         __ Bind(site.label.get());
-        ResolveContinuationFaults(site.label.get());
+        ResolveDeferredFaults(site.label.get());
         if (site.reset_return_stack) {
             __ Ldr(rsb_ptr, MemOperand(state, state_offset_rsb_empty));
         }

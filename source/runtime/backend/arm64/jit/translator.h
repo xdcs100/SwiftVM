@@ -467,9 +467,10 @@ private:
     void RecordExitPollFault(std::optional<JitContext::FaultRange> fault,
                              Label* recovery);
     void ResolveExitPollFaults(Label* recovery);
-    void RecordContinuationFault(JitContext::FaultRange fault,
-                                 Label* recovery);
-    void ResolveContinuationFaults(Label* recovery);
+    void RecordDeferredFault(JitContext::FaultRange fault,
+                             Label* recovery,
+                             FaultRecoveryKind recovery_kind);
+    void ResolveDeferredFaults(Label* recovery);
 
     // Labels used by Goto / NotGoto / BindLabel
     Label *GetLocalLabel(ir::Inst *inst);
@@ -834,11 +835,11 @@ private:
         Label* recovery{};
     };
     std::vector<PendingExitPollFault> pending_exit_poll_faults{};
-    struct PendingContinuationFault {
+    struct PendingDeferredFault {
         size_t metadata_index{};
         Label* recovery{};
     };
-    std::vector<PendingContinuationFault> pending_continuation_faults{};
+    std::vector<PendingDeferredFault> pending_deferred_faults{};
     struct IndirectExitMissSite {
         std::unique_ptr<Label> label{};
         u64 guest_start{};

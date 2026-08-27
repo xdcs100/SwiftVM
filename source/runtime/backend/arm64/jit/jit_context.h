@@ -58,6 +58,11 @@ public:
         std::optional<FaultRange> poll_fault{};
     };
 
+    struct IndirectCallForwardResult {
+        FaultRange lookup_fault{};
+        FaultRange target_fault{};
+    };
+
     explicit JitContext(const std::shared_ptr<Module> &module,
                         RegAlloc& reg_alloc,
                         bool enable_direct_link = true);
@@ -150,7 +155,7 @@ public:
     ForwardIndirectL1(const Register& location, Label* miss = nullptr);
     [[nodiscard]] FaultRange
     ForwardContinuation(const Register& location, Label* miss);
-    [[nodiscard]] FaultRange
+    [[nodiscard]] IndirectCallForwardResult
     ForwardIndirectCall(const Register& location,
                         Label* miss,
                         bool pending_flags = false);

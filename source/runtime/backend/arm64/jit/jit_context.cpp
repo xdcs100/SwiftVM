@@ -836,7 +836,7 @@ JitContext::ForwardContinuation(const Register& location, Label* miss) {
     return {fault_begin, CurrentBufferSize()};
 }
 
-JitContext::FaultRange
+JitContext::IndirectCallForwardResult
 JitContext::ForwardIndirectCall(const Register& location,
                                 Label* miss,
                                 bool pending_flags) {
@@ -856,10 +856,13 @@ JitContext::ForwardIndirectCall(const Register& location,
     __ Ldp(index, entry, MemOperand(entry));
     const u32 fault_end = CurrentBufferSize();
     __ Cmp(index, location);
-    __ Ccmp(entry, xzr, ZFlag, eq);
-    __ B(miss, eq);
+    __ B(miss, ne);
+    const u32 target_fault_begin = CurrentBufferSize();
     __ Blr(entry);
-    return {fault_begin, fault_end};
+    return {
+            .lookup_fault = {fault_begin, fault_end},
+            .target_fault = {target_fault_begin, CurrentBufferSize()},
+    };
 }
 
 // --- Return Stack Buffer (RSB) -------------------------------------------

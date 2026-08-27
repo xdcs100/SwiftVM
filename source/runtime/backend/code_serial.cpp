@@ -701,7 +701,8 @@ bool ReadUnit(BlobReader& r, SerialUnit& unit) {
             (site.recovery_offset != UINT32_MAX &&
              ((site.recovery_offset & 3u) != 0 ||
               site.recovery_offset >= code_size)) ||
-            site.recovery_kind > 1) {
+            site.recovery_kind >
+                    static_cast<u8>(FaultRecoveryKind::IndirectCallMiss)) {
             return false;
         }
     }

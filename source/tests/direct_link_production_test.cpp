@@ -99,6 +99,45 @@ void* TranslateContinuationReturnSource(
     return TranslateIR(module, function);
 }
 
+void* TranslateIndirectCallSource(const std::shared_ptr<Module>& module,
+                                  VAddr guest,
+                                  VAddr return_guest) {
+    HIRBuilder builder{1, true};
+    auto* function = builder.AppendFunction(Location{guest},
+                                            Location{return_guest + 1});
+    const auto target = function
+                                ->LoadUniform<TypedValue<ValueType::U64>>(
+                                        Uniform{8, ValueType::U64})
+                                .SetType(ValueType::U64);
+    const auto return_value = function
+                                      ->LoadImm(Imm{return_guest})
+                                      .SetType(ValueType::U64);
+    function->CallReturn(return_value,
+                         Imm{return_guest},
+                         Lambda{target});
+    function->SetLocation(Lambda{target});
+    builder.RegisterCallReturn(Location{return_guest});
+    function->EndBlock(terminal::ReturnToDispatch{});
+    builder.SetCurBlock(Location{return_guest});
+    function->EndBlock(terminal::ReturnToHost{});
+    function->EndFunction();
+    return TranslateIR(module, function);
+}
+
+void* TranslateCallTarget(const std::shared_ptr<Module>& module,
+                          VAddr guest,
+                          u64 fingerprint) {
+    HIRBuilder builder{1, true};
+    auto* function = builder.AppendFunction(Location{guest}, Location{guest + 1});
+    const auto value = function
+                               ->LoadImm(Imm{fingerprint})
+                               .SetType(ValueType::U64);
+    function->StoreUniform(Uniform{0, ValueType::U64}, value);
+    function->EndBlock(terminal::ReturnToHost{});
+    function->EndFunction();
+    return TranslateIR(module, function);
+}
+
 IntrusivePtr<Block> BuildConditionalSource(VAddr guest,
                                            VAddr then_target,
                                            VAddr else_target) {
@@ -1287,6 +1326,69 @@ TEST_CASE("fault-backed continuation rejects empty and mismatched frames",
     REQUIRE(munmap(guest_memory, guest_size) == 0);
 #else
     SUCCEED("fault-backed continuation recovery requires an AArch64 host");
+#endif
+}
+
+TEST_CASE("fault-backed indirect call rejects an invalidated host target",
+          "[direct-link][continuation][indirect-l1][fault]") {
+#if defined(__aarch64__)
+    ScopedEnvironment disk_cache{"SVM_JIT_CACHE", ""};
+    ScopedEnvironment flags_regs{"SVM_FLAGS_REGS", "1"};
+
+    const size_t page_size = static_cast<size_t>(getpagesize());
+    const size_t guest_size = 8 * page_size;
+    void* guest_memory = mmap(nullptr,
+                              guest_size,
+                              PROT_READ | PROT_WRITE,
+                              MAP_PRIVATE | MAP_ANON,
+                              -1,
+                              0);
+    REQUIRE(guest_memory != MAP_FAILED);
+    {
+        const VAddr source_guest = page_size + 0x180;
+        const VAddr return_guest = source_guest + 1;
+        const VAddr target_guest = 5 * page_size + 0x180;
+        constexpr u64 kFingerprint = 0x1234'5678'9abc'def0ull;
+        Config config{
+                .loc_start = 0,
+                .loc_end = guest_size,
+                .enable_jit = true,
+                .enable_asm_interp = false,
+                .has_local_operation = false,
+                .backend_isa = kArm64,
+                .uniform_buffer_size = 64,
+                .global_opts = Optimizations::BlockLink |
+                               Optimizations::ReturnStackBuffer,
+                .region_edges = true,
+                .memory_base = guest_memory,
+                .guest_addr_mask = guest_size - 1,
+        };
+        AddressSpace space{config};
+        auto module = space.GetDefaultModule();
+
+        REQUIRE(TranslateCallTarget(module, target_guest, kFingerprint) != nullptr);
+        REQUIRE(TranslateIndirectCallSource(
+                        module, source_guest, return_guest) != nullptr);
+        REQUIRE(space.GetCallCodeCacheTable().Lookup(target_guest) != 0);
+        REQUIRE(space.GetCallCodeCacheTable().Zero(target_guest));
+        REQUIRE(space.GetCallCodeCacheTable().Lookup(target_guest) == 0);
+
+        Runtime runtime{&space};
+        auto* empty = runtime.GetState()->rsb_pointer;
+        REQUIRE(empty != nullptr);
+        std::memcpy(runtime.GetUniformBuffer().data() + 8,
+                    &target_guest,
+                    sizeof(target_guest));
+        runtime.SetLocation(source_guest);
+        REQUIRE(runtime.Run() == HaltReason::CallHost);
+        REQUIRE(runtime.GetState()->rsb_pointer == empty);
+        u64 result{};
+        std::memcpy(&result, runtime.GetUniformBuffer().data(), sizeof(result));
+        REQUIRE(result == kFingerprint);
+    }
+    REQUIRE(munmap(guest_memory, guest_size) == 0);
+#else
+    SUCCEED("fault-backed indirect-call recovery requires an AArch64 host");
 #endif
 }
 

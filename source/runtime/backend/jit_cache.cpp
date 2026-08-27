@@ -456,7 +456,9 @@ bool JitDiskCache::ReviveUnit(const std::shared_ptr<Module>& module, const Seria
             site.host_end > unit.code.size() ||
             (site.recovery_offset != UINT32_MAX &&
              ((site.recovery_offset & 3u) != 0 ||
-              site.recovery_offset >= unit.code.size()))) {
+              site.recovery_offset >= unit.code.size())) ||
+            site.recovery_kind >
+                    static_cast<u8>(FaultRecoveryKind::IndirectCallMiss)) {
             stats.reject_reloc.fetch_add(1, std::memory_order_relaxed);
             dirty = true;
             return false;

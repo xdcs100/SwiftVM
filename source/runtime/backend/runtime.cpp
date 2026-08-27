@@ -351,8 +351,11 @@ struct Runtime::Impl final {
                 has_entry = self->address_space->LookupFault(
                         reinterpret_cast<u8*>(link_register - sizeof(u32)),
                         entry);
-                has_entry &= entry.recovery_kind ==
-                        backend::FaultRecoveryKind::ContinuationMiss;
+                has_entry &=
+                        entry.recovery_kind ==
+                                backend::FaultRecoveryKind::ContinuationMiss ||
+                        entry.recovery_kind ==
+                                backend::FaultRecoveryKind::IndirectCallMiss;
             }
         }
         if (!has_entry) {
@@ -365,6 +368,14 @@ struct Runtime::Impl final {
                         25,
                         reinterpret_cast<std::uintptr_t>(
                                 self->return_stack->Empty()))) {
+                return false;
+            }
+            backend::SignalHandler::SetContextPC(
+                    uctx, reinterpret_cast<std::uintptr_t>(entry.recovery));
+            return true;
+        }
+        if (entry.recovery_kind == backend::FaultRecoveryKind::IndirectCallMiss) {
+            if (fault_addr != 0 || !entry.recovery) {
                 return false;
             }
             backend::SignalHandler::SetContextPC(
