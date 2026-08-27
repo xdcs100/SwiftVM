@@ -2221,6 +2221,25 @@ peepholes.
   Orb report zero CMPXCHG mismatches; only the established unrelated rotate/bit families remain.
   Bounded SQLite exits normally. No stress run, probe, diagnostic source path or new environment
   switch remains.
+- `3c5a67a` adds an explicit general-register-only helper contract for AArch64 Clang and GCC and
+  applies it to the CPUID pair-result helper. CPUID now receives the XSAVE/YMM configuration in its
+  compile-time feature mask, so the helper is a closed integer leaf; Orb disassembly has 113
+  instructions, no SIMD operand and no call. The backend therefore omits the pinned SIMD snapshot
+  only when the compiler enforces that contract. Against `58e8d58`, bounded SQLite `main/10` keeps
+  all 1,995 units and moves `464,305 -> 463,873` (`-432`, `-0.093042%`), with all five CPUID units
+  shrinking and none growing. The larger CPUID roots move `1,703 -> 1,495` and `621 -> 509`, while
+  `get_common_cache_info` moves `1,226 -> 1,146`.
+- The same commit moves the process-wide unaligned-atomic lock address into runtime state. Scalar
+  CMPXCHG, XCHG, XADD and generic locked RMW cold paths load it once and retain it across acquire
+  and release; 128-bit CAS reloads it only where its observed pair consumes both reserved atomic
+  scratch registers. Against the preceding helper shape, SQLite moves `463,873 -> 463,553`
+  (`-320`, `-0.068984%`), with 25 shrinking units and no growth; `__run_exit_handlers` moves
+  `986 -> 936`. Mac and Orb fixed-seed 101/424242 bit fuzz report zero CMPXCHG mismatches, and both
+  hosts pass the CPUID, XSAVE, FSGSBASE/ADX and PKRU focuses. From the pre-division `9ac80fd` shape,
+  the five completed mechanisms move SQLite `467,641 -> 463,553` (`-4,088`, `-0.874175%`). Bounded
+  SQLite exits normally, CoreMark 20k retains `crcfinal=0x382f`, and smallpt retains SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. No stress run, retained
+  probe, diagnostic source path or new environment switch remains.
 
 ## Orb loop
 
