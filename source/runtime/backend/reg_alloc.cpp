@@ -440,6 +440,9 @@ ScratchNeed ScratchBudget(const ir::Inst& inst, const FeatureSet& features) {
             case ir::OpCode::AdvancePC:
                 need.gpr = 1;
                 break;
+            case ir::OpCode::PublishSse42StrFlags:
+                need.gpr = 1;
+                break;
             case ir::OpCode::SetCarry:
             case ir::OpCode::SetOverflow:
                 need.gpr = 2;

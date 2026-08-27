@@ -101,6 +101,7 @@ bool IsFlagObserver(ir::OpCode op) {
         case ir::OpCode::SetCarry:
         case ir::OpCode::SetOverflow:
         case ir::OpCode::PublishFCmpFlags:
+        case ir::OpCode::PublishSse42StrFlags:
         case ir::OpCode::CondSelect:
         case ir::OpCode::CondSet:
         case ir::OpCode::LocalParitySet:

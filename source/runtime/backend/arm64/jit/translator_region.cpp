@@ -1122,6 +1122,9 @@ bool JitTranslator::TargetKillsIncomingFlags(ir::Location target) const {
             case ir::OpCode::BranchOnlyFlags:
                 incoming = ir::Flags::None;
                 break;
+            case ir::OpCode::PublishSse42StrFlags:
+                incoming &= ~inst.GetArg<ir::Flags>(1);
+                break;
             default:
                 break;
         }

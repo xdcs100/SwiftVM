@@ -324,6 +324,18 @@ void RAShapeAnalyzeFlags(const ir::Block* block, RAShapeUnitCounters& unit) {
             pending_af = false;
             continue;
         }
+        if (op == ir::OpCode::PublishSse42StrFlags) {
+            const auto published = inst.GetArg<ir::Flags>(1);
+            if (True(published & ir::Flags::Parity)) {
+                ++unit.pf_producers;
+                ++unit.pf_materialize;
+                pending_pf = false;
+            }
+            if (True(published & ir::Flags::AuxiliaryCarry)) {
+                pending_af = false;
+            }
+            continue;
+        }
         if (op == ir::OpCode::TestFlags || op == ir::OpCode::TestNotFlags) {
             const auto flags = inst.GetArg<ir::Flags>(0);
             if (True(flags & ir::Flags::Parity)) ++unit.pf_direct_consumers;

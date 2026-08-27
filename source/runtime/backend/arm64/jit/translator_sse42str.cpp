@@ -1,5 +1,8 @@
 #include "translator.h"
 
+#include "runtime/backend/arm64/defines.h"
+#include "runtime/common/sse42str_result.h"
+
 namespace swift::runtime::backend::arm64 {
 
 #define __ masm.
@@ -8,7 +11,7 @@ namespace swift::runtime::backend::arm64 {
 // each aggregation gets a dedicated NEON shape; equal-any uses a compact
 // runtime loop over the first operand while the other three are straight-line.
 // The packed result layout is shared with decoder_sse42str.cc:
-//   [15:0] IntRes2, [23:16] index, [24] ZF, [25] SF, [26] CF, [27] OF.
+//   [15:0] IntRes2, [23:16] index, [24] SF, [25] ZF, [26] CF, [27] OF.
 void JitTranslator::EmitSse42Str(ir::Inst* inst) {
     const auto a = context.V(inst->GetArg<ir::Value>(0));
     const auto b = context.V(inst->GetArg<ir::Value>(1));
@@ -22,6 +25,16 @@ void JitTranslator::EmitSse42Str(ir::Inst* inst) {
     const u32 all = (1u << n) - 1u;
 
     auto result = context.W(ir::Value{inst});
+    ir::Flags publish_flags = cur_block ? ir::Flags::None : ir::Flags::All;
+    if (cur_block) {
+        for (auto& user : cur_block->GetInstList()) {
+            if (user.GetOp() == ir::OpCode::PublishSse42StrFlags &&
+                user.GetArg<ir::Value>(0).Def() == inst) {
+                publish_flags = user.GetArg<ir::Flags>(1);
+                break;
+            }
+        }
+    }
     auto len1 = context.GetTmpX();
     auto len2 = context.GetTmpX();
     auto scalar = context.GetTmpX();
@@ -230,19 +243,65 @@ void JitTranslator::EmitSse42Str(ir::Inst* inst) {
     }
     __ Orr(result, result, Operand{scalar.W(), LSL, 16});
 
-    // ZF = len2<n, SF = len1<n, CF = IntRes2!=0, OF = IntRes2[0].
-    __ Cmp(len2.W(), n);
-    __ Cset(scalar.W(), lt);
-    __ Orr(result, result, Operand{scalar.W(), LSL, 24});
-    __ Cmp(len1.W(), n);
-    __ Cset(scalar.W(), lt);
-    __ Orr(result, result, Operand{scalar.W(), LSL, 25});
-    __ And(scalar.W(), result, all);
-    __ Cmp(scalar.W(), 0);
-    __ Cset(scalar.W(), ne);
-    __ Orr(result, result, Operand{scalar.W(), LSL, 26});
-    __ And(scalar.W(), result, 1);
-    __ Orr(result, result, Operand{scalar.W(), LSL, 27});
+    if (True(publish_flags & ir::Flags::Negate)) {
+        __ Cmp(len1.W(), n);
+        __ Cset(scalar.W(), lt);
+        __ Orr(result, result,
+               Operand{scalar.W(), LSL, sse42str::kSignBit});
+    }
+    if (True(publish_flags & ir::Flags::Zero)) {
+        __ Cmp(len2.W(), n);
+        __ Cset(scalar.W(), lt);
+        __ Orr(result, result,
+               Operand{scalar.W(), LSL, sse42str::kZeroBit});
+    }
+    if (True(publish_flags & ir::Flags::Carry)) {
+        __ And(scalar.W(), result, all);
+        __ Cmp(scalar.W(), 0);
+        __ Cset(scalar.W(), ne);
+        __ Orr(result, result,
+               Operand{scalar.W(), LSL, sse42str::kCarryBit});
+    }
+    if (True(publish_flags & ir::Flags::Overflow)) {
+        __ And(scalar.W(), result, 1);
+        __ Orr(result, result,
+               Operand{scalar.W(), LSL, sse42str::kOverflowBit});
+    }
+}
+
+void JitTranslator::EmitPublishSse42StrFlags(ir::Inst* inst) {
+    MergeNZCV(FlagsRegsAuditMergeCause::ClearOrPartialWrite,
+              flags_audit_block_edge);
+    FlushFlags();
+    InvalidateFlagsToken();
+
+    const auto requested = inst->GetArg<ir::Flags>(1);
+    const auto packed = context.W(inst->GetArg<ir::Value>(0));
+    const auto scratch = context.GetSharedTmpX();
+    if ((requested & ir::Flags::NZCV) == ir::Flags::NZCV) {
+        __ Bfc(flags, HostFlagsBit::V, 4);
+        __ Ubfx(scratch.W(), packed, sse42str::kSignBit, 4);
+        __ Rbit(scratch.W(), scratch.W());
+        __ Orr(flags, flags, scratch);
+    } else {
+        const auto publish = [&](ir::Flags flag, u32 source, u32 target) {
+            if (True(requested & flag)) {
+                __ Ubfx(scratch.W(), packed, source, 1);
+                __ Bfi(flags, scratch, target, 1);
+            }
+        };
+        publish(ir::Flags::Negate, sse42str::kSignBit, HostFlagsBit::N);
+        publish(ir::Flags::Zero, sse42str::kZeroBit, HostFlagsBit::Z);
+        publish(ir::Flags::Carry, sse42str::kCarryBit, HostFlagsBit::C);
+        publish(ir::Flags::Overflow, sse42str::kOverflowBit, HostFlagsBit::V);
+    }
+    if (True(requested & ir::Flags::AuxiliaryCarry)) {
+        __ Bfc(flags, HostFlagsBit::AuxiliaryCarry, 1);
+    }
+    if (True(requested & ir::Flags::Parity)) {
+        __ Bfc(flags, HostFlagsBit::ParityByte, 8);
+        __ Orr(flags, flags, 1);
+    }
 }
 
 }  // namespace swift::runtime::backend::arm64

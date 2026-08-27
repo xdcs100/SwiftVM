@@ -701,6 +701,7 @@ private:
             case OpCode::SetOverflow:
             case OpCode::InvertCarry:
             case OpCode::PublishFCmpFlags:
+            case OpCode::PublishSse42StrFlags:
                 return true;
             default:
                 return false;

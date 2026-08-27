@@ -100,6 +100,9 @@ Flags TransferFlagsLiveness(Block* block, Flags needed) {
             case OpCode::PublishFCmpFlags:
                 needed &= ~Flags::All;
                 break;
+            case OpCode::PublishSse42StrFlags:
+                needed &= ~inst.GetArg<Flags>(1);
+                break;
             case OpCode::TestFlags:
             case OpCode::TestNotFlags:
                 needed |= inst.GetArg<Flags>(0);
@@ -525,6 +528,7 @@ bool TryBranchOnly(Block* block,
             case OpCode::SetCarry:
             case OpCode::SetOverflow:
             case OpCode::PublishFCmpFlags:
+            case OpCode::PublishSse42StrFlags:
             case OpCode::CondSelect:
             case OpCode::CondSet:
             case OpCode::LocalCondSet:
@@ -852,6 +856,20 @@ void FlagsEliminationPass::Run(Block* block, HIRFunction* hir_function,
                 // (OF/SF/AF clear, CF/PF/ZF from the relation).
                 needed &= ~Flags::All;
                 break;
+            case OpCode::PublishSse42StrFlags: {
+                const auto mask = inst.GetArg<Flags>(1);
+                const auto live = mask & needed;
+                if (False(live)) {
+                    victims.push_back(&inst);
+                } else {
+                    if (live != mask) {
+                        inst.SetArg(1, live);
+                        stat_shrunk++;
+                    }
+                    needed &= ~live;
+                }
+                break;
+            }
             case OpCode::TestFlags:
             case OpCode::TestNotFlags:
                 needed |= inst.GetArg<Flags>(0);

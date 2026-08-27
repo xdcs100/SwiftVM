@@ -132,6 +132,7 @@ INST(InvertCarry, Void)
 // compact path's ordered bit and AXFLAG-transformed NZCV.  The interpreter
 // always retains architectural VecFCmp semantics.
 INST(PublishFCmpFlags, Void, Value, Imm)
+INST(PublishSse42StrFlags, Void, Value, Flags)
 // Shift
 // LogicalShiftLeft
 INST(LslImm, Value, Value, Imm)

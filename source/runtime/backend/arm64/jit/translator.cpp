@@ -262,6 +262,7 @@ DensityCategory DensityClass(ir::OpCode op) {
         case O::SetOverflow:
         case O::InvertCarry:
         case O::PublishFCmpFlags:
+        case O::PublishSse42StrFlags:
         case O::LocalCondSet:
         case O::LocalParitySet:
         case O::FCmpCondSet:

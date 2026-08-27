@@ -332,6 +332,7 @@
 #endif
 
 #include "runtime/common/helper_abi.h"
+#include "runtime/common/sse42str_result.h"
 #include "runtime/frontend/x86/decoder_internal.h"
 #include "runtime/frontend/x86/vex_decoder.h"
 
@@ -358,12 +359,12 @@ constexpr u32 kCtlLen1Shift = 9;   // bits 13:9   saturated len1 (0..16)
 constexpr u32 kCtlLen2Shift = 14;  // bits 18:14  saturated len2 (0..16)
 
 // The packed result the second helper returns.
-constexpr u32 kResMaskShift = 0;   // bits 15:0   IntRes2
-constexpr u32 kResIndexShift = 16; // bits 23:16  the index result (0..16)
-constexpr u32 kResZfBit = 24;
-constexpr u32 kResSfBit = 25;
-constexpr u32 kResCfBit = 26;
-constexpr u32 kResOfBit = 27;
+constexpr u32 kResMaskShift = sse42str::kMaskShift;
+constexpr u32 kResIndexShift = sse42str::kIndexShift;
+constexpr u32 kResSfBit = sse42str::kSignBit;
+constexpr u32 kResZfBit = sse42str::kZeroBit;
+constexpr u32 kResCfBit = sse42str::kCarryBit;
+constexpr u32 kResOfBit = sse42str::kOverflowBit;
 
 struct Sse42StrStaged {
     u64 lo, hi;
@@ -1113,19 +1114,7 @@ ir::Value X64Decoder::Sse42StrLength(ir::Value raw, u32 elements) {
 // The six flags
 // ---------------------------------------------------------------------------
 void X64Decoder::Sse42StrFlags(ir::Value packed) {
-    const auto bit = [&](u32 position) {
-        return __ And(__ LsrImm(packed, ir::Imm(position)), ir::Operand{ir::Imm(u64(1))})
-                .SetType(kU64);
-    };
-    __ ClearFlags(ir::Flags::Parity | ir::Flags::AuxiliaryCarry);
-    auto one = __ LoadImm(ir::Imm(u64(1))).SetType(kU64);
-    auto zero = __ LoadImm(ir::Imm(u64(0))).SetType(kU64);
-    auto zf = __ Select(__ TestNotZero(bit(kResZfBit)), zero, one).SetType(kU64);
-    __ SaveFlags(__ Or(zf, ir::Operand{ir::Imm(u64(0))}), ir::Flags::Zero);
-    auto sf = __ LslImm(bit(kResSfBit), ir::Imm(63u)).SetType(kU64);
-    __ SaveFlags(__ Or(sf, ir::Operand{ir::Imm(u64(0))}), ir::Flags::Negate);
-    __ SetCarry(bit(kResCfBit));
-    __ SetOverflow(bit(kResOfBit));
+    __ PublishSse42StrFlags(packed, ir::Flags::All);
     carry_ = CarryPolarity::Direct;
     StorePolarity(false);
 }

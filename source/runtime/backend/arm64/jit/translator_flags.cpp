@@ -1185,6 +1185,7 @@ bool OpClobbersPstate(ir::OpCode op) {
         case ir::OpCode::CallDynamic:
         case ir::OpCode::VecFCmp:
         case ir::OpCode::PublishFCmpFlags:
+        case ir::OpCode::PublishSse42StrFlags:
         case ir::OpCode::X87Op:
             return true;
         default:

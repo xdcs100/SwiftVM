@@ -12,6 +12,7 @@
 #include "interpreter.h"
 #include <bit>
 #include "runtime/common/div128.h"
+#include "runtime/common/sse42str_result.h"
 #include "runtime/common/variant_util.h"
 #include "runtime/frontend/x86/x87.h"
 
@@ -659,6 +660,29 @@ void Interpreter::RunPublishFCmpFlags(ir::Inst* inst, InterpStack& stack) {
     flags |= ((packed & 1) ^ u64(compact)) << kHostFlagC;
     flags |= ((packed >> 2) & 1) << kHostFlagZ;
     flags |= (((packed >> 1) & 1) ^ 1) << kHostParityByte;
+}
+
+void Interpreter::RunPublishSse42StrFlags(ir::Inst* inst, InterpStack& stack) {
+    const u64 packed = ReadScalar(stack, inst->GetArg<ir::Value>(0));
+    const auto requested = inst->GetArg<ir::Flags>(1);
+    u64& flags = state.host_cpu_flags;
+    const auto publish = [&](ir::Flags flag, u32 source, u32 target) {
+        if (True(requested & flag)) {
+            const u64 bit = (packed >> source) & 1;
+            flags = (flags & ~(u64(1) << target)) | (bit << target);
+        }
+    };
+    publish(ir::Flags::Negate, sse42str::kSignBit, kHostFlagN);
+    publish(ir::Flags::Zero, sse42str::kZeroBit, kHostFlagZ);
+    publish(ir::Flags::Carry, sse42str::kCarryBit, kHostFlagC);
+    publish(ir::Flags::Overflow, sse42str::kOverflowBit, kHostFlagV);
+    if (True(requested & ir::Flags::AuxiliaryCarry)) {
+        flags &= ~(u64(1) << kHostAF);
+    }
+    if (True(requested & ir::Flags::Parity)) {
+        flags = (flags & ~(u64(0xff) << kHostParityByte)) |
+                (u64(1) << kHostParityByte);
+    }
 }
 
 void Interpreter::RunLocalCondSet(ir::Inst* inst, InterpStack& stack) {

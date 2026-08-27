@@ -334,6 +334,7 @@ bool JitTranslator::LaterNeedsHostPstate(ir::Inst* from) const {
             case ir::OpCode::TestNotFlags:
             case ir::OpCode::VecFCmp:
             case ir::OpCode::PublishFCmpFlags:
+            case ir::OpCode::PublishSse42StrFlags:
                 return true;
             default:
                 break;
