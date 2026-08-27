@@ -1216,7 +1216,6 @@ void JitTranslator::EmitDirectCycleExitStubs() {
         ASSERT(label);
         __ Bind(label.get());
         ResolveExitPollFaults(label.get(), ir::Location{target});
-        __ Ldar(ip0, MemOperand(state, state_offset_exit_request));
         if (FlagsRegsEnabled()) {
             EmitSplitFlagsPublish();
         }
@@ -1236,6 +1235,7 @@ void JitTranslator::EmitDirectCycleExitReasonTail(Label* reason) {
     Label signal;
     Label publish;
     __ Bind(reason);
+    __ Ldar(ip0, MemOperand(state, state_offset_exit_request));
     __ Tbnz(ip0, 63, &signal);
     __ Mov(ipw1, static_cast<u32>(HaltReason::CodeMiss));
     __ B(&publish);
