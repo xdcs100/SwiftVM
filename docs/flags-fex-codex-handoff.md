@@ -2149,6 +2149,11 @@ peepholes.
   assertions each. Bounded smallpt keeps SHA-256
   `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. No stress run, full
   suite, probe, diagnostic path or new environment switch remains.
+- A CPUID prototype that retained all four output registers in SSA until the final publication was
+  fully removed. It lengthened four simultaneous Select chains and increased register pressure:
+  bounded SQLite moved `468,505 -> 469,934` (`+1,429`), all five changed CPUID units grew, and
+  `get_common_cache_info` grew `1,594 -> 1,821`. A future CPUID reduction must use compact
+  leaf-directed control flow or a dedicated lowering rather than extending all output lifetimes.
 
 ## Orb loop
 
