@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Product code tip: **`4c9c669`** `perf: lower narrow division to native instructions`
+- Product code tip: **`26c5f40`** `perf: share direct cycle exit tails`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -19,6 +19,7 @@ Default **`SVM_FLAGS_REGS=1`** (`121620f`). Region edges default ON. Default reg
 
 | Commit | What |
 |---|---|
+| `26c5f40` | Share the halt-reason/return tail across direct-cycle cold exits in functions with at least five candidate stubs |
 | `4c9c669` | Lower 8/16/32-bit DIV/IDIV to native 64-bit division and arithmetic remainder; retain helpers only for 128/64 division |
 | `30c85c7` | Replace BSF/BSR preserve-all helpers with U64 count-zero IR lowered to native AArch64 `CLZ` and `RBIT + CLZ` |
 | `4661866` | Feed an exact low U8/U16 store extract from an allocator-coalesced fixed-home publication directly to `STRB/STRH` |
@@ -2133,6 +2134,19 @@ peepholes.
   `1.484/1.562s -> 1.456/1.486s`. CoreMark 2k keeps all 3,695 PCs/versions at 100% coverage with no
   growth and moves `291,700,693 -> 291,700,603` (`-90`). Fixed-seed 101 and 424242 DIV/IDIV fuzz
   pass on Mac and Orb. Bounded smallpt keeps SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. No stress run, full
+  suite, probe, diagnostic path or new environment switch remains.
+- `26c5f40` removes repeated direct-cycle cold exit tails from large function units. Each fault
+  recovery label still acquires the exit request, publishes its block-specific flags and writes
+  its exact target; functions with at least five conservative candidates branch afterward to one
+  shared halt-reason/host-return tail. Smaller functions keep the original inline tail so the
+  screen has no growing unit. The bounded SQLite `main/10` set keeps all 1,995 units and moves
+  `488,179 -> 468,505` (`-19,674`, `-4.030079%`), with 306 shrinking units and no growth;
+  `0x4a5518` and `0x4a5470` shrink by 134 and 119 instructions. An exact same-build, order-reversed
+  full SQLite pair is neutral-to-positive: internal totals `1.288/1.281s -> 1.272/1.277s`, wall
+  `1.594/1.565s -> 1.559/1.564s`. CoreMark 2k is byte-identical across all 3,695 PCs/versions at
+  100% coverage. Mac/Orb direct-cycle, pending-interrupt and disabled-latch focuses pass 65
+  assertions each. Bounded smallpt keeps SHA-256
   `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. No stress run, full
   suite, probe, diagnostic path or new environment switch remains.
 
