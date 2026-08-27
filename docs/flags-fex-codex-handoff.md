@@ -1952,6 +1952,25 @@ peepholes.
   `crcfinal=0x382f`, and bounded smallpt retains zero spills and SHA-256
   `542db87b61af7a5cfff84083696082819f8608dc9c3ffaeda04b1db5b3210635`. No stress run, probe,
   diagnostic path or environment switch remains.
+- `880831e` closes two correctness failures exposed while admitting more FEX comparison workloads.
+  FLAGS_REGS previously discarded a pending parity token and uncommitted NZCV whenever the next
+  producer wrote any flag. The producer boundary now publishes only state that the new producer
+  does not overwrite, while SSE4.2 string comparison clears its architecturally constant PF/AF
+  directly instead of synthesizing two dead ALU flag producers. The SSE4.2 Rosetta/SDM matrix moves
+  from 4,592 JIT/interpreter divergences to zero and passes 16,255 assertions; the alias/REX matrix
+  passes 27. Separately, a continuation miss reached the cold indirect-L1 lookup with its guest
+  target in `x8`; scratch allocation then emitted `ldp x8, x9; cmp x8, x8`, replacing the real
+  stack target `0x4d94ae` with the empty cache key and dispatching to RIP zero. Indirect-L1,
+  continuation and indirect-call forwarding now reserve their target before leasing scratch, and a
+  focused cold-lookup check covers the register non-alias invariant. SQLite no longer rejects
+  `--size` or falls through RIP zero, 7zip advances from RIP zero to its independent gconv cwd
+  assertion, and OpenSSL reaches its SHA loop; SQLite's empty `PRAGMA threads=` and OpenSSL ignoring
+  `-seconds 1` remain separate argument/value-semantics blockers, so no new cross-workload FEX ratio
+  is claimed. A 10.7-11.2 second CoreMark 2k A/B keeps all 3,506 PCs / 5,236 versions, 100% coverage
+  and `crcfinal=0x4983`; weighted host work changes `300,773,011 -> 300,773,475`
+  (`+464`, `+0.000154%`). Mac and Orb flags, indirect-L1 and continuation focuses pass 119, 19 and
+  2 assertions respectively. No stress run, full suite, diagnostic path or environment switch
+  remains.
 
 ## Orb loop
 
