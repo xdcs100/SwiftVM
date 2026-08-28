@@ -1191,7 +1191,8 @@ void JitTranslator::EmitBackedgeExitStub() {
     ResolveExitPollFaults(backedge_exit_label.get(),
                           cur_block->GetStartLocation());
     const bool shared_reason = translating_function && share_cycle_exit_reason;
-    if (!shared_reason) {
+    const bool region_reason = context.CanUseRegionTrampoline();
+    if (!shared_reason && !region_reason) {
         __ Ldar(ip0, MemOperand(state, state_offset_exit_request));
     }
     if (backedge_flags_plan && backedge_flags_plan->optimized) {
@@ -1204,6 +1205,10 @@ void JitTranslator::EmitBackedgeExitStub() {
             cycle_exit_reason = std::make_unique<Label>();
         }
         __ B(cycle_exit_reason.get());
+        return;
+    }
+    if (region_reason) {
+        context.EmitCycleReasonBranch();
         return;
     }
     __ Tbnz(ip0, 63, &signal);
@@ -1249,9 +1254,13 @@ void JitTranslator::EmitDirectCycleExitStubs() {
 
 void JitTranslator::EmitCycleExitReasonTail(Label* reason) {
     ASSERT(reason);
+    __ Bind(reason);
+    if (context.CanUseRegionTrampoline()) {
+        context.EmitCycleReasonBranch();
+        return;
+    }
     Label signal;
     Label publish;
-    __ Bind(reason);
     __ Ldar(ip0, MemOperand(state, state_offset_exit_request));
     __ Tbnz(ip0, 63, &signal);
     __ Mov(ipw1, static_cast<u32>(HaltReason::CodeMiss));

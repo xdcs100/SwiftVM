@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <thread>
+#include <utility>
 #include <vector>
 #include <catch2/catch_test_macros.hpp>
 #include "aarch64/macro-assembler-aarch64.h"
@@ -146,6 +147,42 @@ u32 LoadInsn(const void* address) {
 }
 
 }  // namespace
+
+TEST_CASE("region cycle reason trampoline publishes the pending reason",
+          "[direct-link][trampoline][cycle]") {
+#if defined(__aarch64__)
+    std::vector<UniformMapDesc> descriptors;
+    auto config = TestConfig(descriptors);
+    TrampolinesArm64 runtime_trampolines{config, FeatureSet{}};
+    LinkManager manager;
+    CodeCache cache{config, 1u << 20, FeatureSet{}};
+    auto* return_host = reinterpret_cast<void*>(runtime_trampolines.GetReturnHost());
+    REQUIRE(cache.InitializeRegionTrampoline(manager, return_host, return_host));
+    REQUIRE(cache.GetCycleReasonRegionTrampoline());
+
+    auto code = cache.AllocCode(sizeof(u32));
+    REQUIRE(code);
+    const auto branch = EncodeB(
+            static_cast<u8*>(cache.GetCycleReasonRegionTrampoline()) -
+            code->exec_data);
+    REQUIRE(branch);
+    std::memcpy(code->rw_data, &*branch, sizeof(*branch));
+    code->Flush();
+
+    const std::array cases{
+            std::pair{u64{0}, HaltReason::CodeMiss},
+            std::pair{u64{1} << 63, HaltReason::Signal},
+    };
+    for (const auto& [request, expected] : cases) {
+        TestState test_state{config.uniform_buffer_size};
+        test_state.state->exit_request = request;
+        REQUIRE(runtime_trampolines.GetRuntimeEntry()(test_state.state,
+                                                       code->exec_data) == expected);
+    }
+#else
+    SUCCEED("region trampoline execution requires an AArch64 host");
+#endif
+}
 
 TEST_CASE("region trampoline preserves x30 and every static-pin configuration",
           "[direct-link][trampoline][x30]") {

@@ -741,6 +741,11 @@ void JitContext::EmitFlagsMergeBranch(FlagsMergeTrampolineKind kind) {
     __ dc32(*EncodeB(0));
 }
 
+void JitContext::EmitCycleReasonBranch() {
+    cycle_reason_sites.push_back(CurrentBufferSize());
+    __ dc32(*EncodeB(0));
+}
+
 bool JitContext::CanBypassDispatcher(ir::Location location) const {
     if (!module->GetModuleConfig().HasOpt(Optimizations::BlockLink)) {
         return false;
@@ -1119,6 +1124,20 @@ u8* JitContext::Flush(const CodeBuffer& code_cache) {
             const auto branch = EncodeB(trampoline - rx_site);
             ASSERT(branch);
             std::memcpy(emitted + site.code_offset, &*branch, sizeof(*branch));
+        }
+    }
+    if (!cycle_reason_sites.empty()) {
+        auto* cache = module->GetCodeCache(code_cache.exec_data);
+        ASSERT(cache);
+        auto* trampoline = static_cast<u8*>(
+                cache->GetCycleReasonRegionTrampoline());
+        ASSERT(trampoline && cache->GetRegion().ContainsRx(trampoline));
+        auto* emitted = masm.GetBuffer()->GetStartAddress<u8*>();
+        for (const u32 offset : cycle_reason_sites) {
+            auto* rx_site = code_cache.exec_data + offset;
+            const auto branch = EncodeB(trampoline - rx_site);
+            ASSERT(branch);
+            std::memcpy(emitted + offset, &*branch, sizeof(*branch));
         }
     }
     if (!pending_return_sites.empty()) {

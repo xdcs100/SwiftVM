@@ -146,12 +146,13 @@ public:
     [[nodiscard]] bool CanUseRegionTrampoline() const { return direct_link_active; }
     [[nodiscard]] bool RequiresRegionTrampoline() const {
         return !pending_direct_link_sites.empty() || !pending_return_sites.empty() ||
-               !flags_merge_sites.empty();
+               !flags_merge_sites.empty() || !cycle_reason_sites.empty();
     }
     [[nodiscard]] const std::vector<DirectLinkSiteInfo>& GetDirectLinkSites() const {
         return pending_direct_link_sites;
     }
     void EmitFlagsMergeBranch(FlagsMergeTrampolineKind kind);
+    void EmitCycleReasonBranch();
     // Dispatch to a compile-time-constant guest location, for the
     // "SetLocation(imm) + ReturnToDispatch" shape a direct jmp/call decodes to.
     // Prefer a tracked direct-link site and retain the inline L2 lookup when the
@@ -438,6 +439,7 @@ private:
         FlagsMergeTrampolineKind kind{};
     };
     std::vector<FlagsMergeSiteInfo> flags_merge_sites;
+    std::vector<u32> cycle_reason_sites;
 
     GPRSMask cur_dirty_gprs{};
     GPRSMask cur_dirty_fprs{};

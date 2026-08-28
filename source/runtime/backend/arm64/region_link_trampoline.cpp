@@ -1,6 +1,7 @@
 #include "runtime/backend/arm64/region_link_trampoline.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include "aarch64/macro-assembler-aarch64.h"
 #include "runtime/backend/arm64/fpcr_mode.h"
@@ -141,6 +142,7 @@ RegionLinkTrampolineCode BuildRegionLinkTrampoline(
             AlignUp(fpr_base + fprs.size() * sizeof(u128), size_t{16}));
 
     Label canonical_entry;
+    Label return_host;
     const u32 pending_flags_offset =
             static_cast<u32>(masm.GetBuffer()->GetSizeInBytes());
     masm.Mrs(x16, NZCV);
@@ -160,6 +162,19 @@ RegionLinkTrampolineCode BuildRegionLinkTrampoline(
     masm.Orr(x26, x26, x16);
     masm.Bfi(x26, x12, 0, 8);
     masm.Br(x17);
+    ASSERT(masm.GetBuffer()->GetSizeInBytes() ==
+           pending_flags_offset + kCycleReasonOffsetFromPending);
+    Label signal;
+    Label publish;
+    masm.Ldar(x16, MemOperand(x28, offsetof(State, exit_request)));
+    masm.Tbnz(x16, 63, &signal);
+    masm.Mov(w17, static_cast<u32>(HaltReason::CodeMiss));
+    masm.B(&publish);
+    masm.Bind(&signal);
+    masm.Mov(w17, static_cast<u32>(HaltReason::Signal));
+    masm.Bind(&publish);
+    masm.Str(w17, MemOperand(x28, offsetof(State, halt_reason)));
+    masm.B(&return_host);
     masm.Bind(&canonical_entry);
     const u32 canonical_offset =
             static_cast<u32>(masm.GetBuffer()->GetSizeInBytes());
@@ -218,6 +233,7 @@ RegionLinkTrampolineCode BuildRegionLinkTrampoline(
     masm.Br(x16);
     const u32 return_offset =
             static_cast<u32>(masm.GetBuffer()->GetSizeInBytes());
+    masm.Bind(&return_host);
     masm.Mov(x16, reinterpret_cast<uintptr_t>(context->return_host));
     masm.Br(x16);
     masm.FinalizeCode();
