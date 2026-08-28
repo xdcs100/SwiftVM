@@ -163,6 +163,19 @@ RegionLinkTrampolineCode BuildRegionLinkTrampoline(
     masm.Bfi(x26, x12, 0, 8);
     masm.Br(x17);
     ASSERT(masm.GetBuffer()->GetSizeInBytes() ==
+           pending_flags_offset + kReturnFlagsMergeOffsetFromPending);
+    masm.Mrs(x16, NZCV);
+    masm.And(x26, x26, ~u64{0xf0000000});
+    masm.Orr(x26, x26, x16);
+    masm.B(&return_host);
+    ASSERT(masm.GetBuffer()->GetSizeInBytes() ==
+           pending_flags_offset + kReturnFlagsMergeTokenOffsetFromPending);
+    masm.Mrs(x16, NZCV);
+    masm.And(x26, x26, ~u64{0xf0000000});
+    masm.Orr(x26, x26, x16);
+    masm.Bfi(x26, x12, 0, 8);
+    masm.B(&return_host);
+    ASSERT(masm.GetBuffer()->GetSizeInBytes() ==
            pending_flags_offset + kCycleFlagsMergeOffsetFromPending);
     Label cycle_reason;
     masm.Mrs(x16, NZCV);

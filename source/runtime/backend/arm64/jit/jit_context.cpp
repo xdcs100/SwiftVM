@@ -739,6 +739,17 @@ void JitContext::EmitFlagsMergeBranch(FlagsMergeTrampolineKind kind) {
     __ dc32(*EncodeB(0));
 }
 
+std::optional<FlagsMergeTrampolineKind>
+JitContext::TakeFlagsMergeBranch(u32 code_offset) {
+    if (flags_merge_sites.empty() ||
+        flags_merge_sites.back().code_offset != code_offset) {
+        return std::nullopt;
+    }
+    const auto kind = flags_merge_sites.back().kind;
+    flags_merge_sites.pop_back();
+    return kind;
+}
+
 void JitContext::EmitCycleReasonBranch() {
     cycle_reason_sites.push_back(
             {CurrentBufferSize(), CycleReasonTrampolineKind::Plain});
@@ -750,6 +761,15 @@ void JitContext::EmitCycleFlagsMergeBranch(bool token) {
             {CurrentBufferSize(),
              token ? CycleReasonTrampolineKind::NZCVToken
                    : CycleReasonTrampolineKind::NZCV});
+    __ dc32(*EncodeB(0));
+}
+
+void JitContext::EmitReturnFlagsMergeBranch(bool token) {
+    ASSERT(ContinuationActive());
+    pending_return_sites.push_back(
+            {CurrentBufferSize(),
+             token ? ReturnTrampolineKind::NZCVToken
+                   : ReturnTrampolineKind::NZCV});
     __ dc32(*EncodeB(0));
 }
 
@@ -802,7 +822,8 @@ void JitContext::ReturnHost() {
         __ Ret();
         return;
     }
-    pending_return_sites.push_back(CurrentBufferSize());
+    pending_return_sites.push_back(
+            {CurrentBufferSize(), ReturnTrampolineKind::Plain});
     __ dc32(*EncodeB(0));
 }
 
@@ -1160,14 +1181,24 @@ u8* JitContext::Flush(const CodeBuffer& code_cache) {
     if (!pending_return_sites.empty()) {
         auto* cache = module->GetCodeCache(code_cache.exec_data);
         ASSERT(cache);
-        auto* trampoline = static_cast<u8*>(cache->GetReturnRegionTrampoline());
-        ASSERT(trampoline && cache->GetRegion().ContainsRx(trampoline));
         auto* emitted = masm.GetBuffer()->GetStartAddress<u8*>();
-        for (const u32 offset : pending_return_sites) {
-            auto* rx_site = code_cache.exec_data + offset;
+        for (const auto& site : pending_return_sites) {
+            auto* trampoline = static_cast<u8*>([&] {
+                switch (site.kind) {
+                    case ReturnTrampolineKind::Plain:
+                        return cache->GetReturnRegionTrampoline();
+                    case ReturnTrampolineKind::NZCV:
+                        return cache->GetReturnFlagsMergeRegionTrampoline();
+                    case ReturnTrampolineKind::NZCVToken:
+                        return cache->GetReturnFlagsMergeTokenRegionTrampoline();
+                }
+                PANIC();
+            }());
+            ASSERT(trampoline && cache->GetRegion().ContainsRx(trampoline));
+            auto* rx_site = code_cache.exec_data + site.code_offset;
             const auto branch = EncodeB(trampoline - rx_site);
             ASSERT(branch);
-            std::memcpy(emitted + offset, &*branch, sizeof(*branch));
+            std::memcpy(emitted + site.code_offset, &*branch, sizeof(*branch));
         }
     }
     if (!pending_direct_link_sites.empty()) {

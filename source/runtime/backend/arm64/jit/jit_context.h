@@ -48,6 +48,12 @@ enum class CycleReasonTrampolineKind : u8 {
     NZCVToken,
 };
 
+enum class ReturnTrampolineKind : u8 {
+    Plain,
+    NZCV,
+    NZCVToken,
+};
+
 // Allocation-relative description retained after emission so disk cache
 // can normalize every site without reading a concurrently patched code word.
 struct DirectLinkSiteInfo {
@@ -164,8 +170,11 @@ public:
         return pending_direct_link_sites;
     }
     void EmitFlagsMergeBranch(FlagsMergeTrampolineKind kind);
+    [[nodiscard]] std::optional<FlagsMergeTrampolineKind>
+    TakeFlagsMergeBranch(u32 code_offset);
     void EmitCycleReasonBranch();
     void EmitCycleFlagsMergeBranch(bool token);
+    void EmitReturnFlagsMergeBranch(bool token);
     // Dispatch to a compile-time-constant guest location, for the
     // "SetLocation(imm) + ReturnToDispatch" shape a direct jmp/call decodes to.
     // Prefer a tracked direct-link site and retain the inline L2 lookup when the
@@ -446,7 +455,11 @@ private:
     std::map<u32, u8> spill_use_scratch;
     std::vector<PendingSpillWrite> pending_spill_writes;
     std::vector<DirectLinkSiteInfo> pending_direct_link_sites;
-    std::vector<u32> pending_return_sites;
+    struct ReturnSiteInfo {
+        u32 code_offset{};
+        ReturnTrampolineKind kind{};
+    };
+    std::vector<ReturnSiteInfo> pending_return_sites;
     struct FlagsMergeSiteInfo {
         u32 code_offset{};
         FlagsMergeTrampolineKind kind{};

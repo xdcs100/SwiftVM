@@ -83,6 +83,8 @@ public:
     [[nodiscard]] void* GetPendingFlagsRegionTrampoline() const;
     [[nodiscard]] void* GetFlagsMergeRegionTrampoline() const;
     [[nodiscard]] void* GetFlagsMergeTokenRegionTrampoline() const;
+    [[nodiscard]] void* GetReturnFlagsMergeRegionTrampoline() const;
+    [[nodiscard]] void* GetReturnFlagsMergeTokenRegionTrampoline() const;
     [[nodiscard]] void* GetCycleFlagsMergeRegionTrampoline() const;
     [[nodiscard]] void* GetCycleFlagsMergeTokenRegionTrampoline() const;
     [[nodiscard]] void* GetCycleReasonRegionTrampoline() const;

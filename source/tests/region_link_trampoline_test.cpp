@@ -184,8 +184,8 @@ TEST_CASE("region cycle reason trampoline publishes the pending reason",
 #endif
 }
 
-TEST_CASE("cycle reason trampoline merges flags before returning",
-          "[direct-link][trampoline][cycle][flags]") {
+TEST_CASE("region exit trampolines merge flags before returning",
+          "[direct-link][trampoline][cycle][return][flags]") {
 #if defined(__aarch64__)
     std::vector<UniformMapDesc> descriptors;
     auto config = TestConfig(descriptors);
@@ -199,7 +199,8 @@ TEST_CASE("cycle reason trampoline merges flags before returning",
     constexpr u64 packed_zc = (u64{1} << 30) | (u64{1} << 29);
     constexpr u64 old_parity = 0xa5;
     constexpr u64 token_parity = 0x3c;
-    for (const bool token : {false, true}) {
+    for (const bool cycle : {false, true}) {
+        for (const bool token : {false, true}) {
         auto code = cache.AllocCode(128);
         REQUIRE(code);
         MacroAssembler masm;
@@ -207,14 +208,20 @@ TEST_CASE("cycle reason trampoline merges flags before returning",
         masm.Mov(x12, token_parity);
         masm.Mov(x0, 1);
         masm.Cmp(x0, x0);
+        if (!cycle) {
+            masm.Mov(w11, static_cast<u32>(HaltReason::PageFatal));
+            masm.Str(w11, MemOperand(x28, state_offset_halt_reason));
+        }
         const u32 branch_offset =
                 static_cast<u32>(masm.GetBuffer()->GetSizeInBytes());
         masm.dc32(*EncodeB(0));
         CopyAssembler(*code, 0, masm);
 
-        auto* trampoline = static_cast<u8*>(
-                token ? cache.GetCycleFlagsMergeTokenRegionTrampoline()
-                      : cache.GetCycleFlagsMergeRegionTrampoline());
+        auto* trampoline = static_cast<u8*>(cycle
+                ? (token ? cache.GetCycleFlagsMergeTokenRegionTrampoline()
+                         : cache.GetCycleFlagsMergeRegionTrampoline())
+                : (token ? cache.GetReturnFlagsMergeTokenRegionTrampoline()
+                         : cache.GetReturnFlagsMergeRegionTrampoline()));
         REQUIRE(trampoline);
         const auto branch = EncodeB(
                 trampoline - (code->exec_data + branch_offset));
@@ -225,10 +232,11 @@ TEST_CASE("cycle reason trampoline merges flags before returning",
         TestState test_state{config.uniform_buffer_size};
         REQUIRE(runtime_trampolines.GetRuntimeEntry()(test_state.state,
                                                        code->exec_data) ==
-                HaltReason::CodeMiss);
+                (cycle ? HaltReason::CodeMiss : HaltReason::PageFatal));
         const u64 parity = token ? token_parity : old_parity;
         REQUIRE(test_state.state->host_cpu_flags ==
                 (packed_zc | packed_af | parity));
+        }
     }
 #else
     SUCCEED("region trampoline execution requires an AArch64 host");

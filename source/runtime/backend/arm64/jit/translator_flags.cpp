@@ -318,16 +318,19 @@ DirectLinkFlagsBypass JitTranslator::EmitOutlinedNZCVMerge() {
     return {begin, context.CurrentBufferSize(), 0, merge_branch};
 }
 
-void JitTranslator::EmitOutlinedNZCVMergeResume(bool token) {
+DirectLinkFlagsBypass JitTranslator::EmitOutlinedNZCVMergeResume(bool token) {
     if (token) {
         MaterializeFlagsTokenResult();
     }
     Label resume;
+    const u32 begin = context.CurrentBufferSize();
     __ Adr(ip1, &resume);
+    const u32 merge_branch = context.CurrentBufferSize();
     context.EmitFlagsMergeBranch(
             token ? FlagsMergeTrampolineKind::NZCVToken
                   : FlagsMergeTrampolineKind::NZCV);
     __ Bind(&resume);
+    return {begin, context.CurrentBufferSize(), 0, merge_branch};
 }
 
 void JitTranslator::EmitDeferredNZCVMergeStubs() {
@@ -343,6 +346,35 @@ void JitTranslator::EmitDeferredNZCVMergeStubs() {
     }
     context.EndColdScratch();
     deferred_nzcv_merge_stubs.clear();
+}
+
+bool JitTranslator::TryEmitReturnFlagsBypass(
+        const DirectLinkFlagsBypass& flags_bypass) {
+    if (!FlagsRegsEnabled() || !context.ContinuationActive() ||
+        !context.CanUseRegionTrampoline() || !flags_bypass.Valid() ||
+        flags_bypass.resume_offset != context.CurrentBufferSize() ||
+        flags_bypass.linked_instruction != 0) {
+        return false;
+    }
+    const bool outlined_merge =
+            flags_bypass.merge_branch_offset ==
+                    flags_bypass.code_offset + sizeof(u32) &&
+            flags_bypass.resume_offset ==
+                    flags_bypass.code_offset + 2 * sizeof(u32);
+    const bool inline_merge =
+            flags_bypass.merge_branch_offset == UINT32_MAX &&
+            flags_bypass.resume_offset ==
+                    flags_bypass.code_offset + 3 * sizeof(u32);
+    if (!outlined_merge && !inline_merge) {
+        return false;
+    }
+    const auto merge_kind = outlined_merge
+            ? context.TakeFlagsMergeBranch(flags_bypass.merge_branch_offset)
+            : std::nullopt;
+    masm.GetBuffer()->Rewind(flags_bypass.code_offset);
+    context.EmitReturnFlagsMergeBranch(
+            merge_kind == FlagsMergeTrampolineKind::NZCVToken);
+    return true;
 }
 
 std::optional<u64> JitTranslator::PendingNZCVMergeMask(
@@ -389,7 +421,7 @@ DirectLinkFlagsBypass JitTranslator::MergeNZCV(
                          cold_outline;
         if (deferred_merge) {
             if (cold_outline) {
-                EmitOutlinedNZCVMergeResume(flags_token_valid);
+                flags_bypass = EmitOutlinedNZCVMergeResume(flags_token_valid);
             } else if (flags_token_valid) {
                 const auto scratch = context.GetSharedTmpX();
                 flags_bypass = EmitDeferredNZCVMerge(scratch, FlagsTokenResult());

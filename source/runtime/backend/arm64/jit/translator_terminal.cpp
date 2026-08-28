@@ -36,17 +36,21 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
                                 context.ContinuationActive() && static_next_loc &&
                                         context.CanEmitDirectLink(
                                                 ir::Location{*static_next_loc}));
+            const auto terminal_flags_bypass = local_flags_bypass.Valid()
+                    ? local_flags_bypass
+                    : flags_bypass;
             context.RecordExecCounter(static_next_loc ? exec_offset_exit_direct
                                                       : exec_offset_exit_indirect);
             if (!EmitStaticForward(
                         call_continuation ? LinkSiteKind::Call
                                           : direct_link_kind,
-                        local_flags_bypass.Valid() ? local_flags_bypass
-                                                   : flags_bypass) &&
+                        terminal_flags_bypass) &&
                 !(CanUseIndirectCallContinuation()
                           ? EmitIndirectCallForward(pending_call_flags)
                           : EmitIndirectForward())) {
-                context.ReturnHost();
+                if (!TryEmitReturnFlagsBypass(terminal_flags_bypass)) {
+                    context.ReturnHost();
+                }
             }
         } else if constexpr (std::is_same_v<T, ir::terminal::ReturnToDispatch>) {
             constexpr auto merge_cause =
@@ -62,6 +66,9 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
                                 context.ContinuationActive() && static_next_loc &&
                                         context.CanEmitDirectLink(
                                                 ir::Location{*static_next_loc}));
+            const auto terminal_flags_bypass = local_flags_bypass.Valid()
+                    ? local_flags_bypass
+                    : flags_bypass;
             context.RecordExecCounter(
                     cur_block_is_call ? exec_offset_exit_call
                                       : (static_next_loc ? exec_offset_exit_direct
@@ -69,12 +76,13 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
             if (!EmitStaticForward(
                         call_continuation ? LinkSiteKind::Call
                                           : direct_link_kind,
-                        local_flags_bypass.Valid() ? local_flags_bypass
-                                                   : flags_bypass) &&
+                        terminal_flags_bypass) &&
                 !(CanUseIndirectCallContinuation()
                           ? EmitIndirectCallForward(pending_call_flags)
                           : EmitIndirectForward())) {
-                context.ReturnHost();
+                if (!TryEmitReturnFlagsBypass(terminal_flags_bypass)) {
+                    context.ReturnHost();
+                }
             }
         } else if constexpr (std::is_same_v<T, ir::terminal::ReturnToHost>) {
             MergeNZCV(FlagsRegsAuditMergeCause::HostExit,
