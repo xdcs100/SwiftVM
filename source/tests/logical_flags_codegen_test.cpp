@@ -171,8 +171,8 @@ std::vector<std::string> EmitNarrowArithmetic(OpCode op,
     return Disassemble(context);
 }
 
-std::vector<std::string> EmitPackedCVAFClear(bool exact_clear,
-                                             bool arithmetic = false) {
+std::vector<std::string> EmitPackedCVAFClear(
+        bool exact_clear, OpCode producer = OpCode::And) {
     Config config{
             .loc_start = 0,
             .loc_end = 1ull << 48,
@@ -186,9 +186,14 @@ std::vector<std::string> EmitPackedCVAFClear(bool exact_clear,
     IntrusivePtr<Block> block{new Block(0, Location{0x8a20})};
     auto source = block->LoadUniform<TypedValue<ValueType::U32>>(
             Uniform{0, ValueType::U32});
-    auto result = arithmetic
-            ? block->Add(source, Operand{Imm{1u}}).SetType(ValueType::U32)
-            : block->And(source, Operand{source}).SetType(ValueType::U32);
+    Value result;
+    if (producer == OpCode::Add) {
+        result = block->Add(source, Operand{Imm{1u}}).SetType(ValueType::U32);
+    } else if (producer == OpCode::Xor) {
+        result = block->Xor(source, Operand{source}).SetType(ValueType::U32);
+    } else {
+        result = block->And(source, Operand{source}).SetType(ValueType::U32);
+    }
     const auto clear = exact_clear
             ? Flags::CV | Flags::AuxiliaryCarry
             : Flags::CV;
@@ -305,7 +310,13 @@ TEST_CASE("logical NZ publication absorbs an adjacent CVAF clear") {
     const auto partial = EmitPackedCVAFClear(false);
     REQUIRE_FALSE(Contains(partial, "#26, #6"));
 
-    const auto arithmetic = EmitPackedCVAFClear(true, true);
+    const auto zero = EmitPackedCVAFClear(true, OpCode::Xor);
+    REQUIRE(Contains(zero, "mov x26, #0x40000000"));
+    REQUIRE_FALSE(Contains(zero, "bfc x26"));
+    REQUIRE_FALSE(Contains(zero, "bfi x26"));
+    REQUIRE_FALSE(Contains(zero, "orr x26"));
+
+    const auto arithmetic = EmitPackedCVAFClear(true, OpCode::Add);
     REQUIRE(Contains(arithmetic, "uxtb w26"));
     REQUIRE_FALSE(Contains(arithmetic, "bfc x26, #26, #4"));
 }
