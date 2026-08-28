@@ -2744,6 +2744,23 @@ peepholes.
   still reproduce on the exact baseline. No stress run, probe, diagnostic path or environment
   switch remains.
 
+- `d6b584f` treats an `ENDBR64` target other than the current root as a lazy function-region
+  boundary. The target remains an ordinary independently compiled L2/direct-link entry; only its
+  eager inclusion in the caller's unit is removed. This stops nearby cold functions from being
+  mistaken for internal blocks without requiring symbols or a retained heuristic switch.
+  `__memcpy_chk@0x514000` drops `136 -> 17` host instructions versus FEX at 29 because its
+  `__chk_fail/__fortify_fail` chain is no longer embedded; `printfFunc@0x45ae50` drops
+  `586 -> 283`. SQLite `main/10` reshapes 11 old roots into eight new entries, so the exact common
+  subset covers 99.564277% of prior static host code and moves `299,340 -> 298,641` (`-699`),
+  while the complete total moves `300,650 -> 300,175` (`-475`, `-0.157991%`). Three interleaved
+  pairs improve internal median `1.334 -> 1.315s` and wall median `1.604 -> 1.581s`. Bounded
+  smallpt reshapes 262 roots into 263 and moves complete total `41,890 -> 41,415` (`-475`,
+  `-1.133922%`) with its canonical PPM SHA-256 unchanged. Mac and Orb pass the late-entry replay,
+  73-assertion large-function CFG, 38-assertion extracted glibc function, function-liveness and
+  35-assertion region-SMC focuses. The counter-based SQLite capture and CoreMark 20k/2k gates did
+  not finish inside their 8/6-second caps and were stopped rather than extended; no result is
+  claimed from them. No stress run, probe, diagnostic path or environment switch remains.
+
 ## Orb loop
 
 ```
