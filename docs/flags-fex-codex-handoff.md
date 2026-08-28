@@ -2445,6 +2445,24 @@ peepholes.
   both grew SQLite by 1,717 instructions and overwrote `x30` before continuation-preserving direct
   links. No probe, diagnostic path or environment switch from that evaluation remains.
 
+- Full-NZCV publication in out-of-line recovery and cycle paths now uses allocation-relative merge
+  sites patched to one of two code-region trampolines. The plain form carries only live PSTATE; the
+  token form first materializes the parity/AF byte in `x12`. Both use `ADR x17, resume; B trampoline`
+  and return through `x17`, so `x30` remains the host continuation. Units that cannot obtain a
+  reachable region trampoline are re-emitted through the existing non-direct allocation path and do
+  not generate these sites. Exact SQLite `main/10` static-only A/B keeps all 1,999 units and moves
+  `340,875 -> 333,452` host instructions (`-7,423`, `-2.177631%`), with 1,299 shrinking units and no
+  growth. `0x4032a2` moves `694 -> 654`, `0x402f73` moves `617 -> 581`, and `0x4ee9a5` moves
+  `829 -> 797`. Remaining `MRS NZCV` falls from 11,694 to 5,751; full merges fall from 8,012 to
+  2,069, while the 3,680 partial merges are unchanged and are now the larger publication class.
+  Timing-normalized SQLite output remains byte-identical with SHA-256
+  `9fb4d81a33c7f75c5b122f609410088c3be8a2a0bf5458d1e1164ecfc19f22f2`; bounded smallpt retains
+  SHA-256 `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. Mac passes 616 final
+  assertions across cache, production bypass, continuation, cycle/SMC and trampoline coverage; Orb
+  passes the corresponding 442 assertions. A pending-flags return-continuation tag was audited but
+  not emitted: without a second continuation entry it grows static code before it can remove the hot
+  merge. No census logging, probe path, stress run or environment switch remains.
+
 ## Orb loop
 
 ```
