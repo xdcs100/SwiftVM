@@ -2896,6 +2896,17 @@ peepholes.
   keys with zero candidate-only case. No stress run, probe, diagnostic path or environment switch
   remains.
 
+- `6dc8e14` folds incoming packed `JA/JBE` conditions without reconstructing their boolean graph.
+  When carry is no longer live in PSTATE, the canonical FlagM path now commits any pending NZCV and
+  tests x26's guest CF/ZF bits directly; the live-PSTATE direct-carry path keeps `HI/LS`. Exact
+  SQLite keeps all 2,171 roots and moves `287,411 -> 287,236` (`-175`, `-0.060888%`) with no growth.
+  Bounded smallpt keeps all 263 roots, moves `40,469 -> 40,412` (`-57`, `-0.140849%`) and retains
+  PPM SHA-256 `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`.
+  Timing-normalized SQLite output is byte-identical, CoreMark 20k retains `crcfinal=0x382f`, and the
+  Mac/Orb packed/direct carry focuses pass 106 assertions each. Fixed-seed 424242 JCC differential
+  retains the baseline's exact 107 mismatch keys with zero candidate-only case. No stress run,
+  probe, diagnostic path or environment switch remains.
+
 ## Orb loop
 
 ```
