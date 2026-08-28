@@ -3092,6 +3092,31 @@ peepholes.
   alias/REX and evaluator checks. No stress run, probe, diagnostic path or environment switch
   remains.
 
+- The remaining continuation return hot path is at its current safe ABI floor. Each return loads
+  the architectural target from the guest stack, loads the predicted target/host continuation pair
+  from the guarded x25 stack, compares the guest targets, branches to the shared miss path and uses
+  `BLR` so a null/stale continuation fault can recover through LR-based metadata. Replacing that
+  sequence with FEX's single `RET` requires a different hardware-stack ownership and invalidation
+  ABI; no return peephole or speculative fallback was retained.
+
+- Memory CMPXCHG now publishes the observed CAS value directly to the accumulator. On success the
+  observed value equals the expected accumulator, and on failure x86 requires that same observed
+  value, so the previous `XOR + TestZero + Select` was redundant. The comparison flags are marked
+  as the immediately following instruction's local NZCV, allowing existing branch-only analysis
+  to retain `SUBS` while deleting dead parity/AF/carry construction. Register-destination CMPXCHG
+  keeps its conditional destination and accumulator selections. Exact SQLite keeps all 2,167 roots
+  and moves `272,988 -> 272,701` (`-287`, `-0.105133%`) with 18 shrinking roots and no growth;
+  `version_lock_lock_exclusive` moves `194 -> 168`, narrowing its FEX gap from 69 to 43.
+  Bounded smallpt keeps all 263 roots, moves `38,657 -> 38,386` (`-271`, `-0.701037%`) with 17
+  shrinking roots and no growth, and retains PPM SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. CoreMark 2k keeps all
+  295 roots, moves `38,631 -> 38,344` (`-287`, `-0.742927%`) with 17 shrinking roots and no
+  growth, and retains `crcfinal=0x4983`. Three interleaved SQLite pairs keep wall median neutral
+  (`1.022901 -> 1.022955s`) and move internal median `0.770 -> 0.766s`; all six normalized outputs
+  are byte-identical. Fixed-seed 424242, 256-case Mac and Orb bit-op differentials report zero
+  CMPXCHG mismatch; their only failures are the established ROL family. No stress run, probe,
+  diagnostic path or environment switch remains.
+
 ## Orb loop
 
 ```

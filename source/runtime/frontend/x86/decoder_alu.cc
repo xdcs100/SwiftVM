@@ -1267,14 +1267,15 @@ void X64Decoder::DecodeCmpxchg(_DInst& insn) {
         auto addr = FlatAddress(insn, op0);
         old = __ CompareAndSwap(addr, acc, desired).SetType(type);
     }
-    // Flags come from CMP accumulator, destination (acc - old).
-    ArithWithFlags(acc, old, ArithOp::Sub, width, ir::Flags::All);
-    // Equality on the masked operands: the narrow subtract container can hold
-    // a non-zero value (e.g. 0x10000 for 0x7fff-0x7fff) that would poison a
-    // zero test, so compare the inputs directly.
-    auto equal = __ TestZero(__ Xor(acc, ir::Operand{old}).SetType(type));
+    const bool memory_destination = op0.type != O_REG;
+    ArithWithFlags(acc, old, ArithOp::Sub, width, ir::Flags::All,
+                   memory_destination);
 
     if (op0.type == O_REG) {
+        // Equality on the masked operands: the narrow subtract container can
+        // hold a non-zero value that would poison a zero test.
+        auto equal = __ TestZero(
+                __ Xor(acc, ir::Operand{old}).SetType(type));
         // Register destination: pure select, no store.
         auto new_dst = __ Select(equal, desired, old).SetType(type);
         if (width == 16) {
@@ -1286,13 +1287,12 @@ void X64Decoder::DecodeCmpxchg(_DInst& insn) {
         } else {
             Dst(insn, op0, new_dst);
         }
-    }
-    // dest == accumulator register: the dest write already updated it.
-    const bool dst_is_acc = op0.type == O_REG && op0.index == acc_reg;
-    if (!dst_is_acc) {
-        // The accumulator becomes the previous destination value ONLY when the
-        // comparison failed; on success it is unchanged.
-        R(acc_reg, __ Select(equal, acc, old).SetType(type));
+        // dest == accumulator register: the dest write already updated it.
+        if (op0.index != acc_reg) {
+            R(acc_reg, __ Select(equal, acc, old).SetType(type));
+        }
+    } else {
+        R(acc_reg, old);
     }
 }
 
