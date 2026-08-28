@@ -2,6 +2,7 @@
 // Created by 甘尧 on 2024/6/21.
 //
 
+#include <array>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -481,6 +482,13 @@ static bool IsLocalFunctionTarget(VAddr root, VAddr target) {
                           : root - target <= kMaxDistance;
 }
 
+static bool IsEndbr64Boundary(VAddr target) {
+    constexpr std::array<u8, 4> kEndbr64{0xf3, 0x0f, 0x1e, 0xfa};
+    std::array<u8, 4> bytes{};
+    memory_impl.Read(bytes.data(), target, bytes.size());
+    return bytes == kEndbr64;
+}
+
 struct X86Instance::Impl final {
     // memory_base: guest->host bias (host addr = guest addr + bias), installed
     // by the linux loader; nullptr keeps the identity-mapped fast path.
@@ -719,6 +727,9 @@ struct X86Instance::Impl final {
                         }
                         // Split cold sections stay external and compile through the lazy edge.
                         if (lazy && !IsLocalFunctionTarget(pc, addr)) {
+                            continue;
+                        }
+                        if (lazy && addr != pc && IsEndbr64Boundary(addr)) {
                             continue;
                         }
                         to_decode.push_back(addr);
