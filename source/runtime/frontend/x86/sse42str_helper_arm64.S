@@ -1,5 +1,18 @@
 #include "runtime/backend/arm64/marcos.h"
 
+.def SwiftSse42StrEqualAnyIndex
+    mov w4, #0x02
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    fmov x0, d0
+    umov x1, v0.d[1]
+    fmov x2, d1
+    umov x3, v1.d[1]
+    bl cdecl(SwiftSse42StrEvalVector)
+    mov x16, x0
+    ldp x29, x30, [sp], #16
+    ret
+
 .def SwiftSse42StrEqualEachNegIndex
     cmeq v2.16b, v0.16b, #0
     cmeq v3.16b, v1.16b, #0

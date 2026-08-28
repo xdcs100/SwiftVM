@@ -3065,6 +3065,33 @@ peepholes.
   comparisons retain the baseline's exact 79 and 123 established mismatch sets with zero
   candidate-only mismatch. No stress run, probe, diagnostic path or environment switch remains.
 
+- The explicit split-entry audit confirmed `0x4498c9`, `0x449a5b` and `0x449b0c` are real x86
+  instruction boundaries, but boundary identity is still insufficient. A prototype transferred
+  HIR ownership, call-return metadata, CFG edges and guest-code dependencies only at exact
+  `AdvancePC` cuts, rejected prefix SSA use and incoming-flags observation, and retained
+  `CheckHalt` on internalized cycle edges. Isolating it to `freeSpace` moved that root
+  `417 -> 399`, but global activation reproduced guest halt in libc initialization and heap
+  corruption in `_int_malloc`; fan-in thresholds only changed which function failed. The entire
+  implementation, test and diagnostic output were removed. A viable split entry needs a frontend
+  decoder-state snapshot in addition to HIR/fault ownership; do not infer it from `SetLocation`,
+  exact instruction boundaries or fan-in counts.
+
+- Implicit-length PCMPISTRI control `0x02` now uses a shared vector helper ABI instead of expanding
+  equal-any aggregation in every JIT unit. The AArch64 entry marshals `v0/v1` to the existing
+  evaluator and returns the packed result in `x16`; native `0x1a` and generic `0x02` helpers retain
+  separate caller-clobber masks. The rejected `0x3a` extension grew nine roots by 18 instructions
+  each and was fully removed. Two repeated exact SQLite captures keep all 2,167 roots and move
+  `273,030 -> 272,988` (`-42`, `-0.015383%`) with one shrinking root and no growth:
+  `__strcspn_sse42` moves `326 -> 284`, narrowing its FEX gap from 85 to 43 instructions.
+  Three interleaved short pairs move wall/internal medians
+  `1.032009/0.774 -> 1.025786/0.769s`; all six timing-normalized outputs are byte-identical.
+  Bounded smallpt is byte-identical at 263 roots / 38,657 instructions with PPM SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. CoreMark 2k is
+  byte-identical at 295 roots / 38,631 instructions and retains `crcfinal=0x4983`. Mac and Orb pass
+  16,800 assertions across the helper scratch contract, SDM/Rosetta differential, memory-boundary,
+  alias/REX and evaluator checks. No stress run, probe, diagnostic path or environment switch
+  remains.
+
 ## Orb loop
 
 ```

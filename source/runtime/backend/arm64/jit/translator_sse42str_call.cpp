@@ -10,13 +10,14 @@ namespace swift::runtime::backend::arm64 {
 void JitTranslator::EmitSse42StrVectorCall(const VRegister& left,
                                            const VRegister& right,
                                            const WRegister& result,
-                                           VAddr target) {
+                                           VAddr target,
+                                           u32 gpr_clobbers) {
     using ABI = swift::x86::Sse42StrVectorCallABI;
 
     const auto live_gprs = context.GetLiveGPRs();
     boost::container::small_vector<u32, 8> save_gprs;
     for (u32 code = 0; code < 32; ++code) {
-        if ((ABI::GPRClobbers & (1u << code)) && live_gprs.Get(code)) {
+        if ((gpr_clobbers & (1u << code)) && live_gprs.Get(code)) {
             save_gprs.push_back(code);
         }
     }

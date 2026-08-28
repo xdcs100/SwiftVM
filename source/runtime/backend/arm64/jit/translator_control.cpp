@@ -188,9 +188,9 @@ void JitTranslator::PrepareHostCallThunks(const std::vector<ir::Block*>& blocks)
                 if (!lambda.IsValue()) {
                     target = lambda.GetImm().Get();
                 }
-            } else if (inst.GetOp() == ir::OpCode::Sse42Str &&
-                       inst.GetArg<ir::Imm>(2).Get() == 0x1au) {
-                target = swift::x86::Sse42StrVectorHelperAddress();
+            } else if (inst.GetOp() == ir::OpCode::Sse42Str) {
+                target = swift::x86::Sse42StrVectorHelperAddress(
+                        u8(inst.GetArg<ir::Imm>(2).Get()));
             }
             if (target) {
                 ++host_call_thunks[target].uses;

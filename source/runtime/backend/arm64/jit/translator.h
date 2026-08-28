@@ -637,7 +637,8 @@ private:
     void EmitSse42StrVectorCall(const VRegister& left,
                                 const VRegister& right,
                                 const WRegister& result,
-                                VAddr target);
+                                VAddr target,
+                                u32 gpr_clobbers);
     void PrepareHostCallThunks(const std::vector<ir::Block*>& blocks);
     void MaterializeHostCallTarget(u64 target);
     bool TryEmitSharedHostCall(const ir::Lambda& lambda);

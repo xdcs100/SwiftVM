@@ -42,6 +42,7 @@
 #include "runtime/common/backedge_control.h"
 #include "runtime/common/svm_config.h"
 #include "runtime/frontend/x86/decoder.h"
+#include "runtime/frontend/x86/sse42str_helper.h"
 #include "runtime/frontend/x86/x87.h"
 #include "compiler/slang/slang.h"
 #include "assembler_riscv64.h"
@@ -8140,7 +8141,10 @@ TEST_CASE("SSE4.2 string lowering stays within its declared scratch contract") {
         RegAlloc alloc{block.MaxInstrId(), gprs, fprs, FeatureSet{}};
         RegisterAllocPass::Run(&block, &alloc, false, FeatureSet{});
 #if defined(__aarch64__)
-        const swift::u32 expected_gprs = imm == 0x1au ? 0u : 4u;
+        const swift::u32 expected_gprs =
+                swift::x86::Sse42StrVectorHelperAddress(swift::u8(imm))
+                        ? 0u
+                        : 4u;
 #else
         const swift::u32 expected_gprs = 4u;
 #endif

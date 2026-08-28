@@ -5,6 +5,7 @@
 #include <algorithm>
 #include "reg_alloc.h"
 #include "runtime/common/perf_stats.h"
+#include "runtime/frontend/x86/sse42str_helper.h"
 #include "runtime/frontend/x86/x87.h"
 
 namespace swift::runtime::backend {
@@ -452,7 +453,8 @@ ScratchNeed ScratchBudget(const ir::Inst& inst, const FeatureSet& features) {
                 break;
             case ir::OpCode::Sse42Str:
 #if defined(__aarch64__)
-                if (inst.GetArg<ir::Imm>(2).Get() == 0x1au) {
+                if (swift::x86::Sse42StrVectorHelperAddress(
+                            u8(inst.GetArg<ir::Imm>(2).Get()))) {
                     return {0, 0};
                 }
 #endif
