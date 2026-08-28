@@ -779,7 +779,12 @@ void JitTranslator::EmitBackedgeMaterialize(const BackedgeFlagsPlan& plan) {
                                             carry_inverted)));
     }
     const u64 requested = static_cast<u64>(plan.requested);
-    EmitNZCVMerge(requested, ip0);
+    if (requested == static_cast<u64>(HostFlags::NZCV) &&
+        context.CanUseRegionTrampoline()) {
+        EmitOutlinedNZCVMergeResume(false);
+    } else {
+        EmitNZCVMerge(requested, ip0);
+    }
 }
 
 void JitTranslator::EmitRegionBranchPFAF(const BackedgeFlagsPlan& plan) {

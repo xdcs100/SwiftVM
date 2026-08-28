@@ -298,7 +298,7 @@ DirectLinkFlagsBypass JitTranslator::EmitOutlinedNZCVMerge() {
     return {begin, context.CurrentBufferSize(), 0, merge_branch};
 }
 
-void JitTranslator::EmitColdOutlinedNZCVMerge(bool token) {
+void JitTranslator::EmitOutlinedNZCVMergeResume(bool token) {
     if (token) {
         MaterializeFlagsTokenResult();
     }
@@ -369,7 +369,7 @@ DirectLinkFlagsBypass JitTranslator::MergeNZCV(
                          cold_outline;
         if (deferred_merge) {
             if (cold_outline) {
-                EmitColdOutlinedNZCVMerge(flags_token_valid);
+                EmitOutlinedNZCVMergeResume(flags_token_valid);
             } else if (flags_token_valid) {
                 const auto scratch = context.GetSharedTmpX();
                 flags_bypass = EmitDeferredNZCVMerge(scratch, FlagsTokenResult());
