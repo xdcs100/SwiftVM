@@ -190,22 +190,28 @@ static u8 LogicalOperandScratch(const ir::Inst& inst) {
     const auto right = inst.GetArg<ir::Operand>(1);
     if (right.GetRight().Null()) {
         if (!right.GetLeft().IsImm()) {
-            return 0;
+            return NarrowHostReadScratch(right.GetLeft());
         }
         return 1;
     }
 
-    u8 need = right.GetLeft().IsImm() ? 1 : 0;
+    u8 need = right.GetLeft().IsImm()
+            ? 1
+            : NarrowHostReadScratch(right.GetLeft());
     if (right.GetRight().IsImm() &&
         (right.GetOp() == ir::OperandOp::LSL ||
          right.GetOp() == ir::OperandOp::LSR)) {
         return need;
     }
+    need += NarrowHostReadScratch(right.GetRight());
     return need + 1;
 }
 
 static ScratchNeed PreciseLogicalScratchBudget(const ir::Inst& inst) {
-    u8 need = std::max<u8>(LogicalOperandScratch(inst), 1);
+    u8 need = std::max<u8>(
+            NarrowHostReadScratch(ir::DataClass{inst.GetArg<ir::Value>(0)}) +
+                    LogicalOperandScratch(inst),
+            1);
     for (auto* pseudo : const_cast<ir::Inst&>(inst).GetPseudoOperations()) {
         if (pseudo->GetOp() == ir::OpCode::SaveFlags ||
             pseudo->GetOp() == ir::OpCode::BranchOnlyFlags) {

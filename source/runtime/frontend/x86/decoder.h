@@ -286,7 +286,8 @@ public:
                runtime::Arm64Features arm64_features = runtime::Arm64Features::None,
                bool sse_afp_nan = false,
                bool identity_addressing = false,
-               const runtime::FeatureSet& features = runtime::FeatureSet{});
+               const runtime::FeatureSet& features = runtime::FeatureSet{},
+               VAddr decode_stop = 0);
 
     void Decode();
 
@@ -1120,6 +1121,7 @@ private:
 
     VAddr start;
     VAddr pc;
+    VAddr decode_stop;
     // First byte of the instruction currently in DecodeSwitch. Handlers that
     // must inspect the raw encoding (VEX prefix fields, see DecodeVex) read
     // through this; _DInst alone does not carry them.

@@ -724,6 +724,16 @@ struct X86Instance::Impl final {
                     }
                     builder.SetCurBlock(addr);
                     ir::Assembler assembler{&builder};
+                    LocationDescriptor decode_stop{};
+                    for (auto& candidate : hir_func->GetHIRBlockList()) {
+                        const auto location = candidate.GetBlock()
+                                                      ->GetStartLocation()
+                                                      .Value();
+                        if (location > addr &&
+                            (decode_stop == 0 || location < decode_stop)) {
+                            decode_stop = location;
+                        }
+                    }
                     x86::X64Decoder decoder{
                             addr,
                             &memory_impl,
@@ -733,7 +743,8 @@ struct X86Instance::Impl final {
                             address_space->GetConfig().sse_afp_nan,
                             !address_space->GetConfig().memory_base &&
                                     !address_space->GetConfig().page_table,
-                            features};
+                            features,
+                            decode_stop};
                     PerfScope2 perf_decode_detail{GetPerfStats2().decode_total};
                     decoder.Decode();
                     ++decoded_count;

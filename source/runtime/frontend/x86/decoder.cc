@@ -253,8 +253,10 @@ X64Decoder::X64Decoder(VAddr start,
                        runtime::Arm64Features arm64_features,
                        bool sse_afp_nan,
                        bool identity_addressing,
-                       const runtime::FeatureSet& features)
-        : start(start), pc(start), assembler(visitor), memory(memory), is_64bit(is_64bit),
+                       const runtime::FeatureSet& features,
+                       VAddr decode_stop)
+        : start(start), pc(start), decode_stop(decode_stop), assembler(visitor), memory(memory),
+          is_64bit(is_64bit),
           identity_addressing_(identity_addressing), features_(features) {
     addr_mask = is_64bit ? UINT64_MAX : UINT32_MAX;
     flags_cfinv_supported_ =
@@ -297,6 +299,15 @@ public:
         verify_fast = DistormFastVerifyEnabled();
 
         while (!decoder.end_decode) {
+            if (decoder.decode_stop != 0 && decoder.pc == decoder.decode_stop) {
+                decoder.assembler->LinkBlock(
+                        ir::terminal::LinkBlock{ir::Location{decoder.pc}});
+                decoder.end_decode = true;
+                return;
+            }
+            if (decoder.decode_stop != 0 && decoder.pc > decoder.decode_stop) {
+                decoder.decode_stop = 0;
+            }
             swift::runtime::PerfDecodeScope2 perf_instruction{
                     swift::runtime::GetPerfStats2().decode_instruction_total};
             RecordDecodeAttempt();

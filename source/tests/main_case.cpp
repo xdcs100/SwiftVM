@@ -1954,6 +1954,79 @@ TEST_CASE("narrow rotate compact recognizes only the verified U16 immediate-eigh
                          [](const Inst& inst) { return inst.GetOp() == OpCode::ByteSwap; }));
 }
 
+TEST_CASE("function decoder stops at an existing block entry") {
+    using namespace swift::runtime;
+    using namespace swift::runtime::ir;
+    using namespace swift::x86;
+
+    std::array<swift::u8, 8> code{
+            0xb8, 0x01, 0x00, 0x00, 0x00,
+            0xd1, 0xc0,
+            0xf4,
+    };
+    struct MemIf final : MemoryInterface {
+        bool Read(void* dest, size_t addr, size_t size) override {
+            return std::memcpy(dest, reinterpret_cast<const void*>(addr), size);
+        }
+        bool Write(void* src, size_t addr, size_t size) override {
+            return std::memcpy(reinterpret_cast<void*>(addr), src, size);
+        }
+        void* GetPointer(void* src) override { return src; }
+    } memory;
+
+    const auto start = reinterpret_cast<VAddr>(code.data());
+    const auto boundary = start + 5;
+    HIRBuilder builder{1, true, false, FeatureSet{}};
+    auto* function = builder.AppendFunction(Location{start});
+    auto* first = function->GetCurrentBlock();
+    auto* second = function->AppendBlock(Location{boundary});
+    REQUIRE(first != second);
+
+    Assembler first_assembler{&builder};
+    X64Decoder first_decoder{start,
+                             &memory,
+                             &first_assembler,
+                             true,
+                             Arm64Features::None,
+                             false,
+                             false,
+                             FeatureSet{},
+                             boundary};
+    first_decoder.Decode();
+    REQUIRE(std::none_of(first->GetInstList().begin(),
+                         first->GetInstList().end(),
+                         [](const Inst& inst) {
+                             return inst.GetOp() == OpCode::RorImm;
+                         }));
+    REQUIRE(VisitVariant<bool>(first->GetBlock()->GetTerminal(),
+                               [boundary](const auto& value) {
+                                   using T = std::decay_t<decltype(value)>;
+                                   if constexpr (std::is_same_v<
+                                                         T,
+                                                         terminal::LinkBlock>) {
+                                       return value.next.Value() == boundary;
+                                   }
+                                   return false;
+                               }));
+
+    builder.SetCurBlock(second);
+    Assembler second_assembler{&builder};
+    X64Decoder second_decoder{boundary,
+                              &memory,
+                              &second_assembler,
+                              true,
+                              Arm64Features::None,
+                              false,
+                              false,
+                              FeatureSet{}};
+    second_decoder.Decode();
+    REQUIRE(std::count_if(second->GetInstList().begin(),
+                          second->GetInstList().end(),
+                          [](const Inst& inst) {
+                              return inst.GetOp() == OpCode::RorImm;
+                          }) == 1);
+}
+
 TEST_CASE("structured V128 address wraps inside the 4GB guest window") {
     using namespace swift::translator;
     using namespace swift::translator::x86;
