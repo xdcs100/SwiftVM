@@ -16,7 +16,8 @@ public:
     // pass deletes instructions, and in an HIRFunction every deletion has to go
     // through EraseInst so the HIRValue use lists stay consistent.
     static void Run(Block *block, HIRFunction *hir_function,
-                    const FeatureSet& features);
+                    const FeatureSet& features,
+                    Flags live_out = Flags::All);
 };
 
 }  // namespace swift::runtime::ir

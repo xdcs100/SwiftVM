@@ -66,4 +66,38 @@ TEST_CASE("branch-only flags discard dead carry normalization") {
                          }));
 }
 
+TEST_CASE("function flags liveness removes only internally dead publications") {
+    FeatureSet features{};
+    HIRBuilder builder{1, true, features};
+    auto* function = builder.AppendFunction(Location{0x9500}, Location{0x9700});
+    const auto left = function->LoadImm(Imm{1u}).SetType(ValueType::U32);
+    const auto right = function->LoadImm(Imm{2u}).SetType(ValueType::U32);
+    const auto dead_result = function->Add(left, Operand{right}).SetType(ValueType::U32);
+    function->SaveFlags(dead_result, Flags::All);
+    auto* successor = builder.LinkBlock(terminal::LinkBlock{Location{0x9600}});
+    builder.SetCurBlock(successor);
+    AddFlagsOverwrite(function);
+    function->EndFunction();
+    function->ComputeRPO();
+    function->IdByRPO();
+
+    FlagsEliminationPass::Run(function, features);
+    REQUIRE(dead_result.Def()->GetPseudoOperations(OpCode::SaveFlags).empty());
+
+    HIRBuilder external_builder{1, true, features};
+    auto* external = external_builder.AppendFunction(Location{0x9800}, Location{0x9900});
+    const auto external_left = external->LoadImm(Imm{1u}).SetType(ValueType::U32);
+    const auto external_right = external->LoadImm(Imm{2u}).SetType(ValueType::U32);
+    const auto live_result = external->Add(external_left, Operand{external_right})
+                                     .SetType(ValueType::U32);
+    external->SaveFlags(live_result, Flags::All);
+    external->EndBlock(terminal::ReturnToHost{});
+    external->EndFunction();
+    external->ComputeRPO();
+    external->IdByRPO();
+
+    FlagsEliminationPass::Run(external, features);
+    REQUIRE(live_result.Def()->GetPseudoOperations(OpCode::SaveFlags).size() == 1);
+}
+
 }  // namespace swift::runtime::ir

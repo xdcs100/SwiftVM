@@ -238,7 +238,10 @@ void JitTranslator::PrepareDeadEdgeIntegerBranch(ir::Block* block) {
                 break;
         }
     }
-    if (!plan.producer || inverts != (zero_value.Defined() ? 0u : 1u) ||
+    const bool valid_inverts = zero_value.Defined()
+            ? inverts == 0
+            : (plan.required == ir::Flags::Zero ? inverts <= 1 : inverts == 1);
+    if (!plan.producer || !valid_inverts ||
         polarity_stores > 1 ||
         plan.producer->Id() >= condition->Id()) {
         return;

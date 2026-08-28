@@ -158,6 +158,37 @@ void CollectTerminalTargets(const Terminal& terminal,
 
 using LiveMap = std::unordered_map<HIRBlock*, Flags>;
 
+Flags ComputeBlockLiveOut(HIRBlock* hir_block, const LiveMap& live_in) {
+    auto* block = hir_block->GetBlock();
+    if (block->GetInstList().empty() || !block->HasTerminal()) {
+        return Flags::All;
+    }
+
+    std::vector<Location> targets;
+    bool unknown = false;
+    CollectTerminalTargets(block->GetTerminal(), targets, unknown);
+    Flags live_out = unknown ? Flags::All : Flags::None;
+    for (const auto& target : targets) {
+        HIRBlock* successor = nullptr;
+        for (auto* candidate : hir_block->GetSuccessors()) {
+            if (candidate &&
+                candidate->GetBlock()->GetStartLocation() == target) {
+                successor = candidate;
+                break;
+            }
+        }
+        const auto live = successor ? live_in.find(successor) : live_in.end();
+        if (!successor || live == live_in.end() ||
+            successor->GetBlock()->GetInstList().empty() ||
+            !successor->GetBlock()->HasTerminal()) {
+            live_out |= Flags::All;
+        } else {
+            live_out |= live->second;
+        }
+    }
+    return live_out;
+}
+
 LiveMap ComputeFunctionLiveIn(HIRFunction* function) {
     LiveMap live_in;
     for (auto* hir_block : function->GetHIRBlocks()) {
@@ -173,35 +204,8 @@ LiveMap ComputeFunctionLiveIn(HIRFunction* function) {
         for (auto it = rpo.rbegin(); it != rpo.rend(); ++it) {
             auto* hir_block = &*it;
             auto* block = hir_block->GetBlock();
-            if (block->GetInstList().empty() || !block->HasTerminal()) {
-                if (live_in[hir_block] != Flags::All) {
-                    live_in[hir_block] = Flags::All;
-                    changed = true;
-                }
-                continue;
-            }
-
-            std::vector<Location> targets;
-            bool unknown = false;
-            CollectTerminalTargets(block->GetTerminal(), targets, unknown);
-            Flags live_out = unknown ? Flags::All : Flags::None;
-            for (const auto& target : targets) {
-                HIRBlock* successor = nullptr;
-                for (auto* candidate : hir_block->GetSuccessors()) {
-                    if (candidate &&
-                        candidate->GetBlock()->GetStartLocation() == target) {
-                        successor = candidate;
-                        break;
-                    }
-                }
-                if (!successor || successor->GetBlock()->GetInstList().empty() ||
-                    !successor->GetBlock()->HasTerminal()) {
-                    live_out |= Flags::All;
-                    continue;
-                }
-                live_out |= live_in[successor];
-            }
-            const Flags next = TransferFlagsLiveness(block, live_out);
+            const Flags next = TransferFlagsLiveness(
+                    block, ComputeBlockLiveOut(hir_block, live_in));
             if (next != live_in[hir_block]) {
                 live_in[hir_block] = next;
                 changed = true;
@@ -630,7 +634,8 @@ bool TryBranchOnly(Block* block,
 }  // namespace
 
 void FlagsEliminationPass::Run(Block* block, HIRFunction* hir_function,
-                               const FeatureSet& features) {
+                               const FeatureSet& features,
+                               Flags live_out) {
     auto& inst_list = block->GetInstList();
 
     if (BranchOnlyEnabled(features) && !hir_function) {
@@ -677,7 +682,7 @@ void FlagsEliminationPass::Run(Block* block, HIRFunction* hir_function,
     // cross-block-conservative handling exactly.
     const bool carry_elim_off = !features.flag_carry_elim;
 
-    Flags needed = Flags::All;  // live-out: flags persist across blocks
+    Flags needed = live_out;
     // Needed-set snapshots at bound labels, keyed by the Goto/NotGoto inst
     // whose value the label binds (in-block branches are forward-only in the
     // current frontends; an unseen target falls back to needing everything).
@@ -945,8 +950,8 @@ void FlagsEliminationPass::Run(HIRBuilder* hir_builder, const FeatureSet& featur
 
 void FlagsEliminationPass::Run(HIRFunction* hir_function,
                                const FeatureSet& features) {
+    auto live_in = ComputeFunctionLiveIn(hir_function);
     if (BranchOnlyEnabled(features)) {
-        const auto live_in = ComputeFunctionLiveIn(hir_function);
         BranchOnlyStats stats;
         for (auto& hir_block : hir_function->GetHIRBlocksRPO()) {
             auto* block = hir_block.GetBlock();
@@ -961,8 +966,11 @@ void FlagsEliminationPass::Run(HIRFunction* hir_function,
                        stats.reject_live, stats.reject_shape);
         }
     }
+    live_in = ComputeFunctionLiveIn(hir_function);
     for (auto& hir_block : hir_function->GetHIRBlocksRPO()) {
-        Run(hir_block.GetBlock(), hir_function, features);
+        const auto live_out = ComputeBlockLiveOut(&hir_block, live_in);
+        Run(hir_block.GetBlock(), hir_function, features,
+            live_out == Flags::None ? Flags::None : Flags::All);
     }
 }
 
