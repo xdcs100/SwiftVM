@@ -2597,6 +2597,22 @@ peepholes.
   CoreMark retains `crcfinal=0x382f`. No stress run, probe, diagnostic path or environment switch
   remains.
 
+- `4655448` feeds the function CFG's existing fixed-point flags liveness into the destructive flags
+  pass when every internal successor has `Flags::None` live-in. Any partial demand, unresolved edge,
+  empty successor or host/dispatcher exit keeps the conservative `Flags::All` live-out. This removes
+  complete publications that are overwritten before an internal observer without reviving the
+  rejected partial-NZCV experiment. ZF-only dead-edge subtraction also accepts a carry inversion
+  already removed by the pass; CF-reading conditions still require exactly one inversion. Exact
+  SQLite `main/10` keeps all 2,087 roots and versions, moves `296,954 -> 292,116` host instructions
+  (`-4,838`, `-1.629209%`), and has 633 shrinking roots with no growth. Three interleaved short pairs
+  move wall median `1.047209 -> 1.029851s`; timing-normalized output is identical. Bounded smallpt
+  keeps all 262 roots and moves `42,800 -> 42,204` (`-596`, `-1.392523%`) with PPM SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. Mac and Orb pass the
+  function-liveness, dead-edge, SSE4.2 and direct-link/SMC focuses; fixed-seed 424242 setcc/cmov/jcc
+  retains the baseline's exact 422 established mismatches with zero candidate-only mismatch.
+  CoreMark retains `crcfinal=0x382f`. No stress run, probe, diagnostic path or environment switch
+  remains.
+
 ## Orb loop
 
 ```
