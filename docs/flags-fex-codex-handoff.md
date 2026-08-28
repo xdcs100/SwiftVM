@@ -2948,6 +2948,22 @@ peepholes.
   the baseline's exact 100 mismatch keys with zero candidate-only case. No stress run, probe,
   diagnostic path or environment switch remains.
 
+- `4d8e1f0` moves paired integer-helper preservation out of every Div128 and CPUID call site into
+  one AddressSpace trampoline. The site records its three inputs, helper target, x11/x16/LR and two
+  outputs in a fixed 64-byte frame; the shared trampoline preserves caller-saved GPRs once and calls
+  the existing exact helper. Compilers without the general-register-only contract also preserve
+  SIMD state in that shared code. A strict paired SQLite capture keeps all 2,166 roots and moves
+  `283,508 -> 282,881` (`-627`, `-0.221158%`) with no growth. The three largest CPUID roots lose
+  117, 63 and 46 instructions; `pagerFlushOnCommit` and `sqlite3BtreeSetSpillSize` each lose 21.
+  Bounded smallpt keeps all 263 roots, moves `40,070 -> 39,746` (`-324`, `-0.808585%`) and retains
+  PPM SHA-256 `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`.
+  CoreMark keeps all 294 roots, moves `40,131 -> 39,819` (`-312`, `-0.777454%`) and retains
+  `crcfinal=0x382f`. Timing-normalized SQLite output is byte-identical; three interleaved short
+  pairs keep wall median `1.025 -> 1.025s` and move internal median `0.772 -> 0.771s`. Mac and Orb
+  fixed seeds 101/424242 pass 100 DIV/IDIV iterations, CPUID passes 29 assertions, and Orb pin
+  levels 0-3 each pass a 30-iteration DIV/IDIV check. No stress run, probe, diagnostic path or
+  environment switch remains.
+
 ## Orb loop
 
 ```
