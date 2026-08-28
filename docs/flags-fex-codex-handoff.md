@@ -2488,6 +2488,21 @@ peepholes.
   ordering contract than the link-site metadata alone proves. Do not retry this as a simple store
   relocation without first representing that ordering in the continuation ABI.
 
+- Function-region decoding now stops before the nearest HIR block entry already discovered by the
+  worklist and links to that block instead of decoding its sequential suffix a second time. The stop
+  is ignored when it falls inside the current x86 instruction, preserving legal overlapping entry
+  streams. This closes the dominant duplication seen at SQLite guest `0x423620`: the guest and FEX
+  each contain 32 rotates, while the old SwiftVM HIR contained 64. A contemporaneous SQLite
+  `main/10` static-only A/B matches 2,119 PCs, all top 20 roots, 99.756435% host coverage and moves
+  common host instructions `333,389 -> 317,838` (`-15,551`, `-4.664521%`). The final bounded run
+  retains the same candidate common total and timing-normalized output is byte-identical. The
+  smallpt `4 8 6` common set moves `45,968 -> 43,816` (`-2,152`, `-4.681518%`); its final shape is
+  identical to the initial candidate capture and the PPM SHA-256 remains
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. CoreMark retains final CRC
+  `0x382f`. The newly exposed narrow `Xor` block also corrected logical-op scratch accounting for
+  pinned U8/U16 inputs. Mac and Orb pass the focused decoder/function tests, non-stress direct-link
+  group and continuation group. No stress run, probe, diagnostic path or environment switch remains.
+
 ## Orb loop
 
 ```
