@@ -30,6 +30,8 @@ struct RegionLinkTrampolineCode {
     u32 return_offset{};
 };
 
+constexpr u32 kFlagsMergeOffsetFromPending = 4 * sizeof(u32);
+
 [[nodiscard]] RegionLinkTrampolineCode BuildRegionLinkTrampoline(
         const Config& config,
         RegionLinkContext* context,

@@ -1119,10 +1119,14 @@ u8* JitContext::Flush(const CodeBuffer& code_cache) {
                 static_cast<u8*>(cache->GetRegionTrampoline());
         auto* pending_flags_trampoline =
                 static_cast<u8*>(cache->GetPendingFlagsRegionTrampoline());
+        auto* flags_merge_trampoline =
+                static_cast<u8*>(cache->GetFlagsMergeRegionTrampoline());
         ASSERT(canonical_trampoline &&
                region.ContainsRx(canonical_trampoline));
         ASSERT(pending_flags_trampoline &&
                region.ContainsRx(pending_flags_trampoline));
+        ASSERT(flags_merge_trampoline &&
+               region.ContainsRx(flags_merge_trampoline));
         const LinkSourceOwner owner{module.get(), code_cache.exec_data};
         auto* emitted = masm.GetBuffer()->GetStartAddress<u8*>();
         for (auto& pending : pending_direct_link_sites) {
@@ -1136,6 +1140,20 @@ u8* JitContext::Flush(const CodeBuffer& code_cache) {
             std::memcpy(emitted + pending.code_offset, &*branch, sizeof(*branch));
             LinkFlagsBypassPatch flags_bypass_patch{};
             if (pending.flags_bypass.Valid()) {
+                if (pending.flags_bypass.merge_branch_offset != UINT32_MAX) {
+                    ASSERT(static_cast<size_t>(
+                                   pending.flags_bypass.merge_branch_offset) +
+                                   sizeof(u32) <= code_cache.size);
+                    auto* rx_merge_branch = code_cache.exec_data +
+                            pending.flags_bypass.merge_branch_offset;
+                    const auto merge_branch = EncodeB(
+                            flags_merge_trampoline - rx_merge_branch);
+                    ASSERT(merge_branch);
+                    std::memcpy(emitted +
+                                        pending.flags_bypass.merge_branch_offset,
+                                &*merge_branch,
+                                sizeof(*merge_branch));
+                }
                 if (pending.flags_bypass.linked_instruction) {
                     std::memcpy(&pending.flags_bypass_instruction,
                                 emitted + pending.flags_bypass.code_offset,

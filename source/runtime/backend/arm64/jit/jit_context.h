@@ -30,6 +30,7 @@ struct DirectLinkFlagsBypass {
     u32 code_offset{UINT32_MAX};
     u32 resume_offset{UINT32_MAX};
     u32 linked_instruction{};
+    u32 merge_branch_offset{UINT32_MAX};
 
     [[nodiscard]] bool Valid() const {
         return code_offset != UINT32_MAX && resume_offset != UINT32_MAX;

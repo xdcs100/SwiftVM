@@ -19,6 +19,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include "runtime/common/svm_config.h"
 #include "runtime/backend/address_space.h"
+#include "runtime/backend/arm64/region_link_trampoline.h"
 #include "runtime/backend/context.h"
 #include "runtime/backend/link_manager.h"
 #include "runtime/backend/runtime.h"
@@ -191,7 +192,7 @@ void* TranslatePendingFlagsSource(const std::shared_ptr<Module>& module,
             Uniform{8, ValueType::U8}).SetType(ValueType::U8);
     const auto one = function->LoadImm(Imm{u8{1}}).SetType(ValueType::U8);
     const auto result = function->Sub(selector, Operand{one}).SetType(ValueType::U8);
-    function->SaveFlags(result, Flags::All);
+    function->SaveFlags(result, Flags::NZCV);
     function->AdvancePC(Imm{u64{1}});
     const auto condition = function->LocalCondSet(Cond::EQ).SetType(ValueType::U8);
     function->EndBlock(terminal::If{
@@ -1115,7 +1116,13 @@ TEST_CASE("production direct links bypass a shared full flags merge",
         auto* bypass =
                 region->rx_base + then_site->record.flags_bypass_offset;
         REQUIRE(DecodeBranchTarget(bypass, LoadInsn(bypass)) ==
-                reinterpret_cast<uintptr_t>(bypass + 3 * sizeof(u32)));
+                reinterpret_cast<uintptr_t>(bypass + 2 * sizeof(u32)));
+        auto* flags_merge_trampoline =
+                region->rx_base + region->pending_flags_trampoline_offset +
+                arm64::kFlagsMergeOffsetFromPending;
+        REQUIRE(DecodeBranchTarget(bypass + sizeof(u32),
+                                   LoadInsn(bypass + sizeof(u32))) ==
+                reinterpret_cast<uintptr_t>(flags_merge_trampoline));
 
         Runtime runtime{&space};
         SetSelector(runtime, 1);
@@ -1129,7 +1136,7 @@ TEST_CASE("production direct links bypass a shared full flags merge",
                 reinterpret_cast<uintptr_t>(
                         then_target->pending_flags_host_pc));
         REQUIRE(DecodeBranchTarget(bypass, LoadInsn(bypass)) ==
-                reinterpret_cast<uintptr_t>(bypass + 3 * sizeof(u32)));
+                reinterpret_cast<uintptr_t>(bypass + 2 * sizeof(u32)));
 
         SetSelector(runtime, 0);
         runtime.SetLocation(source_guest);
@@ -1140,11 +1147,11 @@ TEST_CASE("production direct links bypass a shared full flags merge",
                 reinterpret_cast<uintptr_t>(
                         else_target->pending_flags_host_pc));
         REQUIRE(DecodeBranchTarget(bypass, LoadInsn(bypass)) ==
-                reinterpret_cast<uintptr_t>(bypass + 3 * sizeof(u32)));
+                reinterpret_cast<uintptr_t>(bypass + 2 * sizeof(u32)));
 
         space.InvalidateCodeRange(then_guest, then_guest + 1);
         REQUIRE(DecodeBranchTarget(bypass, LoadInsn(bypass)) ==
-                reinterpret_cast<uintptr_t>(bypass + 3 * sizeof(u32)));
+                reinterpret_cast<uintptr_t>(bypass + 2 * sizeof(u32)));
         REQUIRE(DecodeBranchTarget(then_site->rx, LoadInsn(then_site->rx)) ==
                 reinterpret_cast<uintptr_t>(pending_trampoline));
 
@@ -1162,6 +1169,9 @@ TEST_CASE("production direct links bypass a shared full flags merge",
         REQUIRE(space.GetLinkManager().QuerySite(then_site->key)->state ==
                 LinkSiteState::Linked);
         REQUIRE(LoadInsn(bypass) == then_site->record.flags_bypass_instruction);
+        REQUIRE(DecodeBranchTarget(bypass + sizeof(u32),
+                                   LoadInsn(bypass + sizeof(u32))) ==
+                reinterpret_cast<uintptr_t>(flags_merge_trampoline));
         REQUIRE(DecodeBranchTarget(then_site->rx, LoadInsn(then_site->rx)) ==
                 reinterpret_cast<uintptr_t>(then_code));
     }

@@ -542,10 +542,11 @@ private:
     void MergeNZCV();
     DirectLinkFlagsBypass MergeNZCV(FlagsRegsAuditMergeCause cause,
                                     FlagsRegsAuditEdgeKind edge,
-                                    bool compact_static_forward = false);
+                                    bool outline_direct_link = false);
     DirectLinkFlagsBypass EmitDeferredNZCVMerge(
             const XRegister& scratch,
             const XRegister& token);
+    DirectLinkFlagsBypass EmitOutlinedNZCVMerge();
     void EmitDeferredNZCVMergeStubs();
     [[nodiscard]] std::optional<u64>
     PendingNZCVMergeMask(FlagsRegsAuditMergeCause cause) const;

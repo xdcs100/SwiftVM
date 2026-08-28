@@ -155,6 +155,7 @@ struct SerialLinkSite {
     u32 flags_bypass_resume_offset{UINT32_MAX};
     u32 flags_bypass_instruction{};
     u32 flags_bypass_linked_instruction{};
+    u32 flags_merge_branch_offset{UINT32_MAX};
 
     [[nodiscard]] bool HasFlagsBypass() const {
         return flags_bypass_offset != UINT32_MAX;
@@ -164,12 +165,24 @@ struct SerialLinkSite {
         if (!HasFlagsBypass()) {
             return flags_bypass_resume_offset == UINT32_MAX &&
                    flags_bypass_instruction == 0 &&
-                   flags_bypass_linked_instruction == 0;
+                   flags_bypass_linked_instruction == 0 &&
+                   flags_merge_branch_offset == UINT32_MAX;
         }
         const auto begin = static_cast<std::size_t>(flags_bypass_offset);
         const auto resume = static_cast<std::size_t>(flags_bypass_resume_offset);
         constexpr u32 kSourceRegisterMask = 0x3E0u;
         constexpr u32 kParityPublishOpcode = 0xB340'1C1Au;
+        if (flags_merge_branch_offset != UINT32_MAX) {
+            const auto merge_branch =
+                    static_cast<std::size_t>(flags_merge_branch_offset);
+            return flags_bypass_linked_instruction == 0 &&
+                   (flags_bypass_instruction & 0x9F00'0000u) == 0x1000'0000u &&
+                   (flags_merge_branch_offset & 3u) == 0 &&
+                   flags_merge_branch_offset == flags_bypass_offset + sizeof(u32) &&
+                   flags_bypass_resume_offset == flags_merge_branch_offset + sizeof(u32) &&
+                   merge_branch + sizeof(u32) <= code_size &&
+                   flags_bypass_resume_offset <= code_offset;
+        }
         if (flags_bypass_linked_instruction &&
             (flags_bypass_linked_instruction & ~kSourceRegisterMask) !=
                     kParityPublishOpcode) {
@@ -270,7 +283,7 @@ struct ValidityKey {
     bool operator==(const ValidityKey&) const = default;
 };
 
-constexpr u64 kCacheFormatVersion = 13;
+constexpr u64 kCacheFormatVersion = 14;
 
 u64 HashBytes(const void* data, std::size_t size, u64 seed);
 u64 HashU64(u64 value, u64 seed);

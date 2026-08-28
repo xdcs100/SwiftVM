@@ -88,12 +88,15 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
                 EmitRegionEdge(term.next);
                 return;
             }
+            const bool flags_bypassable = !flags_token_valid &&
+                                          context.CanEmitDirectLink(term.next);
             const auto local_flags_bypass = MergeNZCV(
                     flags_audit_block_edge ==
                                     FlagsRegsAuditEdgeKind::Dispatcher
                             ? FlagsRegsAuditMergeCause::TerminalDispatcher
                             : FlagsRegsAuditMergeCause::TerminalInternal,
-                    flags_audit_block_edge);
+                    flags_audit_block_edge,
+                    flags_bypassable);
             context.RecordExecCounter(exec_offset_exit_direct);
             auto* exit = IsSelfEdge(term.next) && backedge_exit_label
                     ? backedge_exit_label.get()
@@ -120,12 +123,15 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
                 EmitRegionEdge(term.next);
                 return;
             }
+            const bool flags_bypassable = !flags_token_valid &&
+                                          context.CanEmitDirectLink(term.next);
             const auto local_flags_bypass = MergeNZCV(
                     flags_audit_block_edge ==
                                     FlagsRegsAuditEdgeKind::Dispatcher
                             ? FlagsRegsAuditMergeCause::TerminalDispatcher
                             : FlagsRegsAuditMergeCause::TerminalInternal,
-                    flags_audit_block_edge);
+                    flags_audit_block_edge,
+                    flags_bypassable);
             context.RecordExecCounter(exec_offset_exit_direct);
             auto* exit = IsSelfEdge(term.next) && backedge_exit_label
                     ? backedge_exit_label.get()
@@ -191,12 +197,15 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
             // One commit for both arms. MergeNZCV does not clobber host NZCV,
             // so a local b.cond can still read the cmp. Publishing per arm
             // doubled the AdvancePC merge we just removed.
+            const bool flags_bypassable =
+                    CanBypassTerminalFlagsMerge(term.then_) &&
+                    CanBypassTerminalFlagsMerge(term.else_);
             const auto local_flags_bypass = MergeNZCV(
                     FlagsRegsAuditMergeCause::TerminalDispatcher,
-                    flags_audit_block_edge);
+                    flags_audit_block_edge,
+                    flags_bypassable && !flags_token_valid);
             const auto branch_flags_bypass =
-                    CanBypassTerminalFlagsMerge(term.then_) &&
-                                    CanBypassTerminalFlagsMerge(term.else_)
+                    flags_bypassable
                             ? (local_flags_bypass.Valid() ? local_flags_bypass
                                                          : flags_bypass)
                             : DirectLinkFlagsBypass{};
@@ -227,11 +236,14 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
             }
             DirectLinkFlagsBypass branch_flags_bypass{};
             if (save_in_nzcv && nzcv_dirty) {
+                const bool flags_bypassable =
+                        CanBypassTerminalFlagsMerge(term.then_) &&
+                        CanBypassTerminalFlagsMerge(term.else_);
                 const auto local_flags_bypass = MergeNZCV(
                         FlagsRegsAuditMergeCause::TerminalDispatcher,
-                        flags_audit_block_edge);
-                if (CanBypassTerminalFlagsMerge(term.then_) &&
-                    CanBypassTerminalFlagsMerge(term.else_)) {
+                        flags_audit_block_edge,
+                        flags_bypassable && !flags_token_valid);
+                if (flags_bypassable) {
                     branch_flags_bypass = local_flags_bypass;
                 }
             } else {

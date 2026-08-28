@@ -36,7 +36,7 @@ using namespace swift::runtime::ir;
 constexpr const char* kPhaseEnv = "DIRECT_LINK_CACHE_PHASE";
 constexpr const char* kDirEnv = "DIRECT_LINK_CACHE_DIR";
 constexpr const char* kRoundTripTest =
-        "disk cache v13 round trips direct-link sites across processes";
+        "disk cache v14 round trips direct-link sites across processes";
 
 IntrusivePtr<Block> BuildTarget(VAddr guest, u64 fingerprint) {
     IntrusivePtr<Block> block{new Block(0, Location{guest})};
@@ -424,26 +424,34 @@ TEST_CASE("disk cache scanner keeps move-wide constants and rejects PC-relative 
     }
 }
 
-TEST_CASE("disk cache v13 serializes link and fault-site records",
+TEST_CASE("disk cache v14 serializes link and fault-site records",
           "[direct-link][jit-cache][serializer]") {
     SerialUnit input{};
     input.guest_start = 0x1000;
     input.feature_hash = 0x123456789abcdef0ull;
-    input.code.resize(64, 0);
+    input.code.resize(80, 0);
     input.blocks.push_back({0x1000, 0x1004, 0, 0x1234, 16, 20});
     constexpr u32 kColdMerge = 0x94000004;
     constexpr u32 kLinkedPublish = 0xb3401c1a;
+    constexpr u32 kMergeResumeAdr = 0x10000051;
+    constexpr u32 kUnresolvedBranch = 0x14000000;
     std::memcpy(input.code.data() + 24, &kColdMerge, sizeof(kColdMerge));
+    std::memcpy(input.code.data() + 56, &kMergeResumeAdr,
+                sizeof(kMergeResumeAdr));
+    std::memcpy(input.code.data() + 60, &kUnresolvedBranch,
+                sizeof(kUnresolvedBranch));
     input.link_sites = {
             {40, 0x2000, static_cast<u8>(LinkSiteKind::ConditionalThen),
              24, 28, kColdMerge, kLinkedPublish},
             {44, 0x3000, static_cast<u8>(LinkSiteKind::ConditionalElse),
              24, 28, kColdMerge, kLinkedPublish},
             {52, 0x4000, static_cast<u8>(LinkSiteKind::SwitchArm)},
+            {68, 0x5000, static_cast<u8>(LinkSiteKind::Unconditional),
+             56, 64, kMergeResumeAdr, 0, 60},
     };
     input.fault_sites = {
-            {0x1000, 4, 8, 56, 1},
-            {0x1000, 8, 12, 60, 2},
+            {0x1000, 4, 8, 72, 1},
+            {0x1000, 8, 12, 76, 2},
     };
     BlobWriter writer;
     WriteUnit(writer, input);
@@ -470,17 +478,19 @@ TEST_CASE("disk cache v13 serializes link and fault-site records",
                 input.link_sites[i].flags_bypass_instruction);
         REQUIRE(output.link_sites[i].flags_bypass_linked_instruction ==
                 input.link_sites[i].flags_bypass_linked_instruction);
+        REQUIRE(output.link_sites[i].flags_merge_branch_offset ==
+                input.link_sites[i].flags_merge_branch_offset);
     }
     REQUIRE(output.fault_sites.size() == 2);
     REQUIRE(output.fault_sites[0].guest_start == 0x1000);
     REQUIRE(output.fault_sites[0].host_begin == 4);
     REQUIRE(output.fault_sites[0].host_end == 8);
-    REQUIRE(output.fault_sites[0].recovery_offset == 56);
+    REQUIRE(output.fault_sites[0].recovery_offset == 72);
     REQUIRE(output.fault_sites[0].recovery_kind == 1);
     REQUIRE(output.fault_sites[1].guest_start == 0x1000);
     REQUIRE(output.fault_sites[1].host_begin == 8);
     REQUIRE(output.fault_sites[1].host_end == 12);
-    REQUIRE(output.fault_sites[1].recovery_offset == 60);
+    REQUIRE(output.fault_sites[1].recovery_offset == 76);
     REQUIRE(output.fault_sites[1].recovery_kind == 2);
 }
 

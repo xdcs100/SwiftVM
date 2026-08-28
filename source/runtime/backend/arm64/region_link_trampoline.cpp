@@ -147,6 +147,12 @@ RegionLinkTrampolineCode BuildRegionLinkTrampoline(
     masm.And(x26, x26, ~u64{0xf0000000});
     masm.Orr(x26, x26, x16);
     masm.B(&canonical_entry);
+    ASSERT(masm.GetBuffer()->GetSizeInBytes() ==
+           pending_flags_offset + kFlagsMergeOffsetFromPending);
+    masm.Mrs(x16, NZCV);
+    masm.And(x26, x26, ~u64{0xf0000000});
+    masm.Orr(x26, x26, x16);
+    masm.Br(x17);
     masm.Bind(&canonical_entry);
     const u32 canonical_offset =
             static_cast<u32>(masm.GetBuffer()->GetSizeInBytes());

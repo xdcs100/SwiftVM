@@ -288,6 +288,16 @@ DirectLinkFlagsBypass JitTranslator::EmitDeferredNZCVMerge(
     return {begin, context.CurrentBufferSize(), linked_instruction};
 }
 
+DirectLinkFlagsBypass JitTranslator::EmitOutlinedNZCVMerge() {
+    Label resume;
+    const u32 begin = context.CurrentBufferSize();
+    __ Adr(ip1, &resume);
+    const u32 merge_branch = context.CurrentBufferSize();
+    __ dc32(*EncodeB(0));
+    __ Bind(&resume);
+    return {begin, context.CurrentBufferSize(), 0, merge_branch};
+}
+
 void JitTranslator::EmitDeferredNZCVMergeStubs() {
     if (deferred_nzcv_merge_stubs.empty()) {
         return;
@@ -328,7 +338,7 @@ bool JitTranslator::CanDeferFullNZCVMerge(
 DirectLinkFlagsBypass JitTranslator::MergeNZCV(
         FlagsRegsAuditMergeCause cause,
         FlagsRegsAuditEdgeKind edge,
-        bool compact_static_forward) {
+        bool outline_direct_link) {
     DirectLinkFlagsBypass flags_bypass{};
     bool deferred_merge{};
     const auto requested = PendingNZCVMergeMask(cause);
@@ -339,12 +349,15 @@ DirectLinkFlagsBypass JitTranslator::MergeNZCV(
         // their existing value in the flags register, so a ClearFlags(CF)
         // between two flag-setting instructions is not overwritten.
         const u64 req = *requested;
-        deferred_merge = compact_static_forward && flags_token_keep &&
-                flags_token_valid &&
+        deferred_merge = outline_direct_link && flags_token_keep &&
                 req == static_cast<u64>(HostFlags::NZCV);
         if (deferred_merge) {
-            const auto scratch = context.GetSharedTmpX();
-            flags_bypass = EmitDeferredNZCVMerge(scratch, FlagsTokenResult());
+            if (flags_token_valid) {
+                const auto scratch = context.GetSharedTmpX();
+                flags_bypass = EmitDeferredNZCVMerge(scratch, FlagsTokenResult());
+            } else {
+                flags_bypass = EmitOutlinedNZCVMerge();
+            }
         } else {
             EmitNZCVMerge(req, context.GetSharedTmpX());
         }

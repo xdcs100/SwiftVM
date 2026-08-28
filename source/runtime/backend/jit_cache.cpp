@@ -15,6 +15,7 @@
 #include <unistd.h>
 
 #include "runtime/backend/address_space.h"
+#include "runtime/backend/arm64/region_link_trampoline.h"
 #include "runtime/common/backedge_control.h"
 #include "runtime/backend/module.h"
 #include "runtime/common/hot_coalesce_prof.h"
@@ -256,6 +257,8 @@ void JitDiskCache::RecordUnit(const std::shared_ptr<Module>& module,
                 return;
             }
             const bool has_flags_bypass = site.HasFlagsBypass();
+            const bool has_flags_outline =
+                    site.flags_merge_branch_offset != UINT32_MAX;
             if (!site.ValidFlagsBypass(code_size) ||
                 (has_flags_bypass &&
                  region->pending_flags_trampoline_offset ==
@@ -284,6 +287,17 @@ void JitDiskCache::RecordUnit(const std::shared_ptr<Module>& module,
                 if (!inserted && it->second != site.flags_bypass_instruction) {
                     stats.reject_scan.fetch_add(1, std::memory_order_relaxed);
                     return;
+                }
+                if (has_flags_outline) {
+                    const auto [branch_it, branch_inserted] =
+                            normalized_words.emplace(
+                                    site.flags_merge_branch_offset,
+                                    0x1400'0000u);
+                    if (!branch_inserted &&
+                        branch_it->second != 0x1400'0000u) {
+                        stats.reject_scan.fetch_add(1, std::memory_order_relaxed);
+                        return;
+                    }
                 }
             }
             previous_offset = site.code_offset;
@@ -448,6 +462,16 @@ bool JitDiskCache::ReviveUnit(const std::shared_ptr<Module>& module, const Seria
                 dirty = true;
                 return false;
             }
+            if (site.flags_merge_branch_offset != UINT32_MAX) {
+                std::memcpy(&instruction,
+                            unit.code.data() + site.flags_merge_branch_offset,
+                            sizeof(instruction));
+                if (instruction != 0x1400'0000u) {
+                    stats.reject_reloc.fetch_add(1, std::memory_order_relaxed);
+                    dirty = true;
+                    return false;
+                }
+            }
         }
     }
     for (const auto& site : unit.fault_sites) {
@@ -527,6 +551,36 @@ bool JitDiskCache::ReviveUnit(const std::shared_ptr<Module>& module, const Seria
             }
             std::memcpy(buffer.rw_data + site.code_offset, &*branch, sizeof(*branch));
             if (has_flags_bypass) {
+                if (site.flags_merge_branch_offset != UINT32_MAX) {
+                    if (direct_region->pending_flags_trampoline_offset ==
+                        CodeRegion::kInvalidTrampolineOffset) {
+                        if (auto* cache = module->GetCodeCache(buffer.exec_data)) {
+                            cache->FreeCode(buffer.exec_data);
+                        }
+                        stats.reject_reloc.fetch_add(1, std::memory_order_relaxed);
+                        dirty = true;
+                        return false;
+                    }
+                    auto* merge_site = buffer.exec_data +
+                            site.flags_merge_branch_offset;
+                    auto* merge_trampoline = direct_region->rx_base +
+                            direct_region->pending_flags_trampoline_offset +
+                            arm64::kFlagsMergeOffsetFromPending;
+                    const auto merge_branch = EncodeB(
+                            merge_trampoline - merge_site);
+                    if (!merge_branch) {
+                        if (auto* cache = module->GetCodeCache(buffer.exec_data)) {
+                            cache->FreeCode(buffer.exec_data);
+                        }
+                        stats.reject_reloc.fetch_add(1, std::memory_order_relaxed);
+                        dirty = true;
+                        return false;
+                    }
+                    std::memcpy(buffer.rw_data +
+                                        site.flags_merge_branch_offset,
+                                &*merge_branch,
+                                sizeof(*merge_branch));
+                }
                 u32 linked_instruction = site.flags_bypass_linked_instruction;
                 if (!linked_instruction) {
                     const auto linked_branch = EncodeB(

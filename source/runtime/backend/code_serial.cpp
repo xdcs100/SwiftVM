@@ -590,6 +590,7 @@ void WriteUnit(BlobWriter& w, const SerialUnit& unit) {
         w.U32(site.flags_bypass_resume_offset);
         w.U32(site.flags_bypass_instruction);
         w.U32(site.flags_bypass_linked_instruction);
+        w.U32(site.flags_merge_branch_offset);
     }
     w.U32(static_cast<u32>(unit.fault_sites.size()));
     for (const auto& site : unit.fault_sites) {
@@ -651,7 +652,7 @@ bool ReadUnit(BlobReader& r, SerialUnit& unit) {
         rel.kind = static_cast<RelocKind>(kind);
         rel.use = static_cast<RelocUse>(use);
     }
-    if (!r.U32(count) || count > r.Remaining() / 29) {
+    if (!r.U32(count) || count > r.Remaining() / 33) {
         return false;
     }
     unit.link_sites.resize(count);
@@ -662,7 +663,8 @@ bool ReadUnit(BlobReader& r, SerialUnit& unit) {
             !r.U8(site.kind) || !r.U32(site.flags_bypass_offset) ||
             !r.U32(site.flags_bypass_resume_offset) ||
             !r.U32(site.flags_bypass_instruction) ||
-            !r.U32(site.flags_bypass_linked_instruction)) {
+            !r.U32(site.flags_bypass_linked_instruction) ||
+            !r.U32(site.flags_merge_branch_offset)) {
             return false;
         }
         if ((site.code_offset & 3u) != 0 ||
@@ -680,6 +682,14 @@ bool ReadUnit(BlobReader& r, SerialUnit& unit) {
                         sizeof(instruction));
             if (instruction != site.flags_bypass_instruction) {
                 return false;
+            }
+            if (site.flags_merge_branch_offset != UINT32_MAX) {
+                std::memcpy(&instruction,
+                            unit.code.data() + site.flags_merge_branch_offset,
+                            sizeof(instruction));
+                if (instruction != 0x1400'0000u) {
+                    return false;
+                }
             }
         }
         previous_offset = site.code_offset;
