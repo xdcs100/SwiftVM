@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Product code tip: **`4d8e1f0`** `perf: share paired helper call preservation`
+- Product code tip: **`218383a`** `perf: combine cycle flags and reason trampolines`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -2964,8 +2964,24 @@ peepholes.
   levels 0-3 each pass a 30-iteration DIV/IDIV check. No stress run, probe, diagnostic path or
   environment switch remains.
 
-- The post-`4d8e1f0` FEX refresh leaves the largest positive SQLite root gaps at `freeSpace`
-  `440/309`, `_IO_new_file_xsputn` `474/383`, `powerOfTen` `242/153`, `__strcspn_sse42`
+- `218383a` combines cold cycle-exit flags publication with the shared halt-reason path. A full-NZCV
+  exit previously branched through an outlined merge, resumed locally and then branched again to
+  the reason tail. New region-trampoline entries preserve AF, optionally insert the parity token
+  and continue directly into CodeMiss/Signal selection, leaving one branch at each eligible stub.
+  A strict paired SQLite capture keeps all 2,167 roots and moves `282,889 -> 281,959` (`-930`,
+  `-0.328751%`) with no growth. Bounded smallpt keeps all 263 roots, moves `39,746 -> 39,656`
+  (`-90`, `-0.226438%`) and retains PPM SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. CoreMark keeps all
+  294 roots, moves `39,819 -> 39,705` (`-114`, `-0.286295%`) and retains `crcfinal=0x382f`.
+  Timing-normalized SQLite output is byte-identical; six short interleaved/reverse-order pairs move
+  wall median `1.051 -> 1.043s` and internal median `0.787 -> 0.779s`, used only as a consistency
+  check. Mac and Orb pass 49 cycle assertions and 93 direct-link/flags assertions each. A separate
+  block-local known-zero-AF merge prototype saved only 16 SQLite instructions, while a matching
+  CheckHalt merge-to-return entry changed zero roots; both were fully removed. No stress run, probe,
+  diagnostic path or environment switch remains.
+
+- The post-`218383a` FEX refresh leaves the largest positive SQLite root gaps at `freeSpace`
+  `438/309`, `_IO_new_file_xsputn` `474/383`, `powerOfTen` `242/153`, `__strcspn_sse42`
   `326/241`, `setupLookaside` `411/333` and `pagerPagecount` `254/177` (SwiftVM/FEX). The shared
   excess is now dominated by path-sensitive PSTATE/PF/AF publication and cycle/link edges, not a
   broad GetHost/SetHost or composite-EA pool. The old two-instruction BFXIL merge, global carry
