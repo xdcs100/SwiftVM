@@ -2934,6 +2934,20 @@ peepholes.
   `UXTW` path when their 32-bit wrap, bias and scale are encodable. No prototype, diagnostic source
   path or new environment switch remains.
 
+- `58fb5ee` collapses the complete known-zero compound logical-flags representation. A self-XOR
+  defines N/C/V/AF as zero, Z as one and the retained parity byte as zero, so x26 is exactly the Z
+  bit regardless of whether the result token is still available. One constant publication now
+  replaces the tokenless `BFC + ORR` update and omits the redundant token insertion. A strict paired
+  SQLite capture keeps all 2,167 roots and moves `285,599 -> 283,516` (`-2,083`, `-0.729344%`) with
+  no growth. Bounded smallpt keeps all 263 roots, moves `40,235 -> 40,070` (`-165`, `-0.410091%`)
+  and retains PPM SHA-256 `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`.
+  CoreMark keeps all 294 roots, moves `40,310 -> 40,131` (`-179`, `-0.444059%`) and retains
+  `crcfinal=0x382f`. Timing-normalized SQLite output is byte-identical; three interleaved short
+  pairs move wall median `1.098 -> 1.090s` and internal median `0.831 -> 0.816s`. Mac and Orb
+  logical-flags focuses pass 27 assertions each. Fixed-seed 424242 with 256 ALU iterations retains
+  the baseline's exact 100 mismatch keys with zero candidate-only case. No stress run, probe,
+  diagnostic path or environment switch remains.
+
 ## Orb loop
 
 ```
