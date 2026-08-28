@@ -722,31 +722,50 @@ struct X86Instance::Impl final {
                         hit_block_cap = true;
                         break;
                     }
-                    builder.SetCurBlock(addr);
-                    ir::Assembler assembler{&builder};
-                    LocationDescriptor decode_stop{};
-                    for (auto& candidate : hir_func->GetHIRBlockList()) {
-                        const auto location = candidate.GetBlock()
-                                                      ->GetStartLocation()
-                                                      .Value();
-                        if (location > addr &&
-                            (decode_stop == 0 || location < decode_stop)) {
-                            decode_stop = location;
+                    auto nearest_entry = [&](VAddr upper) {
+                        LocationDescriptor stop{};
+                        for (auto& candidate : hir_func->GetHIRBlockList()) {
+                            const auto location = candidate.GetBlock()
+                                                          ->GetStartLocation()
+                                                          .Value();
+                            if (location > addr && location < upper &&
+                                (stop == 0 || location < stop)) {
+                                stop = location;
+                            }
+                        }
+                        return stop;
+                    };
+                    auto decode = [&](LocationDescriptor stop) {
+                        ir::Assembler assembler{&builder};
+                        x86::X64Decoder decoder{
+                                addr,
+                                &memory_impl,
+                                &assembler,
+                                true,
+                                address_space->GetConfig().arm64_features,
+                                address_space->GetConfig().sse_afp_nan,
+                                !address_space->GetConfig().memory_base &&
+                                        !address_space->GetConfig().page_table,
+                                features,
+                                stop};
+                        decoder.Decode();
+                    };
+                    auto* decoded_block = hir_func->CreateOrGetBlock(addr);
+                    builder.SetCurBlock(decoded_block);
+                    PerfScope2 perf_decode_detail{GetPerfStats2().decode_total};
+                    decode(nearest_entry(UINT64_MAX));
+                    u64 decoded_bytes{};
+                    for (auto& inst : decoded_block->GetInstList()) {
+                        if (inst.GetOp() == ir::OpCode::AdvancePC) {
+                            decoded_bytes += inst.GetArg<ir::Imm>(0).Get();
                         }
                     }
-                    x86::X64Decoder decoder{
-                            addr,
-                            &memory_impl,
-                            &assembler,
-                            true,
-                            address_space->GetConfig().arm64_features,
-                            address_space->GetConfig().sse_afp_nan,
-                            !address_space->GetConfig().memory_base &&
-                                    !address_space->GetConfig().page_table,
-                            features,
-                            decode_stop};
-                    PerfScope2 perf_decode_detail{GetPerfStats2().decode_total};
-                    decoder.Decode();
+                    const auto end = addr + decoded_bytes;
+                    if (const auto late_entry = nearest_entry(end);
+                        late_entry != 0 &&
+                        builder.ResetDecodedBlock(decoded_block)) {
+                        decode(late_entry);
+                    }
                     ++decoded_count;
                 }
             }

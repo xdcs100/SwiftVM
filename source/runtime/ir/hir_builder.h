@@ -363,6 +363,7 @@ public:
     void RemoveEdge(Edge* edge);
     void MergeAdjacentBlocks(HIRBlock* left, HIRBlock* right);
     bool SplitBlock(HIRBlock* new_block, HIRBlock* old_block);
+    bool ResetDecodedBlock(HIRBlock* block);
     // Populates blocks_rpo with the reverse-post-order of the CFG reachable
     // from the entry block (the synthetic entry itself is excluded — it holds
     // no guest instructions, only a LinkBlock to the first real block). Must be
@@ -641,6 +642,8 @@ public:
     void SetCurBlock(HIRBlock* block);
 
     void SetCurBlock(Location location);
+
+    bool ResetDecodedBlock(HIRBlock* block);
 
     ElseThen If(const terminal::If& if_);
 

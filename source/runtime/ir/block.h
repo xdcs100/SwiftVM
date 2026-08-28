@@ -212,6 +212,7 @@ public:
     GetGuestCodeDependencies() const {
         return guest_code_dependencies;
     }
+    void ClearGuestCodeDependencies() { guest_code_dependencies.clear(); }
 
     [[nodiscard]] const LoopHoistMetadata& GetLoopHoistMetadata() const {
         return loop_hoist_metadata;

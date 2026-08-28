@@ -256,11 +256,63 @@ void HIRFunction::RegisterCallReturn(Location location) {
     target->call_return_target = true;
 }
 
-void HIRFunction::RemoveEdge(Edge* edge) {}
+void HIRFunction::RemoveEdge(Edge* edge) {
+    ASSERT(edge && edge->src_block && edge->dest_block);
+    edge->src_block->outgoing_edges.erase(*edge);
+    edge->dest_block->incoming_edges.erase(*edge);
+}
 
 void HIRFunction::MergeAdjacentBlocks(HIRBlock* left, HIRBlock* right) {}
 
 bool HIRFunction::SplitBlock(HIRBlock* new_block, HIRBlock* old_block) { return false; }
+
+namespace {
+void ReleaseTerminalUses(const Terminal& terminal) {
+    VisitVariant<void>(terminal, [](const auto& term) {
+        using T = std::decay_t<decltype(term)>;
+        if constexpr (std::is_same_v<T, terminal::If>) {
+            term.cond.UnUse();
+            ReleaseTerminalUses(term.then_);
+            ReleaseTerminalUses(term.else_);
+        } else if constexpr (std::is_same_v<T, terminal::Switch>) {
+            term.value.UnUse();
+            for (const auto& arm : term.cases) {
+                ReleaseTerminalUses(arm.then);
+            }
+        } else if constexpr (std::is_same_v<T, terminal::CheckHalt>) {
+            ReleaseTerminalUses(term.else_);
+        }
+    });
+}
+}
+
+bool HIRFunction::ResetDecodedBlock(HIRBlock* hir_block) {
+    ASSERT(hir_block && hir_block->function == this);
+    // RegisterCallReturn also marks the target block. Replaying only the source
+    // would leave that ownership stale.
+    if (hir_block->call_return_block) {
+        return false;
+    }
+
+    auto* block = hir_block->block;
+    ReleaseTerminalUses(block->GetTerminal());
+    block->SetTerminal(terminal::Invalid{});
+    while (!hir_block->outgoing_edges.empty()) {
+        RemoveEdge(&hir_block->outgoing_edges.front());
+    }
+
+    Vector<Inst*> instructions;
+    instructions.reserve(block->GetInstList().size());
+    for (auto& inst : block->GetInstList()) {
+        instructions.push_back(&inst);
+    }
+    for (auto it = instructions.rbegin(); it != instructions.rend(); ++it) {
+        EraseInst(block, *it);
+    }
+    block->ClearGuestCodeDependencies();
+    current_block = hir_block;
+    return true;
+}
 
 void HIRFunction::ComputeRPO() {
     blocks_rpo.clear();
@@ -632,6 +684,18 @@ void HIRBuilder::SetCurBlock(Location location) {
     auto block = current_function->CreateOrGetBlock(location);
     ASSERT(block);
     current_function->SetCurBlock(block);
+}
+
+bool HIRBuilder::ResetDecodedBlock(HIRBlock* block) {
+    ASSERT(current_function);
+    if (!current_function->ResetDecodedBlock(block)) {
+        return false;
+    }
+    current_location = block->GetBlock()->GetStartLocation();
+    last_advance = nullptr;
+    last_advance_block = nullptr;
+    flags_since_advance = false;
+    return true;
 }
 
 HIRBuilder::ElseThen HIRBuilder::If(const terminal::If& if_) {

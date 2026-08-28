@@ -1954,15 +1954,15 @@ TEST_CASE("narrow rotate compact recognizes only the verified U16 immediate-eigh
                          [](const Inst& inst) { return inst.GetOp() == OpCode::ByteSwap; }));
 }
 
-TEST_CASE("function decoder stops at an existing block entry") {
+TEST_CASE("function decoder replays at a late block entry") {
     using namespace swift::runtime;
     using namespace swift::runtime::ir;
     using namespace swift::x86;
 
-    std::array<swift::u8, 8> code{
+    std::array<swift::u8, 9> code{
             0xb8, 0x01, 0x00, 0x00, 0x00,
             0xd1, 0xc0,
-            0xf4,
+            0x75, 0xfc,
     };
     struct MemIf final : MemoryInterface {
         bool Read(void* dest, size_t addr, size_t size) override {
@@ -1979,8 +1979,6 @@ TEST_CASE("function decoder stops at an existing block entry") {
     HIRBuilder builder{1, true, false, FeatureSet{}};
     auto* function = builder.AppendFunction(Location{start});
     auto* first = function->GetCurrentBlock();
-    auto* second = function->AppendBlock(Location{boundary});
-    REQUIRE(first != second);
 
     Assembler first_assembler{&builder};
     X64Decoder first_decoder{start,
@@ -1990,9 +1988,35 @@ TEST_CASE("function decoder stops at an existing block entry") {
                              Arm64Features::None,
                              false,
                              false,
-                             FeatureSet{},
-                             boundary};
+                             FeatureSet{}};
     first_decoder.Decode();
+    REQUIRE(std::count_if(first->GetInstList().begin(),
+                          first->GetInstList().end(),
+                          [](const Inst& inst) {
+                              return inst.GetOp() == OpCode::RorImm;
+                          }) == 1);
+
+    HIRBlock* second{};
+    for (auto& block : function->GetHIRBlockList()) {
+        if (block.GetBlock()->GetStartLocation().Value() == boundary) {
+            second = &block;
+            break;
+        }
+    }
+    REQUIRE(second != nullptr);
+    REQUIRE(builder.ResetDecodedBlock(first));
+
+    Assembler replay_assembler{&builder};
+    X64Decoder replay_decoder{start,
+                              &memory,
+                              &replay_assembler,
+                              true,
+                              Arm64Features::None,
+                              false,
+                              false,
+                              FeatureSet{},
+                              boundary};
+    replay_decoder.Decode();
     REQUIRE(std::none_of(first->GetInstList().begin(),
                          first->GetInstList().end(),
                          [](const Inst& inst) {
