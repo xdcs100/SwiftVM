@@ -2537,6 +2537,20 @@ peepholes.
   CoreMark retains `crcfinal=0x382f`. No stress run, probe, diagnostic path or environment switch
   remains.
 
+- `371d04b` shares repeated direct `CallLambda` targets within a function. Hot call sites now branch
+  directly to one function-cold target thunk; the thunk uses the existing fixed-width move-wide
+  materialization and tail `BR`, so the helper still returns to the original call site and disk-cache
+  relocation remains deterministic. Single-use and dynamic targets retain their inline paths. Against
+  the outlined-backedge baseline, bounded SQLite keeps all 2,080 common PCs at 100% coverage and
+  moves `310,538 -> 310,506` host instructions (`-32`, `-0.010305%`) with no common-PC growth;
+  `sqlite3_randomness` moves `1,159 -> 1,156`. Bounded smallpt keeps all 262 PCs and moves
+  `43,829 -> 43,776` (`-53`, `-0.120925%`) with no growth; its PPM SHA-256 remains
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. Mac and Orb pass the
+  seven focused CallLambda, disk-cache and AFP host-call cases (134 assertions each), and short
+  CoreMark retains `crcfinal=0x382f`. The fingerprint harness confirms cross-process host-byte
+  self-consistency over 935 function units, then trips its stale `>3000` unit-count threshold before
+  the golden comparison. No stress run, probe, diagnostic path or environment switch remains.
+
 ## Orb loop
 
 ```
