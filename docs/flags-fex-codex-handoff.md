@@ -2667,6 +2667,20 @@ peepholes.
   `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. No long benchmark,
   probe, diagnostic path or environment switch remains.
 
+- Byte `VecMovMask` now uses the same weighted pairwise reduction as FEX. The immutable runtime
+  vector prefix holds the repeated `01 02 04 08 10 20 40 80` weights; each lowering is one
+  `LDUR`, `CMLT`, `AND`, three `ADDP` instructions and `UMOV`, replacing the previous eight-step
+  shift/narrow hierarchy. AES keygen keeps its existing `-16` constant offset, while interrupt
+  polling follows the expanded prefix through its named offset. Exact SQLite `main/10` keeps all
+  2,101 roots, moves `291,437 -> 291,317` (`-120`, `-0.041175%`), and has 21 shrinking roots with
+  no growth. `__strrchr_sse2` moves `675 -> 651`, `__memcmp_sse2` moves `675 -> 660`, and the
+  observed `__strcmp_sse42` set moves `1,914 -> 1,903`. Timing-normalized SQLite output is
+  byte-identical. Bounded smallpt moves `42,204 -> 42,140` and retains PPM SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. Mac and Orb pass the
+  complete AVX FP2 reference set, the 42-assertion named-constant/AES test and the 26-assertion
+  direct-cycle interrupt-poll test. No long benchmark, probe, diagnostic path or environment switch
+  remains.
+
 ## Orb loop
 
 ```

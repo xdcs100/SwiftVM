@@ -5783,11 +5783,23 @@ TEST_CASE("AES KEYGEN compact uses the immutable runtime prefix and exact loweri
             0x040B0E010B0E0104ULL,
             0x0C0306090306090CULL,
     };
+    constexpr std::array<swift::u64, 2> kMovmaskWeights{
+            0x8040201008040201ULL,
+            0x8040201008040201ULL,
+    };
     auto read_prefix = [](const State* state) {
         std::array<swift::u64, 2> value{};
         std::memcpy(value.data(),
                     reinterpret_cast<const swift::u8*>(state) +
-                            state_offset_named_vector_constants,
+                            state_offset_aes_keygen_swizzle,
+                    sizeof(value));
+        return value;
+    };
+    auto read_movmask_weights = [](const State* state) {
+        std::array<swift::u64, 2> value{};
+        std::memcpy(value.data(),
+                    reinterpret_cast<const swift::u8*>(state) +
+                            state_offset_byte_movmask_weights,
                     sizeof(value));
         return value;
     };
@@ -5851,11 +5863,15 @@ TEST_CASE("AES KEYGEN compact uses the immutable runtime prefix and exact loweri
                 -state_offset_named_vector_constants);
         REQUIRE(first_constants == kSwizzle);
         REQUIRE(second_constants == kSwizzle);
+        REQUIRE(read_movmask_weights(first_state) == kMovmaskWeights);
+        REQUIRE(read_movmask_weights(second_state) == kMovmaskWeights);
 
         const auto before = first_constants;
+        const auto movmask_before = read_movmask_weights(first_state);
         first.SignalInterrupt();
         first.ClearInterrupt();
         REQUIRE(read_prefix(first_state) == before);
+        REQUIRE(read_movmask_weights(first_state) == movmask_before);
     }
 
     struct Emitted {

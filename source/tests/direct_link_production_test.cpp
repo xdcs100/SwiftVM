@@ -713,7 +713,10 @@ TEST_CASE("direct SCC descending edge observes a pending interrupt",
             space.PushCodeCache(Location{guest_a}, code_a);
             space.PushCodeCache(Location{guest_b}, code_b);
 
-            constexpr u32 kInterruptPollLoad = 0xb85e839fu;
+            constexpr u32 kLdurWzrX28 = 0xb840039fu;
+            constexpr u32 kInterruptPollLoad =
+                    kLdurWzrX28 |
+                    ((static_cast<u32>(state_offset_interrupt_poll) & 0x1ffu) << 12);
             const auto region_a = module->GetCodeRegion(code_a);
             REQUIRE(region_a);
             const auto sites_a = FindProductionSites(space, *region_a, code_a);

@@ -428,13 +428,12 @@ void JitTranslator::EmitByteMovMask(const VRegister& source,
                                     const WRegister& result,
                                     const VRegister& work,
                                     const VRegister& packed) {
-    __ Ushr(work.V16B(), source.V16B(), 7);
-    __ Usra(work.V8H(), work.V8H(), 7);
-    __ Xtn(packed.V8B(), work.V8H());
-    __ Usra(packed.V4H(), packed.V4H(), 6);
-    __ Xtn(work.V8B(), packed.V8H());
-    __ Usra(work.V4H(), work.V4H(), 4);
-    __ Xtn(packed.V8B(), work.V8H());
+    masm.ldur(packed.Q(), MemOperand(state, state_offset_byte_movmask_weights));
+    __ Cmlt(work.V16B(), source.V16B(), 0);
+    __ And(packed.V16B(), work.V16B(), packed.V16B());
+    __ Addp(packed.V16B(), packed.V16B(), packed.V16B());
+    __ Addp(packed.V8B(), packed.V8B(), packed.V8B());
+    __ Addp(packed.V8B(), packed.V8B(), packed.V8B());
     __ Umov(result, packed.V8H(), 0);
 }
 

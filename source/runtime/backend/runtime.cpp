@@ -56,6 +56,10 @@ namespace {
 // Runtime 私有的只读向量常量前缀。它不属于 guest State，也不进入
 // uniform/signal/xsave 布局；构造后没有可变访问入口。
 struct alignas(16) RuntimeNamedVectorConstants {
+    std::array<u64, 2> byte_movmask_weights{
+            0x8040201008040201ULL,
+            0x8040201008040201ULL,
+    };
     std::array<u64, 2> aes_keygen_swizzle{
             0x040B0E010B0E0104ULL,
             0x0C0306090306090CULL,
@@ -68,11 +72,17 @@ backend::InterruptL1Mapping& GetInterruptL1Mapping() {
     return mapping;
 }
 
-static_assert(sizeof(RuntimeNamedVectorConstants) == 16);
+static_assert(sizeof(RuntimeNamedVectorConstants) == 32);
 static_assert(sizeof(RuntimeNamedVectorConstants) <= 256);
 static_assert(alignof(RuntimeNamedVectorConstants) == alignof(backend::State));
 static_assert(backend::state_offset_named_vector_constants ==
               -static_cast<s32>(sizeof(RuntimeNamedVectorConstants)));
+static_assert(backend::state_offset_byte_movmask_weights ==
+              backend::state_offset_named_vector_constants +
+                      offsetof(RuntimeNamedVectorConstants, byte_movmask_weights));
+static_assert(backend::state_offset_aes_keygen_swizzle ==
+              backend::state_offset_named_vector_constants +
+                      offsetof(RuntimeNamedVectorConstants, aes_keygen_swizzle));
 
 }  // namespace
 

@@ -173,9 +173,9 @@ void JitTranslator::EmitVecAesKeygenAssist(ir::Inst* inst) {
     __ Orr(sbox_shifted.V16B(), source.V16B(), source.V16B());
     masm.dci(Crypto2(kAese, sbox_shifted, zero));
     if (context.GetFeatures().keygen_compact) {
-        static_assert(state_offset_named_vector_constants == -16);
+        static_assert(state_offset_aes_keygen_swizzle == -16);
         masm.ldur(control.Q(),
-                  MemOperand(state, state_offset_named_vector_constants));
+                  MemOperand(state, state_offset_aes_keygen_swizzle));
         __ Tbl(result.V16B(), sbox_shifted.V16B(), control.V16B());
         __ Mov(scratch, rcon_byte << 32);
         __ Dup(rcon.V2D(), scratch);
