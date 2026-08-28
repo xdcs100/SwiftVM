@@ -2798,6 +2798,20 @@ peepholes.
   The focused fixed-clobber test passes 16 assertions. No stress run, probe, diagnostic path or
   environment switch remains.
 
+- `040d032` shares repeated 32/64-bit LSE unaligned fallbacks within one translation unit when the
+  operation, width and allocated address/result/operand registers all match. A single site remains
+  inline, while each repeated site keeps only `ADR + B` and returns through reserved `x13`; the
+  cold stub retains the serialized lock, two DMBs and plain faulting memory access. Exact SQLite
+  keeps all 2,212 roots and moves `298,111 -> 297,973` (`-138`, `-0.046291%`) with no growth.
+  `__run_exit_handlers@0x4e2380` moves `570 -> 536`, reducing its gap to FEX from 115 to 81.
+  Bounded smallpt keeps all 263 roots, moves `41,251 -> 41,099` (`-152`, `-0.368476%`) and retains
+  PPM SHA-256 `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`.
+  Three interleaved SQLite pairs are timing-neutral: internal medians move `1.331 -> 1.343s` and
+  wall medians `1.619 -> 1.627s`. Fixed-seed 424242 bit-op/CMPXCHG retains the baseline's exact
+  51 mismatch keys with zero candidate-only case. The aligned and unaligned lock-RMW guests exit
+  zero on both sides. A temporary two-site unaligned XADD probe confirmed two entries sharing one
+  cold stub and was deleted. No stress run, diagnostic path or environment switch remains.
+
 ## Orb loop
 
 ```
