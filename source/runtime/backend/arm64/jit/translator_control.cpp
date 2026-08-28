@@ -175,6 +175,56 @@ void JitTranslator::EmitCallReturn(ir::Inst* inst) {
     call_return_pc = inst->GetArg<ir::Imm>(1).Get();
 }
 
+void JitTranslator::PrepareHostCallThunks(const std::vector<ir::Block*>& blocks) {
+    host_call_thunks.clear();
+    for (auto* block : blocks) {
+        for (auto& inst : block->GetInstList()) {
+            if (inst.GetOp() != ir::OpCode::CallLambda) {
+                continue;
+            }
+            const auto lambda = inst.GetArg<ir::Lambda>(0);
+            if (!lambda.IsValue()) {
+                ++host_call_thunks[lambda.GetImm().Get()].uses;
+            }
+        }
+    }
+    std::erase_if(host_call_thunks, [](const auto& item) {
+        return item.second.uses < 2;
+    });
+    for (auto& item : host_call_thunks) {
+        item.second.entry = std::make_unique<Label>();
+    }
+}
+
+void JitTranslator::MaterializeHostCallTarget(u64 target) {
+    // Keep the target ASLR-independent in size and visible to disk-cache relocation.
+    __ movz(ip, target & 0xFFFFu, 0);
+    __ movk(ip, (target >> 16) & 0xFFFFu, 16);
+    __ movk(ip, (target >> 32) & 0xFFFFu, 32);
+    __ movk(ip, (target >> 48) & 0xFFFFu, 48);
+}
+
+bool JitTranslator::TryEmitSharedHostCall(const ir::Lambda& lambda) {
+    if (lambda.IsValue()) {
+        return false;
+    }
+    const auto it = host_call_thunks.find(lambda.GetImm().Get());
+    if (it == host_call_thunks.end()) {
+        return false;
+    }
+    __ Bl(it->second.entry.get());
+    return true;
+}
+
+void JitTranslator::EmitHostCallThunks() {
+    for (auto& [target, thunk] : host_call_thunks) {
+        __ Bind(thunk.entry.get());
+        MaterializeHostCallTarget(target);
+        __ Br(ip);
+    }
+    host_call_thunks.clear();
+}
+
 void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
                                  const std::vector<ir::DataClass>& args,
                                  bool has_result,
@@ -417,22 +467,13 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
         } else {
             __ Mov(ip, fn);
         }
+        __ Blr(ip);
     } else {
-        // Fixed-width materialization: vixl's Mov() elides zero 16-bit
-        // chunks, which makes the emitted length depend on where ASLR placed
-        // the helper in *this* process (a page-aligned helper such as RepMovs
-        // drops a chunk with probability ~1/4 per process).  The function-mode
-        // fingerprint's self-consistency check compares host byte counts
-        // across two processes, so chunk elision reads as nondeterministic
-        // codegen.  movz+3xmovk is always 16 bytes and stays scannable by
-        // code_serial's relocation pass.
-        const u64 target = lambda.GetImm().Get();
-        __ movz(ip, target & 0xFFFFu, 0);
-        __ movk(ip, (target >> 16) & 0xFFFFu, 16);
-        __ movk(ip, (target >> 32) & 0xFFFFu, 32);
-        __ movk(ip, (target >> 48) & 0xFFFFu, 48);
+        if (!TryEmitSharedHostCall(lambda)) {
+            MaterializeHostCallTarget(lambda.GetImm().Get());
+            __ Blr(ip);
+        }
     }
-    __ Blr(ip);
 
     __ Str(x0, MemOperand(sp, kResultSlot));
     if (secondary_result) {

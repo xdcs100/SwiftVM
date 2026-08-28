@@ -1367,6 +1367,7 @@ void JitTranslator::Translate(ir::HIRFunction* function) {
         }
         emitted_blocks.push_back(block);
     }
+    PrepareHostCallThunks(emitted_blocks);
     terminal_location_publication.Prepare(emitted_blocks, context);
     share_cycle_exit_reason =
             CountCycleExitCandidates(emitted_blocks) >=
@@ -1406,6 +1407,7 @@ void JitTranslator::Translate(ir::HIRFunction* function) {
     EmitIndirectExitColdPaths();
     ASSERT(pending_deferred_faults.empty());
     const auto recovery_offsets = terminal_location_publication.EmitColdPaths(context);
+    EmitHostCallThunks();
     context.EndColdScratch();
     EmitDeferredNZCVMergeStubs();
     for (auto& fault : fault_metadata) {

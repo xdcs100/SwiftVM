@@ -608,6 +608,10 @@ private:
                       bool has_result,
                       const Register &result,
                       std::optional<Register> secondary_result = std::nullopt);
+    void PrepareHostCallThunks(const std::vector<ir::Block*>& blocks);
+    void MaterializeHostCallTarget(u64 target);
+    bool TryEmitSharedHostCall(const ir::Lambda& lambda);
+    void EmitHostCallThunks();
     void EmitPreserveAllPairCall(ir::Inst* inst,
                                  VAddr target,
                                  const std::vector<ir::DataClass>& args,
@@ -894,6 +898,11 @@ private:
         std::unique_ptr<Label> entry{};
     };
     std::vector<DeferredNZCVMergeStub> deferred_nzcv_merge_stubs{};
+    struct HostCallThunk {
+        u32 uses{};
+        std::unique_ptr<Label> entry{};
+    };
+    std::map<u64, HostCallThunk> host_call_thunks{};
     bool boundary_density_enabled{};
     bool boundary_terminal_open{};
     u32 boundary_terminal_link_bytes{};
