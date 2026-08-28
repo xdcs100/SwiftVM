@@ -122,7 +122,7 @@ constexpr u8 kUniformEffectTag = 0x80;
 constexpr u8 kHelperABITag = 0x40;
 constexpr u8 kHostFpTransparentTag = 0x20;
 constexpr u8 kHostGeneralRegistersTag = 0x10;
-constexpr u8 kHostPreservesV16V23Tag = 0x08;
+constexpr u8 kHostPreservesPinnedStateTag = 0x08;
 constexpr u8 kUniformEffectMask = 0x07;
 constexpr size_t kMaxUniformEffectSets = kUniformEffectMask + 1;
 
@@ -186,8 +186,8 @@ Lambda::Lambda(const DataClass& value, HelperCallTraits traits) : address(value)
     }
     if (traits.host_registers == HostRegisterEffect::GeneralOnly) {
         tags |= kHostGeneralRegistersTag;
-    } else if (traits.host_registers == HostRegisterEffect::PreservesV16V23) {
-        tags |= kHostPreservesV16V23Tag;
+    } else if (traits.host_registers == HostRegisterEffect::PreservesPinnedState) {
+        tags |= kHostPreservesPinnedStateTag;
     }
     if (tags) {
         address.type = static_cast<ArgType>(tags);
@@ -197,7 +197,7 @@ Lambda::Lambda(const DataClass& value, HelperCallTraits traits) : address(value)
 bool Lambda::IsTaggedImm() const {
     return (static_cast<u8>(address.type) &
             (kUniformEffectTag | kHelperABITag | kHostFpTransparentTag |
-             kHostGeneralRegistersTag | kHostPreservesV16V23Tag)) != 0;
+             kHostGeneralRegistersTag | kHostPreservesPinnedStateTag)) != 0;
 }
 
 Imm& Lambda::GetImm() {
@@ -246,8 +246,8 @@ HostRegisterEffect Lambda::GetHostRegisterEffect() const {
     if ((tags & kHostGeneralRegistersTag) != 0) {
         return HostRegisterEffect::GeneralOnly;
     }
-    return (tags & kHostPreservesV16V23Tag) != 0
-            ? HostRegisterEffect::PreservesV16V23
+    return (tags & kHostPreservesPinnedStateTag) != 0
+            ? HostRegisterEffect::PreservesPinnedState
             : HostRegisterEffect::MayTouchSIMD;
 }
 

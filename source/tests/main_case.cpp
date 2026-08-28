@@ -291,10 +291,10 @@ TEST_CASE("helper effects default conservative and compose with ABI metadata") {
     const Lambda resident{
             address,
             HelperCallTraits{
-                    .host_registers = HostRegisterEffect::PreservesV16V23,
+                    .host_registers = HostRegisterEffect::PreservesPinnedState,
             }};
     REQUIRE(resident.GetHostRegisterEffect() ==
-            HostRegisterEffect::PreservesV16V23);
+            HostRegisterEffect::PreservesPinnedState);
     REQUIRE(resident.GetHelperABI() == HelperABI::NormalAAPCS);
     REQUIRE(resident.GetUniformEffectId() == UniformEffectId::Unknown);
 }
@@ -5447,8 +5447,8 @@ TEST_CASE("resident XMM coalescing preserves snapshots and fixed-home windows") 
 
         REQUIRE(snapshot_counts(HostRegisterEffect::MayTouchSIMD) ==
                 std::array<std::size_t, 4>{4, 4, 2, 2});
-        REQUIRE(snapshot_counts(HostRegisterEffect::PreservesV16V23) ==
-                std::array<std::size_t, 4>{0, 0, 2, 2});
+        REQUIRE(snapshot_counts(HostRegisterEffect::PreservesPinnedState) ==
+                std::array<std::size_t, 4>{0, 0, 0, 0});
     }
 }
 

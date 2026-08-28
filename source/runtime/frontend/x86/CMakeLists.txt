@@ -35,7 +35,9 @@ add_library(fronted_x86 STATIC decoder.cc
     cpu.h)
 
 if ("arm64" IN_LIST ARCHITECTURE)
-    target_sources(fronted_x86 PRIVATE sse42str_helper_arm64.S)
+    target_sources(fronted_x86 PRIVATE
+        rep_string_helper_arm64.S
+        sse42str_helper_arm64.S)
 endif ()
 
 target_link_libraries(fronted_x86 PUBLIC swift_runtime distorm softfloat_3e)

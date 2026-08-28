@@ -2,7 +2,6 @@
 #include <array>
 #include <cstring>
 #include "runtime/backend/signal_handler.h"
-#include "runtime/common/helper_simd_guard.h"
 #include "runtime/frontend/x86/decoder_internal.h"
 
 namespace swift::x86 {
@@ -127,7 +126,7 @@ static u8* ClampGuestWalk(u64 start, u64 step, bool backward, u64& count, bool& 
     return host_base;
 }
 
-static u64 RepMovs(u64 dst, u64 src, u64 packed) {
+extern "C" u64 SwiftRepMovs(u64 dst, u64 src, u64 packed) {
     const bool backward = (packed & kStringBackward) != 0;
     const u64 step = u64(1) << ((packed >> kStringStepShift) & 3);
     u64 dst_count = packed & kStringCountMask;
@@ -148,7 +147,7 @@ static u64 RepMovs(u64 dst, u64 src, u64 packed) {
 // They return kStringGuestFault or 0; RDI/RCX are updated from IR (the walk is
 // contiguous, so the end address is a pure function of the inputs), which
 // leaves the result free to carry the fault report.
-static u64 RepStos1(u64 dst, u64 value, u64 count) {
+extern "C" u64 SwiftRepStos1(u64 dst, u64 value, u64 count) {
     const bool backward = (count & kStringBackward) != 0;
     count &= ~kStringBackward;
     bool faulted = false;
@@ -159,7 +158,7 @@ static u64 RepStos1(u64 dst, u64 value, u64 count) {
     }
     return faulted ? kStringGuestFault : 0;
 }
-static u64 RepStos2(u64 dst, u64 value, u64 count) {
+extern "C" u64 SwiftRepStos2(u64 dst, u64 value, u64 count) {
     const bool backward = (count & kStringBackward) != 0;
     count &= ~kStringBackward;
     bool faulted = false;
@@ -170,7 +169,7 @@ static u64 RepStos2(u64 dst, u64 value, u64 count) {
     }
     return faulted ? kStringGuestFault : 0;
 }
-static u64 RepStos4(u64 dst, u64 value, u64 count) {
+extern "C" u64 SwiftRepStos4(u64 dst, u64 value, u64 count) {
     const bool backward = (count & kStringBackward) != 0;
     count &= ~kStringBackward;
     bool faulted = false;
@@ -181,7 +180,7 @@ static u64 RepStos4(u64 dst, u64 value, u64 count) {
     }
     return faulted ? kStringGuestFault : 0;
 }
-static u64 RepStos8(u64 dst, u64 value, u64 count) {
+extern "C" u64 SwiftRepStos8(u64 dst, u64 value, u64 count) {
     const bool backward = (count & kStringBackward) != 0;
     count &= ~kStringBackward;
     bool faulted = false;
@@ -193,22 +192,31 @@ static u64 RepStos8(u64 dst, u64 value, u64 count) {
     return faulted ? kStringGuestFault : 0;
 }
 
-constexpr auto kRepMovsResident =
-        &runtime::CallPreservingV16V23<&RepMovs, u64, u64, u64>;
 using ResidentStringHelper = u64 (*)(u64, u64, u64);
 
-#define RESIDENT_STRING_HELPER(name) \
-    &runtime::CallPreservingV16V23<&name, u64, u64, u64>
+#if defined(__aarch64__)
+extern "C" u64 SwiftRepMovsResident(u64, u64, u64);
+extern "C" u64 SwiftRepStos1Resident(u64, u64, u64);
+extern "C" u64 SwiftRepStos2Resident(u64, u64, u64);
+extern "C" u64 SwiftRepStos4Resident(u64, u64, u64);
+extern "C" u64 SwiftRepStos8Resident(u64, u64, u64);
+#define RESIDENT_STRING_HELPER(name) &name##Resident
+#else
+#define RESIDENT_STRING_HELPER(name) &name
+#endif
+
+constexpr ResidentStringHelper kRepMovsResident =
+        RESIDENT_STRING_HELPER(SwiftRepMovs);
 
 constexpr std::array<ResidentStringHelper, 4> kRepStosResident{
-        RESIDENT_STRING_HELPER(RepStos1),
-        RESIDENT_STRING_HELPER(RepStos2),
-        RESIDENT_STRING_HELPER(RepStos4),
-        RESIDENT_STRING_HELPER(RepStos8),
+        RESIDENT_STRING_HELPER(SwiftRepStos1),
+        RESIDENT_STRING_HELPER(SwiftRepStos2),
+        RESIDENT_STRING_HELPER(SwiftRepStos4),
+        RESIDENT_STRING_HELPER(SwiftRepStos8),
 };
 
 constexpr ir::HelperCallTraits kResidentStringHelperTraits{
-        .host_registers = ir::HostRegisterEffect::PreservesV16V23,
+        .host_registers = ir::HostRegisterEffect::PreservesPinnedState,
 };
 
 // rep cmps/scas: run the early-terminating comparison loop and return the
@@ -235,7 +243,7 @@ static u64 RepCmpsN(const u8* s, const u8* d, u64 count, u64 repnz, u64 sz) {
 // that consumed the whole clamped count while the architectural count was
 // longer reaches unmapped memory.
 #define DEFINE_REP_CMPS(name, sz, repnz)                                                           \
-    static u64 name(u64 rsi, u64 rdi, u64 count) {                                                 \
+    extern "C" u64 name(u64 rsi, u64 rdi, u64 count) {                                           \
         const bool bwd = (count & kStringBackward) != 0;                                           \
         u64 n_s = count & ~kStringBackward, n_d = n_s;                                             \
         bool faulted = false;                                                                      \
@@ -246,14 +254,14 @@ static u64 RepCmpsN(const u8* s, const u8* d, u64 count, u64 repnz, u64 sz) {
         const u64 done = RepCmpsN(s_ptr, d_ptr, n, repnz, sz);                                     \
         return done | (faulted && done == limit ? kStringGuestFault : 0);                          \
     }
-DEFINE_REP_CMPS(RepCmpsZ1, 1, 0)
-DEFINE_REP_CMPS(RepCmpsNZ1, 1, 1)
-DEFINE_REP_CMPS(RepCmpsZ2, 2, 0)
-DEFINE_REP_CMPS(RepCmpsNZ2, 2, 1)
-DEFINE_REP_CMPS(RepCmpsZ4, 4, 0)
-DEFINE_REP_CMPS(RepCmpsNZ4, 4, 1)
-DEFINE_REP_CMPS(RepCmpsZ8, 8, 0)
-DEFINE_REP_CMPS(RepCmpsNZ8, 8, 1)
+DEFINE_REP_CMPS(SwiftRepCmpsZ1, 1, 0)
+DEFINE_REP_CMPS(SwiftRepCmpsNZ1, 1, 1)
+DEFINE_REP_CMPS(SwiftRepCmpsZ2, 2, 0)
+DEFINE_REP_CMPS(SwiftRepCmpsNZ2, 2, 1)
+DEFINE_REP_CMPS(SwiftRepCmpsZ4, 4, 0)
+DEFINE_REP_CMPS(SwiftRepCmpsNZ4, 4, 1)
+DEFINE_REP_CMPS(SwiftRepCmpsZ8, 8, 0)
+DEFINE_REP_CMPS(SwiftRepCmpsNZ8, 8, 1)
 #undef DEFINE_REP_CMPS
 
 // rep scas: compare the accumulator (acc) against each [RDI] element.
@@ -272,7 +280,7 @@ static u64 RepScasN(const u8* acc, const u8* d, u64 count, u64 repnz, u64 sz) {
     return i;
 }
 #define DEFINE_REP_SCAS(name, sz, repnz)                                                           \
-    static u64 name(u64 acc, u64 rdi, u64 count) {                                                 \
+    extern "C" u64 name(u64 acc, u64 rdi, u64 count) {                                           \
         u8 ab[sz];                                                                                 \
         std::memcpy(ab, &acc, sz);                                                                 \
         const bool bwd = (count & kStringBackward) != 0;                                           \
@@ -283,39 +291,61 @@ static u64 RepScasN(const u8* acc, const u8* d, u64 count, u64 repnz, u64 sz) {
         const u64 done = RepScasN(ab, d_ptr, n | (bwd ? kStringBackward : 0), repnz, sz);          \
         return done | (faulted && done == limit ? kStringGuestFault : 0);                          \
     }
-DEFINE_REP_SCAS(RepScasZ1, 1, 0)
-DEFINE_REP_SCAS(RepScasNZ1, 1, 1)
-DEFINE_REP_SCAS(RepScasZ2, 2, 0)
-DEFINE_REP_SCAS(RepScasNZ2, 2, 1)
-DEFINE_REP_SCAS(RepScasZ4, 4, 0)
-DEFINE_REP_SCAS(RepScasNZ4, 4, 1)
-DEFINE_REP_SCAS(RepScasZ8, 8, 0)
-DEFINE_REP_SCAS(RepScasNZ8, 8, 1)
+DEFINE_REP_SCAS(SwiftRepScasZ1, 1, 0)
+DEFINE_REP_SCAS(SwiftRepScasNZ1, 1, 1)
+DEFINE_REP_SCAS(SwiftRepScasZ2, 2, 0)
+DEFINE_REP_SCAS(SwiftRepScasNZ2, 2, 1)
+DEFINE_REP_SCAS(SwiftRepScasZ4, 4, 0)
+DEFINE_REP_SCAS(SwiftRepScasNZ4, 4, 1)
+DEFINE_REP_SCAS(SwiftRepScasZ8, 8, 0)
+DEFINE_REP_SCAS(SwiftRepScasNZ8, 8, 1)
 #undef DEFINE_REP_SCAS
 
+#if defined(__aarch64__)
+#define DECLARE_RESIDENT_STRING_HELPER(name) \
+    extern "C" u64 name##Resident(u64, u64, u64)
+DECLARE_RESIDENT_STRING_HELPER(SwiftRepCmpsZ1);
+DECLARE_RESIDENT_STRING_HELPER(SwiftRepCmpsNZ1);
+DECLARE_RESIDENT_STRING_HELPER(SwiftRepCmpsZ2);
+DECLARE_RESIDENT_STRING_HELPER(SwiftRepCmpsNZ2);
+DECLARE_RESIDENT_STRING_HELPER(SwiftRepCmpsZ4);
+DECLARE_RESIDENT_STRING_HELPER(SwiftRepCmpsNZ4);
+DECLARE_RESIDENT_STRING_HELPER(SwiftRepCmpsZ8);
+DECLARE_RESIDENT_STRING_HELPER(SwiftRepCmpsNZ8);
+DECLARE_RESIDENT_STRING_HELPER(SwiftRepScasZ1);
+DECLARE_RESIDENT_STRING_HELPER(SwiftRepScasNZ1);
+DECLARE_RESIDENT_STRING_HELPER(SwiftRepScasZ2);
+DECLARE_RESIDENT_STRING_HELPER(SwiftRepScasNZ2);
+DECLARE_RESIDENT_STRING_HELPER(SwiftRepScasZ4);
+DECLARE_RESIDENT_STRING_HELPER(SwiftRepScasNZ4);
+DECLARE_RESIDENT_STRING_HELPER(SwiftRepScasZ8);
+DECLARE_RESIDENT_STRING_HELPER(SwiftRepScasNZ8);
+#undef DECLARE_RESIDENT_STRING_HELPER
+#endif
+
 constexpr std::array<ResidentStringHelper, 4> kRepCmpsZResident{
-        RESIDENT_STRING_HELPER(RepCmpsZ1),
-        RESIDENT_STRING_HELPER(RepCmpsZ2),
-        RESIDENT_STRING_HELPER(RepCmpsZ4),
-        RESIDENT_STRING_HELPER(RepCmpsZ8),
+        RESIDENT_STRING_HELPER(SwiftRepCmpsZ1),
+        RESIDENT_STRING_HELPER(SwiftRepCmpsZ2),
+        RESIDENT_STRING_HELPER(SwiftRepCmpsZ4),
+        RESIDENT_STRING_HELPER(SwiftRepCmpsZ8),
 };
 constexpr std::array<ResidentStringHelper, 4> kRepCmpsNZResident{
-        RESIDENT_STRING_HELPER(RepCmpsNZ1),
-        RESIDENT_STRING_HELPER(RepCmpsNZ2),
-        RESIDENT_STRING_HELPER(RepCmpsNZ4),
-        RESIDENT_STRING_HELPER(RepCmpsNZ8),
+        RESIDENT_STRING_HELPER(SwiftRepCmpsNZ1),
+        RESIDENT_STRING_HELPER(SwiftRepCmpsNZ2),
+        RESIDENT_STRING_HELPER(SwiftRepCmpsNZ4),
+        RESIDENT_STRING_HELPER(SwiftRepCmpsNZ8),
 };
 constexpr std::array<ResidentStringHelper, 4> kRepScasZResident{
-        RESIDENT_STRING_HELPER(RepScasZ1),
-        RESIDENT_STRING_HELPER(RepScasZ2),
-        RESIDENT_STRING_HELPER(RepScasZ4),
-        RESIDENT_STRING_HELPER(RepScasZ8),
+        RESIDENT_STRING_HELPER(SwiftRepScasZ1),
+        RESIDENT_STRING_HELPER(SwiftRepScasZ2),
+        RESIDENT_STRING_HELPER(SwiftRepScasZ4),
+        RESIDENT_STRING_HELPER(SwiftRepScasZ8),
 };
 constexpr std::array<ResidentStringHelper, 4> kRepScasNZResident{
-        RESIDENT_STRING_HELPER(RepScasNZ1),
-        RESIDENT_STRING_HELPER(RepScasNZ2),
-        RESIDENT_STRING_HELPER(RepScasNZ4),
-        RESIDENT_STRING_HELPER(RepScasNZ8),
+        RESIDENT_STRING_HELPER(SwiftRepScasNZ1),
+        RESIDENT_STRING_HELPER(SwiftRepScasNZ2),
+        RESIDENT_STRING_HELPER(SwiftRepScasNZ4),
+        RESIDENT_STRING_HELPER(SwiftRepScasNZ8),
 };
 
 #undef RESIDENT_STRING_HELPER

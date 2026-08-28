@@ -222,7 +222,7 @@ enum class HostFpEffect : u8 {
 enum class HostRegisterEffect : u8 {
     MayTouchSIMD = 0,
     GeneralOnly,
-    PreservesV16V23,
+    PreservesPinnedState,
 };
 
 struct HelperCallTraits {

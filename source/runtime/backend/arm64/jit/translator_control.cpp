@@ -289,10 +289,11 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
             GeneralRegistersOnlyABIEnabled() && !lambda.IsValue() &&
             lambda.GetHostRegisterEffect() ==
                     ir::HostRegisterEffect::GeneralOnly;
-    const bool preserves_v16_v23 =
+    const bool preserves_pinned_state =
             !lambda.IsValue() &&
             lambda.GetHostRegisterEffect() ==
-                    ir::HostRegisterEffect::PreservesV16V23;
+                    ir::HostRegisterEffect::PreservesPinnedState;
+    ASSERT(!preserves_pinned_state || args.size() <= 3);
 
     // Save the caller-saved registers that are actually live across the call,
     // plus x29/x30: the Blr below clobbers the link register holding this
@@ -339,16 +340,29 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
     for (const auto& desc : context.GetConfig().buffers_static_alloc) {
         // preserve_all keeps x9-x15. x9 therefore needs no snapshot unless it
         // is an argument source; x0-x8 remain caller-saved.
-        if (!desc.is_float && desc.reg <= (preserve_all_leaf ? 8 : 9)) {
+        const u32 last_clobbered = preserves_pinned_state
+                ? 2
+                : (preserve_all_leaf ? 8 : 9);
+        if (!desc.is_float && desc.reg <= last_clobbered) {
             live_gprs.Mark(desc.reg);
         }
+    }
+    if (preserves_pinned_state) {
+        live_gprs.Mark(ip.GetCode());
     }
 
     boost::container::small_vector<u32, 18> save_gprs;
     for (u32 code = 0; code <= 17; ++code) {
         const bool leaf_clobbered = code <= 8 || code >= 16;
+        const bool pinned_state_clobbered =
+                code <= 2 || code == ip.GetCode() || code >= 16;
+        const bool argument_requires_slot =
+                argument_gprs.Get(code) &&
+                (!preserves_pinned_state || pinned_state_clobbered);
         if (live_gprs.Get(code) &&
-            (!preserve_all_leaf || leaf_clobbered || argument_gprs.Get(code))) {
+            (!preserve_all_leaf || leaf_clobbered || argument_requires_slot) &&
+            (!preserves_pinned_state || pinned_state_clobbered ||
+             argument_requires_slot)) {
             save_gprs.push_back(code);
         }
     }
@@ -363,7 +377,7 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
         for (u32 code = 0; code < 32; ++code) {
             if (live_fprs.Get(code) &&
                 (!preserve_all_leaf || code <= 7) &&
-                (!preserves_v16_v23 || code < 16 || code > 23)) {
+                (!preserves_pinned_state || code < 16)) {
                 save_fprs.push_back(code);
             }
         }
@@ -453,7 +467,11 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
             __ Mov(dst, data.imm.Get());
         } else {
             auto src = value_args[value_index++];
-            if (src.GetCode() <= 17) {
+            const bool source_requires_slot =
+                    src.GetCode() <= 17 &&
+                    (!preserves_pinned_state || src.GetCode() <= 2 ||
+                     src.GetCode() >= 16);
+            if (source_requires_slot) {
                 __ Ldr(dst, MemOperand(sp, saved_offset(src.GetCode())));
             } else {
                 __ Mov(dst, src);
