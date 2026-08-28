@@ -294,7 +294,9 @@ TEST_CASE("parity-only logical publication leaves NZCV clean") {
 
 TEST_CASE("logical NZ publication absorbs an adjacent CVAF clear") {
     const auto exact = EmitCompoundLogicalClear(true);
-    REQUIRE(Contains(exact, "#26, #6"));
+    REQUIRE(Contains(exact, "mrs x26, nzcv"));
+    REQUIRE(Count(exact, "ubfx ") == 0);
+    REQUIRE_FALSE(Contains(exact, "#26, #6"));
     REQUIRE_FALSE(Contains(exact, "bfc x26, #26, #4"));
 
     const auto partial = EmitCompoundLogicalClear(false);

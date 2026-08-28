@@ -618,16 +618,28 @@ void JitTranslator::ClearFlags(ir::Flags guest) {
     compound_logical_clear_pending = false;
     compound_logical_zero_pending = false;
     if (compound_logical) {
-        PublishFlagsToken();
-        constexpr u32 width = HostFlagsBit::N - HostFlagsBit::AuxiliaryCarry + 1;
-        if (compound_logical_zero) {
-            __ Bfc(flags, HostFlagsBit::AuxiliaryCarry, width);
-            __ Orr(flags, flags, u64{1} << HostFlagsBit::Z);
+        if (flags_token_valid) {
+            if (compound_logical_zero) {
+                __ Mov(flags, u64{1} << HostFlagsBit::Z);
+            } else {
+                __ Mrs(flags, NZCV);
+            }
+            __ Bfi(flags, FlagsTokenResult(), HostFlagsBit::ParityByte, 8);
+            if (!flags_token_keep) {
+                InvalidateFlagsToken();
+            }
         } else {
-            const auto scratch = context.GetSharedTmpX();
-            __ Mrs(scratch, NZCV);
-            __ Ubfx(scratch, scratch, HostFlagsBit::AuxiliaryCarry, width);
-            __ Bfi(flags, scratch, HostFlagsBit::AuxiliaryCarry, width);
+            constexpr u32 width =
+                    HostFlagsBit::N - HostFlagsBit::AuxiliaryCarry + 1;
+            if (compound_logical_zero) {
+                __ Bfc(flags, HostFlagsBit::AuxiliaryCarry, width);
+                __ Orr(flags, flags, u64{1} << HostFlagsBit::Z);
+            } else {
+                const auto scratch = context.GetSharedTmpX();
+                __ Mrs(scratch, NZCV);
+                __ Ubfx(scratch, scratch, HostFlagsBit::AuxiliaryCarry, width);
+                __ Bfi(flags, scratch, HostFlagsBit::AuxiliaryCarry, width);
+            }
         }
         nzcv_dirty = false;
         nzcv_requested = {};
