@@ -2789,6 +2789,15 @@ peepholes.
   roots / 41,251 instructions with its canonical PPM SHA-256. No stress run, probe, diagnostic
   path or environment switch remains.
 
+- `897008d` reserves `x13` across scalar atomic instructions because their unaligned fallback uses
+  it for the lock address. Before this fix, a CAS result allocated to `x13` replaced the lock
+  pointer while acquiring the lock and issued `STXR` through address 1. The bounded unaligned
+  atomic guest now exits zero instead of PageFatal. Exact SQLite remains 2,212 roots / 298,111
+  instructions with no changed root; bounded smallpt remains 263 roots / 41,251 instructions and
+  retains PPM SHA-256 `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`.
+  The focused fixed-clobber test passes 16 assertions. No stress run, probe, diagnostic path or
+  environment switch remains.
+
 ## Orb loop
 
 ```
