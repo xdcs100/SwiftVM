@@ -82,6 +82,7 @@ public:
     [[nodiscard]] void* GetRegionTrampoline() const;
     [[nodiscard]] void* GetPendingFlagsRegionTrampoline() const;
     [[nodiscard]] void* GetFlagsMergeRegionTrampoline() const;
+    [[nodiscard]] void* GetFlagsMergeTokenRegionTrampoline() const;
     [[nodiscard]] void* GetReturnRegionTrampoline() const;
     [[nodiscard]] arm64::RegionLinkContext* GetRegionLinkContext() const {
         return region_link_context_.get();

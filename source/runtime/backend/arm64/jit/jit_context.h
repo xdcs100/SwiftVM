@@ -37,6 +37,11 @@ struct DirectLinkFlagsBypass {
     }
 };
 
+enum class FlagsMergeTrampolineKind : u8 {
+    NZCV,
+    NZCVToken,
+};
+
 // Allocation-relative description retained after emission so disk cache
 // can normalize every site without reading a concurrently patched code word.
 struct DirectLinkSiteInfo {
@@ -123,6 +128,7 @@ public:
     // the originating opcode.
     void BeginColdScratch();
     void EndColdScratch();
+    [[nodiscard]] bool ColdScratchActive() const { return auxiliary_scratch; }
 
     [[nodiscard]] std::optional<FaultRange>
     Forward(ir::Location location,
@@ -137,12 +143,15 @@ public:
                  Label* local_target = nullptr);
     [[nodiscard]] bool CanBypassDispatcher(ir::Location location) const;
     [[nodiscard]] bool CanEmitDirectLink(ir::Location location) const;
-    [[nodiscard]] bool HasDirectLinkSites() const {
-        return !pending_direct_link_sites.empty() || !pending_return_sites.empty();
+    [[nodiscard]] bool CanUseRegionTrampoline() const { return direct_link_active; }
+    [[nodiscard]] bool RequiresRegionTrampoline() const {
+        return !pending_direct_link_sites.empty() || !pending_return_sites.empty() ||
+               !flags_merge_sites.empty();
     }
     [[nodiscard]] const std::vector<DirectLinkSiteInfo>& GetDirectLinkSites() const {
         return pending_direct_link_sites;
     }
+    void EmitFlagsMergeBranch(FlagsMergeTrampolineKind kind);
     // Dispatch to a compile-time-constant guest location, for the
     // "SetLocation(imm) + ReturnToDispatch" shape a direct jmp/call decodes to.
     // Prefer a tracked direct-link site and retain the inline L2 lookup when the
@@ -424,6 +433,11 @@ private:
     std::vector<PendingSpillWrite> pending_spill_writes;
     std::vector<DirectLinkSiteInfo> pending_direct_link_sites;
     std::vector<u32> pending_return_sites;
+    struct FlagsMergeSiteInfo {
+        u32 code_offset{};
+        FlagsMergeTrampolineKind kind{};
+    };
+    std::vector<FlagsMergeSiteInfo> flags_merge_sites;
 
     GPRSMask cur_dirty_gprs{};
     GPRSMask cur_dirty_fprs{};

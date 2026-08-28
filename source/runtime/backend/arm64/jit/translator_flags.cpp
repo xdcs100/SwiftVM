@@ -298,6 +298,18 @@ DirectLinkFlagsBypass JitTranslator::EmitOutlinedNZCVMerge() {
     return {begin, context.CurrentBufferSize(), 0, merge_branch};
 }
 
+void JitTranslator::EmitColdOutlinedNZCVMerge(bool token) {
+    if (token) {
+        MaterializeFlagsTokenResult();
+    }
+    Label resume;
+    __ Adr(ip1, &resume);
+    context.EmitFlagsMergeBranch(
+            token ? FlagsMergeTrampolineKind::NZCVToken
+                  : FlagsMergeTrampolineKind::NZCV);
+    __ Bind(&resume);
+}
+
 void JitTranslator::EmitDeferredNZCVMergeStubs() {
     if (deferred_nzcv_merge_stubs.empty()) {
         return;
@@ -349,10 +361,16 @@ DirectLinkFlagsBypass JitTranslator::MergeNZCV(
         // their existing value in the flags register, so a ClearFlags(CF)
         // between two flag-setting instructions is not overwritten.
         const u64 req = *requested;
-        deferred_merge = outline_direct_link && flags_token_keep &&
-                req == static_cast<u64>(HostFlags::NZCV);
+        const bool full_nzcv = req == static_cast<u64>(HostFlags::NZCV);
+        const bool cold_outline = context.ColdScratchActive() &&
+                                  context.CanUseRegionTrampoline() &&
+                                  !outline_direct_link && full_nzcv;
+        deferred_merge = (outline_direct_link && flags_token_keep && full_nzcv) ||
+                         cold_outline;
         if (deferred_merge) {
-            if (flags_token_valid) {
+            if (cold_outline) {
+                EmitColdOutlinedNZCVMerge(flags_token_valid);
+            } else if (flags_token_valid) {
                 const auto scratch = context.GetSharedTmpX();
                 flags_bypass = EmitDeferredNZCVMerge(scratch, FlagsTokenResult());
             } else {

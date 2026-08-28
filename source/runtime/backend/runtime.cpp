@@ -1038,8 +1038,8 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
     backend::arm64::JitTranslator* emitted_translator = &translator;
     std::optional<backend::arm64::JitContext> fallback_context;
     std::optional<backend::arm64::JitTranslator> fallback_translator;
-    auto allocation = module->AllocCodeCache(buffer_size, context.HasDirectLinkSites());
-    if (allocation.first == backend::INVALID_CACHE_ID && context.HasDirectLinkSites()) {
+    auto allocation = module->AllocCodeCache(buffer_size, context.RequiresRegionTrampoline());
+    if (allocation.first == backend::INVALID_CACHE_ID && context.RequiresRegionTrampoline()) {
         // A unit too large for a <=128MiB trampoline region must not become a
         // half-direct translation or fail solely because direct linking was selected.
         // Re-emit the entire unit with the legacy slot leaf and allocate it
@@ -1290,8 +1290,8 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRBlock* 
     backend::arm64::JitTranslator* emitted_translator = &translator;
     std::optional<backend::arm64::JitContext> fallback_context;
     std::optional<backend::arm64::JitTranslator> fallback_translator;
-    auto allocation = module->AllocCodeCache(buffer_size, context.HasDirectLinkSites());
-    if (allocation.first == backend::INVALID_CACHE_ID && context.HasDirectLinkSites()) {
+    auto allocation = module->AllocCodeCache(buffer_size, context.RequiresRegionTrampoline());
+    if (allocation.first == backend::INVALID_CACHE_ID && context.RequiresRegionTrampoline()) {
         fallback_context.emplace(module, reg_alloc, false);
         fallback_translator.emplace(*fallback_context);
         fallback_translator->Translate(block->GetBlock());
@@ -1368,8 +1368,8 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module,
     backend::arm64::JitTranslator* emitted_translator = &translator;
     std::optional<backend::arm64::JitContext> fallback_context;
     std::optional<backend::arm64::JitTranslator> fallback_translator;
-    auto allocation = module->AllocCodeCache(buffer_size, context.HasDirectLinkSites());
-    if (allocation.first == backend::INVALID_CACHE_ID && context.HasDirectLinkSites()) {
+    auto allocation = module->AllocCodeCache(buffer_size, context.RequiresRegionTrampoline());
+    if (allocation.first == backend::INVALID_CACHE_ID && context.RequiresRegionTrampoline()) {
         fallback_context.emplace(module, reg_alloc, false);
         fallback_translator.emplace(*fallback_context);
         fallback_translator->Translate(block.get());

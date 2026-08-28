@@ -735,6 +735,12 @@ bool JitContext::EmitDirectLink(ir::Location location,
     return true;
 }
 
+void JitContext::EmitFlagsMergeBranch(FlagsMergeTrampolineKind kind) {
+    const u32 offset = CurrentBufferSize();
+    flags_merge_sites.push_back({offset, kind});
+    __ dc32(*EncodeB(0));
+}
+
 bool JitContext::CanBypassDispatcher(ir::Location location) const {
     if (!module->GetModuleConfig().HasOpt(Optimizations::BlockLink)) {
         return false;
@@ -1097,6 +1103,23 @@ u8* JitContext::Flush(const CodeBuffer& code_cache) {
                      static_cast<unsigned long long>(unit_start),
                      static_cast<void*>(code_cache.exec_data),
                      CurrentBufferSize());
+    }
+    if (!flags_merge_sites.empty()) {
+        auto* cache = module->GetCodeCache(code_cache.exec_data);
+        ASSERT(cache);
+        const auto& region = cache->GetRegion();
+        auto* emitted = masm.GetBuffer()->GetStartAddress<u8*>();
+        for (const auto& site : flags_merge_sites) {
+            auto* trampoline = static_cast<u8*>(
+                    site.kind == FlagsMergeTrampolineKind::NZCV
+                            ? cache->GetFlagsMergeRegionTrampoline()
+                            : cache->GetFlagsMergeTokenRegionTrampoline());
+            ASSERT(trampoline && region.ContainsRx(trampoline));
+            auto* rx_site = code_cache.exec_data + site.code_offset;
+            const auto branch = EncodeB(trampoline - rx_site);
+            ASSERT(branch);
+            std::memcpy(emitted + site.code_offset, &*branch, sizeof(*branch));
+        }
     }
     if (!pending_return_sites.empty()) {
         auto* cache = module->GetCodeCache(code_cache.exec_data);

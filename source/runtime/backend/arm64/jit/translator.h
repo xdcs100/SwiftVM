@@ -547,6 +547,7 @@ private:
             const XRegister& scratch,
             const XRegister& token);
     DirectLinkFlagsBypass EmitOutlinedNZCVMerge();
+    void EmitColdOutlinedNZCVMerge(bool token);
     void EmitDeferredNZCVMergeStubs();
     [[nodiscard]] std::optional<u64>
     PendingNZCVMergeMask(FlagsRegsAuditMergeCause cause) const;
