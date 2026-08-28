@@ -2,6 +2,7 @@
 
 #include "runtime/backend/arm64/defines.h"
 #include "runtime/common/sse42str_result.h"
+#include "runtime/frontend/x86/sse42str_helper.h"
 
 namespace swift::runtime::backend::arm64 {
 
@@ -25,6 +26,26 @@ void JitTranslator::EmitSse42Str(ir::Inst* inst) {
     const u32 all = (1u << n) - 1u;
 
     auto result = context.W(ir::Value{inst});
+    if (imm == 0x1au) {
+        const auto target = swift::x86::Sse42StrVectorHelperAddress();
+        if (target) {
+            const std::array vector_args{a, b};
+            EmitHostCall(
+                    ir::Lambda{
+                            ir::DataClass{ir::Imm{target}},
+                            ir::HelperCallTraits{
+                                    .uniform = ir::UniformEffectId::None,
+                                    .host_fp = ir::HostFpEffect::FPCRTransparent,
+                            }},
+                    {ir::DataClass{ir::Imm{u64(imm)}}},
+                    true,
+                    result,
+                    std::nullopt,
+                    vector_args,
+                    false);
+            return;
+        }
+    }
     ir::Flags publish_flags = cur_block ? ir::Flags::None : ir::Flags::All;
     if (cur_block) {
         for (auto& user : cur_block->GetInstList()) {

@@ -7,6 +7,7 @@
 #include "runtime/backend/arm64/fpcr_mode.h"
 #include "runtime/common/helper_abi.h"
 #include "runtime/common/svm_config.h"
+#include "runtime/frontend/x86/sse42str_helper.h"
 #include "runtime/frontend/x86/x87.h"
 #include "translator/x86/cpu.h"
 
@@ -179,12 +180,18 @@ void JitTranslator::PrepareHostCallThunks(const std::vector<ir::Block*>& blocks)
     host_call_thunks.clear();
     for (auto* block : blocks) {
         for (auto& inst : block->GetInstList()) {
-            if (inst.GetOp() != ir::OpCode::CallLambda) {
-                continue;
+            VAddr target{};
+            if (inst.GetOp() == ir::OpCode::CallLambda) {
+                const auto lambda = inst.GetArg<ir::Lambda>(0);
+                if (!lambda.IsValue()) {
+                    target = lambda.GetImm().Get();
+                }
+            } else if (inst.GetOp() == ir::OpCode::Sse42Str &&
+                       inst.GetArg<ir::Imm>(2).Get() == 0x1au) {
+                target = swift::x86::Sse42StrVectorHelperAddress();
             }
-            const auto lambda = inst.GetArg<ir::Lambda>(0);
-            if (!lambda.IsValue()) {
-                ++host_call_thunks[lambda.GetImm().Get()].uses;
+            if (target) {
+                ++host_call_thunks[target].uses;
             }
         }
     }
@@ -229,11 +236,21 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
                                  const std::vector<ir::DataClass>& args,
                                  bool has_result,
                                  const Register& result,
-                                 std::optional<Register> secondary_result) {
+                                 std::optional<Register> secondary_result,
+                                 std::span<const VRegister> vector_args,
+                                 bool preserve_flags) {
     ASSERT(args.size() <= 8);
-    MergeNZCV(FlagsRegsAuditMergeCause::Helper,
-              FlagsRegsAuditEdgeKind::Host);
-    FlushFlags();
+    if (preserve_flags) {
+        MergeNZCV(FlagsRegsAuditMergeCause::Helper,
+                  FlagsRegsAuditEdgeKind::Host);
+        FlushFlags();
+    } else {
+        flags_set = ir::Flags::None;
+        flags_clear = ir::Flags::None;
+        nzcv_dirty = false;
+        nzcv_requested = {};
+        InvalidateFlagsToken();
+    }
 
     // Materialize value arguments before taking the register snapshot. In
     // function mode an argument can be RegAlloc::MEM; context.X() then reloads
@@ -348,6 +365,9 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
     boost::container::small_vector<u32, 32> save_fprs;
     if (!general_registers_only) {
         FPRSMask live_fprs = context.GetLiveFPRs();
+        for (const auto& reg : vector_args) {
+            live_fprs.Mark(reg.GetCode());
+        }
         for (const auto& desc : context.GetConfig().buffers_static_alloc) {
             if (desc.is_float) {
                 live_fprs.Mark(desc.reg);
@@ -417,6 +437,12 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
                    "host call argument in an unsaved register");
         return u32(gpr_slot[code]);
     };
+    auto saved_fpr_offset = [&](u32 code) -> u32 {
+        const auto it = std::find(save_fprs.begin(), save_fprs.end(), code);
+        ASSERT_MSG(it != save_fprs.end(),
+                   "host call vector argument in an unsaved register");
+        return kSimdSaveOffset + u32(std::distance(save_fprs.begin(), it)) * 16u;
+    };
 
     __ Sub(sp, sp, kSaveBytes);
     for (size_t i = 0; i + 1 < save_gprs.size(); i += 2) {
@@ -453,6 +479,10 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
                 __ Mov(dst, src);
             }
         }
+    }
+    for (u32 i = 0; i < vector_args.size(); ++i) {
+        __ Ldr(VRegister::GetQRegFromCode(i),
+               MemOperand(sp, saved_fpr_offset(vector_args[i].GetCode())));
     }
 
     // Conservative helpers execute under the caller's native FP environment.

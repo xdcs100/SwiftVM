@@ -607,7 +607,9 @@ private:
                       const std::vector<ir::DataClass> &args,
                       bool has_result,
                       const Register &result,
-                      std::optional<Register> secondary_result = std::nullopt);
+                      std::optional<Register> secondary_result = std::nullopt,
+                      std::span<const VRegister> vector_args = {},
+                      bool preserve_flags = true);
     void PrepareHostCallThunks(const std::vector<ir::Block*>& blocks);
     void MaterializeHostCallTarget(u64 target);
     bool TryEmitSharedHostCall(const ir::Lambda& lambda);

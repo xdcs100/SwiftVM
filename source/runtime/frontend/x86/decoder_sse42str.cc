@@ -334,6 +334,7 @@
 #include "runtime/common/helper_abi.h"
 #include "runtime/common/sse42str_result.h"
 #include "runtime/frontend/x86/decoder_internal.h"
+#include "runtime/frontend/x86/sse42str_helper.h"
 #include "runtime/frontend/x86/vex_decoder.h"
 
 namespace swift::x86 {
@@ -1022,6 +1023,18 @@ u64 Sse42StrEvalFast(u64 a_lo, u64 a_hi, u64 b_lo, u64 b_hi, u64 ctl_word) {
 #endif
 }
 
+#if SVM_SSE42STR_NEON
+u64 Sse42StrEvalVector(uint8x16_t a, uint8x16_t b, u64 ctl_word) {
+    const auto a64 = vreinterpretq_u64_u8(a);
+    const auto b64 = vreinterpretq_u64_u8(b);
+    return Sse42StrEvalFast(vgetq_lane_u64(a64, 0),
+                            vgetq_lane_u64(a64, 1),
+                            vgetq_lane_u64(b64, 0),
+                            vgetq_lane_u64(b64, 1),
+                            ctl_word);
+}
+#endif
+
 // The CallLambda target.  `token` is Sse42StrStage's return: an ordering edge,
 // never read.
 u64 Sse42StrEval(u64 b_lo, u64 b_hi, u64 token) {
@@ -1042,6 +1055,14 @@ ir::Value VecConst(ir::Assembler* as, u64 lo, u64 hi) {
 }
 
 }  // namespace
+
+VAddr Sse42StrVectorHelperAddress() {
+#if SVM_SSE42STR_NEON
+    return reinterpret_cast<VAddr>(&Sse42StrEvalVector);
+#else
+    return 0;
+#endif
+}
 
 // ---------------------------------------------------------------------------
 // Test and benchmark hook -- deliberately NOT declared in any header
