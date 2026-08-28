@@ -1,6 +1,8 @@
 #include <atomic>
+#include <array>
 #include <cstring>
 #include "runtime/backend/signal_handler.h"
+#include "runtime/common/helper_simd_guard.h"
 #include "runtime/frontend/x86/decoder_internal.h"
 
 namespace swift::x86 {
@@ -191,6 +193,24 @@ static u64 RepStos8(u64 dst, u64 value, u64 count) {
     return faulted ? kStringGuestFault : 0;
 }
 
+constexpr auto kRepMovsResident =
+        &runtime::CallPreservingV16V23<&RepMovs, u64, u64, u64>;
+using ResidentStringHelper = u64 (*)(u64, u64, u64);
+
+#define RESIDENT_STRING_HELPER(name) \
+    &runtime::CallPreservingV16V23<&name, u64, u64, u64>
+
+constexpr std::array<ResidentStringHelper, 4> kRepStosResident{
+        RESIDENT_STRING_HELPER(RepStos1),
+        RESIDENT_STRING_HELPER(RepStos2),
+        RESIDENT_STRING_HELPER(RepStos4),
+        RESIDENT_STRING_HELPER(RepStos8),
+};
+
+constexpr ir::HelperCallTraits kResidentStringHelperTraits{
+        .host_registers = ir::HostRegisterEffect::PreservesV16V23,
+};
+
 // rep cmps/scas: run the early-terminating comparison loop and return the
 // number of elements actually compared (the decoder reloads the final pair to
 // produce flags). REPZ (repnz=0) stops on the first not-equal element; REPNZ
@@ -273,6 +293,42 @@ DEFINE_REP_SCAS(RepScasZ8, 8, 0)
 DEFINE_REP_SCAS(RepScasNZ8, 8, 1)
 #undef DEFINE_REP_SCAS
 
+constexpr std::array<ResidentStringHelper, 4> kRepCmpsZResident{
+        RESIDENT_STRING_HELPER(RepCmpsZ1),
+        RESIDENT_STRING_HELPER(RepCmpsZ2),
+        RESIDENT_STRING_HELPER(RepCmpsZ4),
+        RESIDENT_STRING_HELPER(RepCmpsZ8),
+};
+constexpr std::array<ResidentStringHelper, 4> kRepCmpsNZResident{
+        RESIDENT_STRING_HELPER(RepCmpsNZ1),
+        RESIDENT_STRING_HELPER(RepCmpsNZ2),
+        RESIDENT_STRING_HELPER(RepCmpsNZ4),
+        RESIDENT_STRING_HELPER(RepCmpsNZ8),
+};
+constexpr std::array<ResidentStringHelper, 4> kRepScasZResident{
+        RESIDENT_STRING_HELPER(RepScasZ1),
+        RESIDENT_STRING_HELPER(RepScasZ2),
+        RESIDENT_STRING_HELPER(RepScasZ4),
+        RESIDENT_STRING_HELPER(RepScasZ8),
+};
+constexpr std::array<ResidentStringHelper, 4> kRepScasNZResident{
+        RESIDENT_STRING_HELPER(RepScasNZ1),
+        RESIDENT_STRING_HELPER(RepScasNZ2),
+        RESIDENT_STRING_HELPER(RepScasNZ4),
+        RESIDENT_STRING_HELPER(RepScasNZ8),
+};
+
+#undef RESIDENT_STRING_HELPER
+
+static size_t StringHelperIndex(u64 step) {
+    switch (step) {
+        case 1: return 0;
+        case 2: return 1;
+        case 4: return 2;
+        default: return 3;
+    }
+}
+
 // fxsave: zero the 512-byte region and plant the architectural defaults
 // (FCW = 0x037F, MXCSR_MASK = 0x0000FFFF); the decoder then stores the live
 // mxcsr and xmm0-15 over it via IR.
@@ -319,7 +375,11 @@ void X64Decoder::DecodeMovs(_DInst& insn) {
         if (TsoOrdered(insn)) {
             __ MemoryBarrierTSO();
         }
-        auto status = __ CallHost(&RepMovs, dst_addr, src_addr, packed)
+        auto status = __ CallHostWithTraits(kResidentStringHelperTraits,
+                                            kRepMovsResident,
+                                            dst_addr,
+                                            src_addr,
+                                            packed)
                               .SetType(ir::ValueType::U64);
         if (TsoOrdered(insn)) {
             __ MemoryBarrierTSO();
@@ -383,19 +443,17 @@ void X64Decoder::DecodeStos(_DInst& insn) {
         // Widen the accumulator: a narrow-typed value passed straight into a
         // host call gets a spill allocation the JIT cannot produce.
         auto acc64 = __ ZeroExtend64(acc);
-        ir::Value status;
         // As with REP MOVS, x86 requires ordering at the operation boundary,
         // not atomic visibility of the whole filled range.
         if (TsoOrdered(insn)) {
             __ MemoryBarrierTSO();
         }
         const u64 step = ir::GetValueSizeByte(size);
-        switch (step) {
-            case 1: status = __ CallHost(&RepStos1, dst_addr, acc64, packed_count); break;
-            case 2: status = __ CallHost(&RepStos2, dst_addr, acc64, packed_count); break;
-            case 4: status = __ CallHost(&RepStos4, dst_addr, acc64, packed_count); break;
-            default: status = __ CallHost(&RepStos8, dst_addr, acc64, packed_count); break;
-        }
+        auto status = __ CallHostWithTraits(kResidentStringHelperTraits,
+                                            kRepStosResident[StringHelperIndex(step)],
+                                            dst_addr,
+                                            acc64,
+                                            packed_count);
         status = status.SetType(ir::ValueType::U64);
         if (TsoOrdered(insn)) {
             __ MemoryBarrierTSO();
@@ -508,22 +566,12 @@ void X64Decoder::DecodeCmps(_DInst& insn) {
     // ArithWithFlags is the final flag commit. (Mirrors DecodeShift, which
     // branches on its plain count before the flag-defining work.)
     auto skip = __ NotGoto(__ TestNotZero(count));
-    ir::Value iters;
-    if (repnz) {
-        switch (step) {
-            case 1: iters = __ CallHost(&RepCmpsNZ1, si0, di0, packed_count); break;
-            case 2: iters = __ CallHost(&RepCmpsNZ2, si0, di0, packed_count); break;
-            case 4: iters = __ CallHost(&RepCmpsNZ4, si0, di0, packed_count); break;
-            default: iters = __ CallHost(&RepCmpsNZ8, si0, di0, packed_count); break;
-        }
-    } else {
-        switch (step) {
-            case 1: iters = __ CallHost(&RepCmpsZ1, si0, di0, packed_count); break;
-            case 2: iters = __ CallHost(&RepCmpsZ2, si0, di0, packed_count); break;
-            case 4: iters = __ CallHost(&RepCmpsZ4, si0, di0, packed_count); break;
-            default: iters = __ CallHost(&RepCmpsZ8, si0, di0, packed_count); break;
-        }
-    }
+    const auto& helpers = repnz ? kRepCmpsNZResident : kRepCmpsZResident;
+    auto iters = __ CallHostWithTraits(kResidentStringHelperTraits,
+                                       helpers[StringHelperIndex(step)],
+                                       si0,
+                                       di0,
+                                       packed_count);
     iters = iters.SetType(ir::ValueType::U64);
     // The comparison consumed every element it was allowed to touch and the
     // next one is unmapped: guest #PF. Checked before iters is used, so the
@@ -586,22 +634,12 @@ void X64Decoder::DecodeScas(_DInst& insn) {
     // CallHost stays inside the branch so its stale NZCV never leaks into the
     // no-op path; ArithWithFlags is the final flag commit on the active path.
     auto skip = __ NotGoto(__ TestNotZero(count));
-    ir::Value iters;
-    if (repnz) {
-        switch (step) {
-            case 1: iters = __ CallHost(&RepScasNZ1, acc64, di0, packed_count); break;
-            case 2: iters = __ CallHost(&RepScasNZ2, acc64, di0, packed_count); break;
-            case 4: iters = __ CallHost(&RepScasNZ4, acc64, di0, packed_count); break;
-            default: iters = __ CallHost(&RepScasNZ8, acc64, di0, packed_count); break;
-        }
-    } else {
-        switch (step) {
-            case 1: iters = __ CallHost(&RepScasZ1, acc64, di0, packed_count); break;
-            case 2: iters = __ CallHost(&RepScasZ2, acc64, di0, packed_count); break;
-            case 4: iters = __ CallHost(&RepScasZ4, acc64, di0, packed_count); break;
-            default: iters = __ CallHost(&RepScasZ8, acc64, di0, packed_count); break;
-        }
-    }
+    const auto& helpers = repnz ? kRepScasNZResident : kRepScasZResident;
+    auto iters = __ CallHostWithTraits(kResidentStringHelperTraits,
+                                       helpers[StringHelperIndex(step)],
+                                       acc64,
+                                       di0,
+                                       packed_count);
     iters = iters.SetType(ir::ValueType::U64);
     RaiseIfGuestFault(iters, insn_pc);
     auto adv = __ Mul(iters, ir::Operand{ir::Imm(step)});

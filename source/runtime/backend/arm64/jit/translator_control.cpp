@@ -282,6 +282,10 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
             GeneralRegistersOnlyABIEnabled() && !lambda.IsValue() &&
             lambda.GetHostRegisterEffect() ==
                     ir::HostRegisterEffect::GeneralOnly;
+    const bool preserves_v16_v23 =
+            !lambda.IsValue() &&
+            lambda.GetHostRegisterEffect() ==
+                    ir::HostRegisterEffect::PreservesV16V23;
 
     // Save the caller-saved registers that are actually live across the call,
     // plus x29/x30: the Blr below clobbers the link register holding this
@@ -350,7 +354,9 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
             }
         }
         for (u32 code = 0; code < 32; ++code) {
-            if (live_fprs.Get(code) && (!preserve_all_leaf || code <= 7)) {
+            if (live_fprs.Get(code) &&
+                (!preserve_all_leaf || code <= 7) &&
+                (!preserves_v16_v23 || code < 16 || code > 23)) {
                 save_fprs.push_back(code);
             }
         }

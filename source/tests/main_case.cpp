@@ -287,6 +287,16 @@ TEST_CASE("helper effects default conservative and compose with ABI metadata") {
             HostRegisterEffect::GeneralOnly);
     REQUIRE(combined.GetHelperABI() == HelperABI::PreserveAllLeaf);
     REQUIRE(combined.GetUniformEffectId() == UniformEffectId::None);
+
+    const Lambda resident{
+            address,
+            HelperCallTraits{
+                    .host_registers = HostRegisterEffect::PreservesV16V23,
+            }};
+    REQUIRE(resident.GetHostRegisterEffect() ==
+            HostRegisterEffect::PreservesV16V23);
+    REQUIRE(resident.GetHelperABI() == HelperABI::NormalAAPCS);
+    REQUIRE(resident.GetUniformEffectId() == UniformEffectId::Unknown);
 }
 
 TEST_CASE("config hash includes programmatic effective AFP policy") {
@@ -5356,12 +5366,9 @@ TEST_CASE("resident XMM coalescing preserves snapshots and fixed-home windows") 
         }
     }
 
-    SECTION("inline helpers snapshot every resident FPR descriptor") {
+    SECTION("helper snapshots honor resident FPR preservation contracts") {
         std::vector<UniformMapDesc> descriptors;
-        const swift::u32 descriptor_count =
-                GetSvmConfig().xmm_resident && GetSvmConfig().xmm_resident_hi
-                ? 12u
-                : 8u;
+        constexpr swift::u32 descriptor_count = 12;
         for (swift::u32 index = 0; index < descriptor_count; ++index) {
             descriptors.emplace_back(index * sizeof(swift::u128), sizeof(swift::u128),
                                      16 + index, true);
@@ -5376,49 +5383,59 @@ TEST_CASE("resident XMM coalescing preserves snapshots and fixed-home windows") 
                         descriptor_count * sizeof(swift::u128)),
                 .buffers_static_alloc = descriptors,
         };
-        AddressSpace address_space{config};
-        IntrusivePtr<Block> block{new Block(0, Location{0xa480})};
-        (void)block->CallLambda(
-                Lambda{Imm{swift::u64{reinterpret_cast<swift::VAddr>(
-                        FptrCast(&ReadFPCRFromHostHelper))}}});
-        block->SetTerminal(terminal::ReturnToDispatch{});
-        block->ReIdInstr();
-        RegAlloc alloc{block->MaxInstrId(),
-                       address_space.GetTrampolines().GetGPRRegs(),
-                       address_space.GetTrampolines().GetFPRRegs(), FeatureSet{}};
-        RegisterAllocPass::Run(block.get(), &alloc, false, FeatureSet{});
-        arm64::JitContext context{address_space.GetDefaultModule(), alloc};
-        arm64::JitTranslator translator{context};
-        translator.Translate(block.get());
-        context.Finish();
+        auto snapshot_counts = [&](HostRegisterEffect effect) {
+            AddressSpace address_space{config};
+            IntrusivePtr<Block> block{new Block(0, Location{0xa480})};
+            (void)block->CallLambda(Lambda{
+                    DataClass{Imm{swift::u64{reinterpret_cast<swift::VAddr>(
+                            FptrCast(&ReadFPCRFromHostHelper))}}},
+                    HelperCallTraits{.host_registers = effect}});
+            block->SetTerminal(terminal::ReturnToDispatch{});
+            block->ReIdInstr();
+            RegAlloc alloc{block->MaxInstrId(),
+                           address_space.GetTrampolines().GetGPRRegs(),
+                           address_space.GetTrampolines().GetFPRRegs(), FeatureSet{}};
+            RegisterAllocPass::Run(block.get(), &alloc, false, FeatureSet{});
+            arm64::JitContext context{address_space.GetDefaultModule(), alloc};
+            arm64::JitTranslator translator{context};
+            translator.Translate(block.get());
+            context.Finish();
 
-        auto& masm = context.GetMasm();
-        auto* first = masm.GetBuffer()->GetStartAddress<const vixl::aarch64::Instruction*>();
-        auto* last = masm.GetBuffer()->GetEndAddress<const vixl::aarch64::Instruction*>();
-        vixl::aarch64::Decoder decoder;
-        vixl::aarch64::Disassembler disassembler;
-        decoder.AppendVisitor(&disassembler);
-        std::size_t stores = 0;
-        std::size_t loads = 0;
-        for (auto* instruction = first; instruction < last;
-             instruction = instruction->GetNextInstruction()) {
-            decoder.Decode(instruction);
-            const std::string_view line = disassembler.GetOutput();
-            stores += line.find("stp q16, q17") != std::string_view::npos ||
-                      line.find("stp q18, q19") != std::string_view::npos ||
-                      line.find("stp q20, q21") != std::string_view::npos ||
-                      line.find("stp q22, q23") != std::string_view::npos ||
-                      line.find("stp q24, q25") != std::string_view::npos ||
-                      line.find("stp q26, q27") != std::string_view::npos;
-            loads += line.find("ldp q16, q17") != std::string_view::npos ||
-                     line.find("ldp q18, q19") != std::string_view::npos ||
-                     line.find("ldp q20, q21") != std::string_view::npos ||
-                     line.find("ldp q22, q23") != std::string_view::npos ||
-                     line.find("ldp q24, q25") != std::string_view::npos ||
-                     line.find("ldp q26, q27") != std::string_view::npos;
-        }
-        REQUIRE(stores == descriptor_count / 2);
-        REQUIRE(loads == descriptor_count / 2);
+            auto& masm = context.GetMasm();
+            auto* first = masm.GetBuffer()->GetStartAddress<const vixl::aarch64::Instruction*>();
+            auto* last = masm.GetBuffer()->GetEndAddress<const vixl::aarch64::Instruction*>();
+            vixl::aarch64::Decoder decoder;
+            vixl::aarch64::Disassembler disassembler;
+            decoder.AppendVisitor(&disassembler);
+            std::array<std::size_t, 4> counts{};
+            for (auto* instruction = first; instruction < last;
+                 instruction = instruction->GetNextInstruction()) {
+                decoder.Decode(instruction);
+                const std::string_view line = disassembler.GetOutput();
+                const bool low_store = line.find("stp q16, q17") != std::string_view::npos ||
+                                       line.find("stp q18, q19") != std::string_view::npos ||
+                                       line.find("stp q20, q21") != std::string_view::npos ||
+                                       line.find("stp q22, q23") != std::string_view::npos;
+                const bool low_load = line.find("ldp q16, q17") != std::string_view::npos ||
+                                      line.find("ldp q18, q19") != std::string_view::npos ||
+                                      line.find("ldp q20, q21") != std::string_view::npos ||
+                                      line.find("ldp q22, q23") != std::string_view::npos;
+                const bool high_store = line.find("stp q24, q25") != std::string_view::npos ||
+                                        line.find("stp q26, q27") != std::string_view::npos;
+                const bool high_load = line.find("ldp q24, q25") != std::string_view::npos ||
+                                       line.find("ldp q26, q27") != std::string_view::npos;
+                counts[0] += low_store;
+                counts[1] += low_load;
+                counts[2] += high_store;
+                counts[3] += high_load;
+            }
+            return counts;
+        };
+
+        REQUIRE(snapshot_counts(HostRegisterEffect::MayTouchSIMD) ==
+                std::array<std::size_t, 4>{4, 4, 2, 2});
+        REQUIRE(snapshot_counts(HostRegisterEffect::PreservesV16V23) ==
+                std::array<std::size_t, 4>{0, 0, 2, 2});
     }
 }
 
