@@ -592,10 +592,15 @@ bool TryBranchOnly(Block* block,
         const bool adjacent = primary_it != insts.end() &&
                 std::next(primary_it) != insts.end() &&
                 *std::next(primary_it) == carry_inversions.front();
+        const bool direct_width = function &&
+                block->GetStartLocation() !=
+                        function->GetFunction()->GetStartLocation() &&
+                (width == sizeof(u32) || width == sizeof(u64));
+        const bool narrow_load = width <= sizeof(u16) &&
+                right.GetRight().Null() && right.GetOp() == OperandOp::Plus &&
+                right_value && right_value->GetOp() == OpCode::LoadMemory;
         if (carry_inversions.size() != 1 || flag_writes.size() != 1 ||
-            !adjacent || width > sizeof(u16) ||
-            !right.GetRight().Null() || right.GetOp() != OperandOp::Plus ||
-            !right_value || right_value->GetOp() != OpCode::LoadMemory ||
+            !adjacent || (!direct_width && !narrow_load) ||
             True(required & Flags::Carry)) {
             stats.reject_shape++;
             return false;

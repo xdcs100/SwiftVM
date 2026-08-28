@@ -66,6 +66,50 @@ TEST_CASE("branch-only flags discard dead carry normalization") {
                          }));
 }
 
+TEST_CASE("branch-only flags discard full-width carry normalization") {
+    for (const auto type : {ValueType::U32, ValueType::U64}) {
+        FeatureSet features{};
+        HIRBuilder builder{1, true, features};
+        auto* function = builder.AppendFunction(Location{0x9410}, Location{0x9450});
+        auto* compare_block = builder.LinkBlock(
+                terminal::LinkBlock{Location{0x9420}});
+        builder.SetCurBlock(compare_block);
+        const auto left = function->LoadImm(Imm{9u}).SetType(type);
+        const auto right = function->LoadImm(Imm{4u}).SetType(type);
+        const auto result = function->Sub(left, Operand{right}).SetType(type);
+        function->SaveFlags(result, Flags::All);
+        function->InvertCarry();
+        function->AdvancePC(Imm{3u});
+        const auto condition = function->LocalCondSet(Cond::NE)
+                                       .SetType(ValueType::U8);
+        auto [then_block, else_block] = builder.If(terminal::If{
+                condition,
+                terminal::LinkBlock{Location{0x9430}},
+                terminal::LinkBlock{Location{0x9440}},
+        });
+
+        builder.SetCurBlock(then_block);
+        AddFlagsOverwrite(function);
+        builder.SetCurBlock(else_block);
+        AddFlagsOverwrite(function);
+        function->EndFunction();
+        function->ComputeRPO();
+        function->IdByRPO();
+
+        FlagsEliminationPass::Run(function, features);
+
+        const auto pseudos = result.Def()->GetPseudoOperations(
+                OpCode::BranchOnlyFlags);
+        REQUIRE(pseudos.size() == 1);
+        REQUIRE(pseudos.front()->GetArg<Flags>(1) == Flags::Zero);
+        REQUIRE(std::none_of(compare_block->GetInstList().begin(),
+                             compare_block->GetInstList().end(),
+                             [](const Inst& inst) {
+                                 return inst.GetOp() == OpCode::InvertCarry;
+                             }));
+    }
+}
+
 TEST_CASE("function flags liveness removes only internally dead publications") {
     FeatureSet features{};
     HIRBuilder builder{1, true, features};

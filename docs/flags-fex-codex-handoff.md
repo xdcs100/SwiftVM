@@ -3041,6 +3041,30 @@ peepholes.
   Closing this `freeSpace` pool requires an explicit split-entry ownership contract that preserves
   overlapping x86 streams, call-return ownership and public-entry recovery semantics.
 
+- A function/region-local R15 carrier in `x9` was rejected and fully removed. State write-through,
+  public-entry reloads and block-local epochs each still produced a deterministic SQLite guest halt
+  around `sqlite3BtreeOpen`/`setSectorSize`; replacing the suppressed reload with the real load
+  passed. The restored translator is byte-identical to the baseline
+  (`ef3548a9d472a15c5444ecf3e759f88df88023bdaed9dce6c743646ffcf32c4c`) and an exact paired
+  capture keeps all 2,166 roots at 273,715 instructions. Do not retry heuristic R15 residency;
+  it needs explicit split-entry state ownership and fault metadata.
+
+- Full-width dead carry normalization is now removed in non-entry HIR blocks. For direct U32/U64
+  subtraction, the adjacent `InvertCarry` changes only Carry, so the existing successor-liveness
+  proof can discard it when the branch does not consume Carry; public function entries remain
+  excluded because they can otherwise enlarge the pending-flags call-entry veneer. Exact paired
+  SQLite keeps all 2,167 roots and moves `273,723 -> 273,030` (`-693`, `-0.253176%`), with 187
+  shrinking and 42 growing roots. Bounded smallpt keeps all 263 roots and moves
+  `38,713 -> 38,657` (`-56`, `-0.144654%`), with 14 shrinking and five growing roots; its PPM
+  SHA-256 remains `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`.
+  CoreMark 2k keeps all 295 roots, moves `38,696 -> 38,631` (`-65`, `-0.167976%`) and retains
+  `crcfinal=0x4983`. Three interleaved short SQLite pairs move wall/internal medians
+  `1.013968/0.757 -> 1.000986/0.751s`; all six timing-normalized outputs are byte-identical.
+  Mac and Orb pass the dedicated two-case/nine-assertion focus and the broader
+  nine-case/126-assertion flag focus. Fixed-seed 424242, 256-case ALU and setcc/cmov/jcc
+  comparisons retain the baseline's exact 79 and 123 established mismatch sets with zero
+  candidate-only mismatch. No stress run, probe, diagnostic path or environment switch remains.
+
 ## Orb loop
 
 ```
