@@ -76,9 +76,6 @@ void TerminalLocationPublication::Prepare(std::span<ir::Block* const> blocks,
             continue;
         }
         deferred.insert(candidate.inst);
-        if (!miss_labels[candidate.reg]) {
-            miss_labels[candidate.reg] = std::make_unique<Label>();
-        }
     }
 }
 
@@ -91,6 +88,15 @@ void TerminalLocationPublication::Reset() {
 
 bool TerminalLocationPublication::Defers(const ir::Inst* inst) const {
     return deferred.contains(inst);
+}
+
+Label* TerminalLocationPublication::GetOrCreateMissLabel(
+        const XRegister& target) {
+    auto& label = miss_labels[target.GetCode()];
+    if (!label) {
+        label = std::make_unique<Label>();
+    }
+    return label.get();
 }
 
 Label* TerminalLocationPublication::MissLabel(const XRegister& target) const {

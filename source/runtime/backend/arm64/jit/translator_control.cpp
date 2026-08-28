@@ -838,8 +838,8 @@ void JitTranslator::EmitSetLocation(ir::Inst* inst) {
         if (!terminal_location_publication.Defers(inst)) {
             __ Str(target, MemOperand(state, state_offset_current_loc));
         } else {
-            dynamic_location_miss = terminal_location_publication.MissLabel(target);
-            ASSERT(dynamic_location_miss);
+            dynamic_location_miss =
+                    terminal_location_publication.GetOrCreateMissLabel(target);
         }
         dynamic_next_loc = location.GetValue();
     } else {

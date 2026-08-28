@@ -18,6 +18,7 @@ public:
     void Reset();
 
     [[nodiscard]] bool Defers(const ir::Inst* inst) const;
+    [[nodiscard]] Label* GetOrCreateMissLabel(const XRegister& target);
     [[nodiscard]] Label* MissLabel(const XRegister& target) const;
     [[nodiscard]] RecoveryOffsets EmitColdPaths(JitContext& context);
 
