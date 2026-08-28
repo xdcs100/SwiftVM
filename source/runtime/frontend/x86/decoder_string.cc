@@ -216,6 +216,7 @@ constexpr std::array<ResidentStringHelper, 4> kRepStosResident{
 };
 
 constexpr ir::HelperCallTraits kResidentStringHelperTraits{
+        .host_fp = ir::HostFpEffect::FPCRTransparent,
         .host_registers = ir::HostRegisterEffect::PreservesPinnedState,
 };
 

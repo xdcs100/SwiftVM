@@ -291,8 +291,10 @@ TEST_CASE("helper effects default conservative and compose with ABI metadata") {
     const Lambda resident{
             address,
             HelperCallTraits{
+                    .host_fp = HostFpEffect::FPCRTransparent,
                     .host_registers = HostRegisterEffect::PreservesPinnedState,
             }};
+    REQUIRE(resident.GetHostFpEffect() == HostFpEffect::FPCRTransparent);
     REQUIRE(resident.GetHostRegisterEffect() ==
             HostRegisterEffect::PreservesPinnedState);
     REQUIRE(resident.GetHelperABI() == HelperABI::NormalAAPCS);

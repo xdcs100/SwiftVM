@@ -283,7 +283,7 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
             LeafHelperABIEnabled(context.GetFeatures()) && !lambda.IsValue() &&
             lambda.GetHelperABI() == ir::HelperABI::PreserveAllLeaf;
     const bool fpcr_transparent =
-            sse_afp_nan && !lambda.IsValue() &&
+            !lambda.IsValue() &&
             lambda.GetHostFpEffect() == ir::HostFpEffect::FPCRTransparent;
     const bool general_registers_only =
             GeneralRegistersOnlyABIEnabled() && !lambda.IsValue() &&
@@ -294,6 +294,9 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
             lambda.GetHostRegisterEffect() ==
                     ir::HostRegisterEffect::PreservesPinnedState;
     ASSERT(!preserves_pinned_state || args.size() <= 3);
+    bool register_result =
+            preserves_pinned_state && fpcr_transparent && has_result &&
+            !secondary_result;
 
     // Save the caller-saved registers that are actually live across the call,
     // plus x29/x30: the Blr below clobbers the link register holding this
@@ -366,6 +369,14 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
             save_gprs.push_back(code);
         }
     }
+    if (register_result) {
+        for (u32 code : save_gprs) {
+            if (code == ip0.GetCode()) {
+                register_result = false;
+                break;
+            }
+        }
+    }
     boost::container::small_vector<u32, 32> save_fprs;
     if (!general_registers_only) {
         FPRSMask live_fprs = context.GetLiveFPRs();
@@ -422,7 +433,9 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
     const u32 kLinkSlot = cursor;
     cursor += 16;
     const u32 kResultSlot = cursor;
-    cursor += 8;
+    if (!register_result) {
+        cursor += 8;
+    }
     const u32 kSecondaryResultSlot = cursor;
     if (secondary_result) {
         cursor += 8;
@@ -504,7 +517,11 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
         }
     }
 
-    __ Str(x0, MemOperand(sp, kResultSlot));
+    if (register_result) {
+        __ Mov(ip0, x0);
+    } else {
+        __ Str(x0, MemOperand(sp, kResultSlot));
+    }
     if (secondary_result) {
         __ Str(x1, MemOperand(sp, kSecondaryResultSlot));
     }
@@ -535,7 +552,11 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
     }
     __ Ldp(x29, x30, MemOperand(sp, kLinkSlot));
     if (has_result) {
-        __ Ldr(result, MemOperand(sp, kResultSlot));
+        if (register_result) {
+            __ Mov(result, ip0);
+        } else {
+            __ Ldr(result, MemOperand(sp, kResultSlot));
+        }
     }
     if (secondary_result) {
         __ Ldr(*secondary_result, MemOperand(sp, kSecondaryResultSlot));
