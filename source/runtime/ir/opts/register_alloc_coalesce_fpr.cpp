@@ -38,6 +38,8 @@ bool IsResidentFPRProducer(OpCode op, bool scalar_insert, bool scalar_tie) {
         case OpCode::VecXor:
         case OpCode::VecAdd:
         case OpCode::VecSub:
+        case OpCode::VecCmpEq:
+        case OpCode::VecCmpGt:
         case OpCode::VecMul:
         case OpCode::VecShuffle32Indexed:
         case OpCode::VecExtractBytes:

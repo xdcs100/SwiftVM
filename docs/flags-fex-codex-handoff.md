@@ -2681,6 +2681,19 @@ peepholes.
   direct-cycle interrupt-poll test. No long benchmark, probe, diagnostic path or environment switch
   remains.
 
+- Packed integer `VecCmpEq` and `VecCmpGt` results now enter a dead resident XMM home directly.
+  The existing last-use, observer, conflicting-home and emitter-side proofs apply unchanged because
+  AArch64 `CMEQ` and `CMGT` are alias-safe three-register operations. This removes the repeated
+  post-compare vector copy visible in the remaining glibc string roots. Against the weighted
+  movemask baseline, exact SQLite `main/10` keeps all 2,101 roots and moves
+  `291,317 -> 291,227` (`-90`, `-0.030894%`) with 11 shrinking roots and no growth.
+  `__strrchr_sse2` moves `651 -> 633`, `__memcmp_sse2` moves `660 -> 649`, and root `0x541d60`
+  moves `415 -> 398`. Timing-normalized output is byte-identical. Bounded smallpt moves
+  `42,140 -> 42,086` and retains PPM SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. Mac and Orb pass the
+  1,034-assertion resident-XMM test and the complete AVX integer reference set. No long benchmark,
+  probe, diagnostic path or environment switch remains.
+
 ## Orb loop
 
 ```
