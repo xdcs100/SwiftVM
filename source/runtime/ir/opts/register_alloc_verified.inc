@@ -44,34 +44,11 @@ static void RunVerified(Unit* unit,
                         bool intwidth_tie = false,
                         bool induct_tie = false,
                         bool spill_evict = true,
-                        RegisterAllocPass::SpillEvictTestResult* test_result = nullptr,
-                        bool known_spill_unit = false) {
+                        RegisterAllocPass::SpillEvictTestResult* test_result = nullptr) {
     const auto finish_placement_probe = [&] {
         if (features.ra_home_perm) {
             reg_alloc->PermutePlacementProbeGPRHomes();
         }
-    };
-    auto rerun_with_conditional_spill_scratch = [&] {
-#if defined(__linux__) && !defined(__ANDROID__)
-        const u32 spills = reg_alloc->SpillCount();
-        if (spills != 0 && !reg_alloc->GetGprs().Get(18)) {
-            // The first pass answers the only question that justifies paying
-            // for x18: does this unit spill at all? If yes, rerun with x18 in
-            // this unit's pool baseline. Reusing the first allocation would
-            // be unsafe because it may already have assigned a live value to
-            // x18, which the spill reload path must be free to overwrite.
-            reg_alloc->ReserveGPRForUnit(18);
-            reg_alloc->ResetAllocations();
-            RunVerified(unit, reg_alloc, features, single_block_fast_path, scalar_insert,
-                        intwidth_tie, induct_tie, spill_evict, test_result, true);
-            if (RaDiagEnabled()) {
-                LOG_WARNING("RegisterAllocPass: {} initial spill(s); x18 reserved for this unit",
-                            spills);
-            }
-            return true;
-        }
-#endif
-        return false;
     };
     auto record_shape = [&](const LinearScanAllocator& scan) {
         if (!RAShapeProfEnabled()) return;
@@ -116,38 +93,6 @@ static void RunVerified(Unit* unit,
     const u32 default_gpr_reserve = backend::kDefaultScratchGPR > scratch_only
             ? backend::kDefaultScratchGPR - scratch_only
             : 0u;
-    if (known_spill_unit && backend::ScratchPreciseRequested(features) &&
-        default_gpr_reserve > 1) {
-        const u32 precise_gpr_reserve = default_gpr_reserve - 1;
-        Vector<u32> forced_spills{};
-        u32 precise_restarts = 0;
-        while (true) {
-            reg_alloc->ResetAllocations();
-            LinearScanAllocator scan{unit, reg_alloc, precise_gpr_reserve,
-                                     backend::kDefaultScratchFPR,
-                                     single_block_fast_path, scalar_insert,
-                                     intwidth_tie, induct_tie,
-                                     spill_evict ? &forced_spills : nullptr,
-                                     spill_evict, features};
-            scan.AllocateRegisters();
-            if (spill_evict && scan.HasEvictionCandidate()) {
-                forced_spills.push_back(scan.EvictionCandidate());
-                ++precise_restarts;
-                continue;
-            }
-            PerfScope2 perf_verify{GetPerfStats2().regalloc_verify};
-            const bool verified = scan.Verify();
-            perf_verify.Stop();
-            if (verified) {
-                record_shape(scan);
-                record_test_result(scan, precise_restarts, false);
-                finish_placement_probe();
-                return;
-            }
-            reg_alloc->ResetAllocations();
-            break;
-        }
-    }
     // Attempt one: the ordinary emitter shape. Every unit in the corpus stops
     // here, so nothing above this point may walk the instruction list -- the
     // whole-unit budget scan below is deliberately deferred until an escalation
@@ -176,7 +121,6 @@ static void RunVerified(Unit* unit,
             const bool verified = scan.Verify();
             perf_verify.Stop();
             if (verified) {
-                if (rerun_with_conditional_spill_scratch()) return;
                 record_shape(scan);
                 record_test_result(scan, eviction_restarts, false);
                 finish_placement_probe();
@@ -195,7 +139,6 @@ static void RunVerified(Unit* unit,
         const bool verified = scan.Verify();
         perf_verify.Stop();
         if (verified) {
-            if (rerun_with_conditional_spill_scratch()) return;
             record_shape(scan);
             record_test_result(scan, 0, false);
             finish_placement_probe();
@@ -268,7 +211,6 @@ static void RunVerified(Unit* unit,
                 LOG_WARNING("RegisterAllocPass: scratch reserve escalated to {}/{}", rung.gpr,
                             rung.fpr);
             }
-            if (rerun_with_conditional_spill_scratch()) return;
             record_shape(scan);
             record_test_result(scan, eviction_restarts, eviction_fallback);
             finish_placement_probe();

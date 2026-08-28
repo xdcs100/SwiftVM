@@ -323,12 +323,6 @@ public:
     [[nodiscard]] RAShapeUnitCounters& RAShape() { return ra_shape; }
     [[nodiscard]] const RAShapeUnitCounters& RAShape() const { return ra_shape; }
 
-    // Refines the pool for one compilation unit after a first allocation pass
-    // has proved that the unit spills. The caller must ResetAllocations and
-    // rerun the pass before emission, so no existing mapping can alias the
-    // newly reserved register.
-    void ReserveGPRForUnit(u32 code);
-
     void SetCurrent(ir::Inst *inst);
 
     // Drops every mapping so the linear scan can be re-run over the same unit

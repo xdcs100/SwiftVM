@@ -846,11 +846,6 @@ u32 RegAlloc::SpillCount() const {
             [](const Map& map) { return map.type == MEM; }));
 }
 
-void RegAlloc::ReserveGPRForUnit(u32 code) {
-    ASSERT(code < 32);
-    gprs.Mark(code);
-}
-
 GPRSMask RegAlloc::GetDirtyGPR() const {
     return alloc_result[current_ir->Id()].dirty_gprs;
 }

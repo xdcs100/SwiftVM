@@ -7997,13 +7997,12 @@ TEST_CASE("Scratch pool survives a register file saturated across a VecFAdd") {
     const auto gprs = address_space.GetTrampolines().GetGPRRegs();
     const auto fprs = address_space.GetTrampolines().GetFPRRegs();
 #if defined(__linux__) && !defined(__ANDROID__)
-    // Trampoline construction must not tax every unit: x18 starts in the
-    // ordinary dynamic pool and is removed only after a unit proves it spills.
+    // Spill handling must not tax the whole unit by reserving x18.
     REQUIRE_FALSE(gprs.Get(18));
 #endif
 
 #if defined(__linux__) && !defined(__ANDROID__)
-    bool saw_conditional_spill_unit = false;
+    bool saw_spill_unit = false;
 #endif
     auto check_and_emit = [&](Block* raw, int expected_spill = -1) {
         swift::runtime::IntrusivePtr<Block> block{raw};
@@ -8011,14 +8010,11 @@ TEST_CASE("Scratch pool survives a register file saturated across a VecFAdd") {
         RegisterAllocPass::Run(block.get(), &reg_alloc, false, FeatureSet{});
 #if defined(__linux__) && !defined(__ANDROID__)
         const bool has_spill = reg_alloc.SpillCount() != 0;
-        saw_conditional_spill_unit |= has_spill;
+        saw_spill_unit |= has_spill;
         if (expected_spill >= 0) {
             REQUIRE(has_spill == (expected_spill != 0));
         }
-        // This is the mask JitContext seeds into every instruction's dirty
-        // baseline. Spilling units exclude x18; zero-spill units retain the
-        // exact trampoline pool and may receive x18 from ordinary GetTmpX.
-        REQUIRE(reg_alloc.GetGprs().Get(18) == has_spill);
+        REQUIRE_FALSE(reg_alloc.GetGprs().Get(18));
 #endif
 
         // 1. The allocation must leave every instruction the scratch its
@@ -8087,7 +8083,7 @@ TEST_CASE("Scratch pool survives a register file saturated across a VecFAdd") {
     }
 
 #if defined(__linux__) && !defined(__ANDROID__)
-    REQUIRE(saw_conditional_spill_unit);
+    REQUIRE(saw_spill_unit);
 #endif
 }
 

@@ -335,14 +335,13 @@ private:
     // A value the linear scan could not keep in a host register lives in
     // State::spill_area (backend/context.h). Spilled defs compute into a
     // scratch register and are written back at the next instruction or block
-    // boundary. A Linux x18 def may stay resident for an adjacent safe direct
-    // consumer; all other uses reload from the slot.
+    // boundary. A Linux x18 def may stay resident for an adjacent direct
+    // consumer when x18 is not live there; all other uses reload from the slot.
     //
     // Platform and capacity constraints:
-    //  - On desktop Linux, units with any spill are reallocated with x18 in
-    //    their private reserved baseline. The first scalar spill reload/write-
-    //    back of each instruction uses x18; further scalar reloads use the
-    //    allocator's verified headroom. Zero-spill units leave x18 dynamic.
+    //  - On desktop Linux, the first scalar spill reload/write-back may use
+    //    x18 when it is free at that instruction. Further scalar reloads and
+    //    x18 conflicts use the allocator's verified headroom.
     //    SIMD spill scratch still comes from GetTmpV and PANICs loudly if that
     //    contract is ever violated.
     //  - The spill area holds kMaxSpillSlots u64 slots; the allocator
@@ -457,12 +456,6 @@ private:
     u32 spill_tmp_gprs{};
     u32 spill_tmp_fprs{};
     u32 last_instruction_scratch_gpr{};
-#if defined(__linux__) && !defined(__ANDROID__)
-    // x18 is already marked in this spilling unit's pool baseline, so using it does not
-    // contribute to spill_tmp_gprs (that counter only discounts newly marked
-    // dynamic reload registers from the emitter scratch budget).
-    bool spill_scratch_in_use{};
-#endif
     int shared_tmp_gpr{-1};
     bool auxiliary_scratch{};
     bool vixl_scratch_contract_active{};

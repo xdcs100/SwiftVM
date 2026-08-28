@@ -38,8 +38,7 @@ SpillForwardingBlock MakeSpillForwardingBlock() {
     return {std::move(block), arriving};
 }
 
-std::vector<std::string> Emit(SpillForwardingBlock input) {
-    GPRSMask gprs{~((1u << 6) - 1u)};
+std::vector<std::string> Emit(SpillForwardingBlock input, GPRSMask gprs) {
     FPRSMask fprs{~((1u << 8) - 1u)};
     RegAlloc alloc{input.block->MaxInstrId(), gprs, fprs, FeatureSet{}};
     RegisterAllocPass::RunForSpillEvictTest(input.block.get(), &alloc, false);
@@ -77,9 +76,10 @@ std::vector<std::string> Emit(SpillForwardingBlock input) {
 
 }  // namespace
 
-TEST_CASE("adjacent spilled scalar def-use stays in the reserved scratch") {
+TEST_CASE("adjacent spilled scalar def-use stays in a free x18 scratch") {
 #if defined(__linux__) && !defined(__ANDROID__)
-    const auto emitted = Emit(MakeSpillForwardingBlock());
+    const auto emitted = Emit(MakeSpillForwardingBlock(),
+                              GPRSMask{~((1u << 5) - 1u) & ~(1u << 18)});
     const auto definition = std::ranges::find_if(emitted, [](const auto& line) {
         return line.find("mov x18, #0x4") != std::string::npos;
     });
@@ -97,6 +97,21 @@ TEST_CASE("adjacent spilled scalar def-use stays in the reserved scratch") {
     REQUIRE(after_consumer != emitted.end());
     REQUIRE(after_consumer->find("str x18, [x28") == std::string::npos);
 #else
-    SUCCEED("reserved spill scratch is Linux-only");
+    SUCCEED("x18 spill scratch is Linux-only");
+#endif
+}
+
+TEST_CASE("x18 spill forwarding yields to a live allocated value") {
+#if defined(__linux__) && !defined(__ANDROID__)
+    const auto emitted = Emit(MakeSpillForwardingBlock(),
+                              GPRSMask{~(((1u << 6) - 1u) << 18)});
+    REQUIRE(std::ranges::any_of(emitted, [](const auto& line) {
+        return line.find("mov x18, #0x1") != std::string::npos;
+    }));
+    REQUIRE(std::ranges::none_of(emitted, [](const auto& line) {
+        return line.find("mov x18, #0x4") != std::string::npos;
+    }));
+#else
+    SUCCEED("x18 spill scratch is Linux-only");
 #endif
 }

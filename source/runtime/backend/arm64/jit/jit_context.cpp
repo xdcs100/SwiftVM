@@ -64,11 +64,6 @@ JitContext::JitContext(const std::shared_ptr<Module>& module,
                        bool enable_direct_link)
         : module(module), features(ResolveFeatureSet(module->GetModuleConfig())),
           reg_alloc(reg_alloc) {
-#if defined(__linux__) && !defined(__ANDROID__)
-    const bool has_spill = reg_alloc.SpillCount() != 0;
-    ASSERT_MSG(!has_spill || reg_alloc.GetGprs().Get(18),
-               "spilling unit reached emission without conditional x18 reservation");
-#endif
     const auto& svm_config = GetSvmConfig();
     exec_profile_enabled = svm_config.exec_prof;
     execution_trace_enabled = svm_config.exec_trace;
@@ -397,6 +392,7 @@ bool JitContext::FlushSpillWrites(ir::Inst* consumer) {
     for (auto& write : pending_spill_writes) {
 #if defined(__linux__) && !defined(__ANDROID__)
         if (consumer && !forwarded && !write.is_fpr && write.reg == spill_scratch.GetCode() &&
+            !reg_alloc.DirtyGPR(consumer->Id()).Get(spill_scratch.GetCode()) &&
             !IsSpillForwardBarrier(consumer->GetOp())) {
             u32 direct_uses = 0;
             ir::Inst* definition = nullptr;
@@ -480,12 +476,9 @@ XRegister JitContext::GetTmpX() {
 // that every instruction was left room for exactly that many.
 XRegister JitContext::GetSpillTmpX() {
 #if defined(__linux__) && !defined(__ANDROID__)
-    // The first scalar spill in an instruction gets the register reserved
-    // expressly for it. This leaves all allocator headroom available for any
-    // additional distinct spilled operands and makes total value-pool
-    // exhaustion unable to remove the final reload/write-back scratch.
-    if (!spill_scratch_in_use) {
-        spill_scratch_in_use = true;
+    if (!cur_dirty_gprs.Get(spill_scratch.GetCode())) {
+        cur_dirty_gprs.Mark(spill_scratch.GetCode());
+        spill_tmp_gprs++;
         return spill_scratch;
     }
 #endif
@@ -1410,14 +1403,16 @@ void JitContext::TickIR(ir::Inst* instr) {
     reg_alloc.SetCurrent(instr);
     cur_dirty_gprs = reg_alloc.GetDirtyGPR();
     cur_dirty_fprs = reg_alloc.GetDirtyFPR();
+#if defined(__linux__) && !defined(__ANDROID__)
+    if (forwarded_spill) {
+        cur_dirty_gprs.Mark(spill_scratch.GetCode());
+    }
+#endif
     // Baseline for the per-instruction scratch budget (see GetTmpX).
     tick_dirty_gprs = cur_dirty_gprs;
     tick_dirty_fprs = cur_dirty_fprs;
     spill_tmp_gprs = 0;
     spill_tmp_fprs = 0;
-#if defined(__linux__) && !defined(__ANDROID__)
-    spill_scratch_in_use = forwarded_spill;
-#endif
     shared_tmp_gpr = -1;
     auxiliary_scratch = false;
     const bool scratch_only =
