@@ -2461,7 +2461,10 @@ peepholes.
   assertions across cache, production bypass, continuation, cycle/SMC and trampoline coverage; Orb
   passes the corresponding 442 assertions. A pending-flags return-continuation tag was audited but
   not emitted: without a second continuation entry it grows static code before it can remove the hot
-  merge. No census logging, probe path, stress run or environment switch remains.
+  merge. Partial-merge follow-ups are also below the mechanism threshold: only 14 sites can use the
+  existing pending direct-link ABI, while a strict no-fault/no-observer full-overwrite chain moves
+  SQLite only `333,452 -> 333,347` (`-105`) across 22 units. Neither prototype remains. No census
+  logging, probe path, stress run or environment switch remains.
 
 ## Orb loop
 
