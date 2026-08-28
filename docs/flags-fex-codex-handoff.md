@@ -2776,6 +2776,19 @@ peepholes.
   candidate-only case. Mac and Orb pass the self-XOR shape and function-liveness focuses. No
   stress run, probe, diagnostic path or environment switch remains.
 
+- `ee09012` relies on the acquire-release ordering already carried by aligned scalar LSE atomics.
+  CASAL, SWPAL and LDADDAL no longer execute an additional `DMB ISH` before and after the RMW;
+  non-LSE exclusive loops and the serialized unaligned plain-access fallback retain both barriers.
+  The total static SQLite shape remains exactly 298,111 because those two instructions move into
+  the unaligned arm rather than disappearing from the unit. `__run_exit_handlers` contains four
+  CASAL and four SWPAL sites, so its aligned path executes 16 fewer DMBs. Three short SQLite pairs
+  are timing-neutral within noise: internal/wall medians move `1.358/1.629 -> 1.362/1.637s`.
+  `clone_lock_rmw_x86_64` is byte-identical to baseline and exits zero; two AcqRel clone TSO
+  litmus runs exit zero with `mp_bad=0`. Fixed-seed 424242 bit-op/CMPXCHG comparison retains the
+  baseline's exact 51 mismatch keys with zero candidate-only case. Bounded smallpt remains at 263
+  roots / 41,251 instructions with its canonical PPM SHA-256. No stress run, probe, diagnostic
+  path or environment switch remains.
+
 ## Orb loop
 
 ```
