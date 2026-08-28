@@ -182,6 +182,7 @@ add_library(swift_runtime STATIC
         backend/arm64/jit/scalar_identity_analysis.h
         backend/arm64/jit/translator_fpr_publication.cpp
         backend/arm64/jit/translator_mem.cpp
+        backend/arm64/jit/translator_mem_atomic_fallback.cpp
         backend/arm64/jit/translator_mem_atomic_lse.cpp
         backend/arm64/jit/translator.h
         backend/arm64/jit/flags.cpp

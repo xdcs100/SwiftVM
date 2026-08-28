@@ -410,6 +410,30 @@ private:
                             ir::Value operand,
                             ir::Value carry);
 
+    enum class UnalignedAtomicFallbackKind : u8 {
+        CompareAndSwap,
+        Exchange,
+        FetchAdd,
+    };
+
+    struct UnalignedAtomicFallbackKey {
+        UnalignedAtomicFallbackKind kind{};
+        ir::ValueType type{};
+        u8 address{};
+        u8 result{};
+        u8 first{};
+        u8 second{};
+
+        auto operator<=>(const UnalignedAtomicFallbackKey&) const = default;
+    };
+
+    [[nodiscard]] std::optional<UnalignedAtomicFallbackKey>
+    GetUnalignedAtomicFallbackKey(ir::Inst* inst);
+    void PrepareUnalignedAtomicFallbacks(std::span<ir::Block* const> blocks);
+    [[nodiscard]] Label* GetUnalignedAtomicFallback(ir::Inst* inst);
+    void EmitUnalignedAtomicFallbacks();
+    void EmitUnalignedAtomicFallback(const UnalignedAtomicFallbackKey& key);
+
     struct PseudoFlags {
         ir::Flags set{};
         ir::Flags clear{};
@@ -904,6 +928,9 @@ private:
         std::unique_ptr<Label> entry{};
     };
     std::vector<DeferredNZCVMergeStub> deferred_nzcv_merge_stubs{};
+    std::map<UnalignedAtomicFallbackKey, u32> unaligned_atomic_fallback_counts{};
+    std::map<UnalignedAtomicFallbackKey, std::unique_ptr<Label>>
+            unaligned_atomic_fallbacks{};
     struct HostCallThunk {
         u32 uses{};
         std::unique_ptr<Label> entry{};

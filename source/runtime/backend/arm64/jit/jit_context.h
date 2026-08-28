@@ -85,6 +85,12 @@ public:
         return reg_alloc.ValueType(value) == RegAlloc::GPR &&
                reg_alloc.ValueGPR(value).id == target;
     }
+    [[nodiscard]] std::optional<u8> MappedGPRCode(const ir::Value& value) {
+        if (reg_alloc.ValueType(value) != RegAlloc::GPR) {
+            return std::nullopt;
+        }
+        return static_cast<u8>(reg_alloc.ValueGPR(value).id);
+    }
     [[nodiscard]] Register R(const ir::Value& value, bool auto_cast = false);
     [[nodiscard]] Register RForWrite(const ir::Value& value);
     [[nodiscard]] XRegister X(const ir::Value& value);

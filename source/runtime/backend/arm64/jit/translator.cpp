@@ -1267,6 +1267,8 @@ void JitTranslator::Translate(ir::Block* block) {
     ASSERT(vec_nan_cold_sites.empty());
     if (!translating_function) {
         placement_unit_pc = block->GetStartLocation().Value();
+        std::array<ir::Block*, 1> blocks{block};
+        PrepareUnalignedAtomicFallbacks(blocks);
     }
     // Each block is a dual-entry identity. Do not inherit a compile-time
     // token/dirty from a sibling that is not a runtime predecessor.
@@ -1348,6 +1350,7 @@ void JitTranslator::Translate(ir::Block* block) {
                       loop_hoist,
                       loop_hoist_prefix_ops);
     if (!translating_function) {
+        EmitUnalignedAtomicFallbacks();
         EmitDeferredNZCVMergeStubs();
         PlacementPoint("unit", block->GetStartLocation().Value());
     }
@@ -1369,6 +1372,7 @@ void JitTranslator::Translate(ir::HIRFunction* function) {
         emitted_blocks.push_back(block);
     }
     PrepareHostCallThunks(emitted_blocks);
+    PrepareUnalignedAtomicFallbacks(emitted_blocks);
     terminal_location_publication.Prepare(emitted_blocks, context);
     share_cycle_exit_reason =
             CountCycleExitCandidates(emitted_blocks) >=
@@ -1409,6 +1413,7 @@ void JitTranslator::Translate(ir::HIRFunction* function) {
     ASSERT(pending_deferred_faults.empty());
     const auto recovery_offsets = terminal_location_publication.EmitColdPaths(context);
     EmitHostCallThunks();
+    EmitUnalignedAtomicFallbacks();
     context.EndColdScratch();
     EmitDeferredNZCVMergeStubs();
     for (auto& fault : fault_metadata) {

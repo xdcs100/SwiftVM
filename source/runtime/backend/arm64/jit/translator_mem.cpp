@@ -2275,7 +2275,6 @@ void JitTranslator::EmitCompareAndSwap(ir::Inst* inst) {
 
     Label aligned;
     Label retry;
-    Label cas_done;
     Label done;
     const bool lse = CanUseLSE();
     if (!lse) {
@@ -2286,21 +2285,29 @@ void JitTranslator::EmitCompareAndSwap(ir::Inst* inst) {
     if (ir::GetValueSizeByte(type) > 1) {
         __ Tst(address, ir::GetValueSizeByte(type) - 1);
         __ B(&aligned, eq);
-        if (lse) {
-            tso_emission_stats.Increment(tso_emission_stats.dmb_instructions);
-            __ Dmb(InnerShareable, BarrierAll);
-        }
-        LoadUnalignedAtomicLockAddress(atomic_pair_scratch);
-        AcquireUnalignedAtomicLock(atomic_pair_scratch, result);
-        EmitPlainAtomicLoad(type, result, address);
-        __ Cmp(result, context.R(expected, true));
-        __ B(&cas_done, ne);
-        EmitPlainAtomicStore(type, context.R(desired, true), address);
-        __ Bind(&cas_done);
-        ReleaseUnalignedAtomicLock(atomic_pair_scratch);
-        if (lse) {
-            tso_emission_stats.Increment(tso_emission_stats.dmb_instructions);
-            __ Dmb(InnerShareable, BarrierAll);
+        if (auto* fallback = GetUnalignedAtomicFallback(inst)) {
+            Label fallback_return;
+            __ Adr(atomic_pair_scratch, &fallback_return);
+            __ B(fallback);
+            __ Bind(&fallback_return);
+        } else {
+            if (lse) {
+                tso_emission_stats.Increment(tso_emission_stats.dmb_instructions);
+                __ Dmb(InnerShareable, BarrierAll);
+            }
+            LoadUnalignedAtomicLockAddress(atomic_pair_scratch);
+            AcquireUnalignedAtomicLock(atomic_pair_scratch, result);
+            EmitPlainAtomicLoad(type, result, address);
+            Label cas_done;
+            __ Cmp(result, context.R(expected, true));
+            __ B(&cas_done, ne);
+            EmitPlainAtomicStore(type, context.R(desired, true), address);
+            __ Bind(&cas_done);
+            ReleaseUnalignedAtomicLock(atomic_pair_scratch);
+            if (lse) {
+                tso_emission_stats.Increment(tso_emission_stats.dmb_instructions);
+                __ Dmb(InnerShareable, BarrierAll);
+            }
         }
         __ B(&done);
     }
@@ -2463,18 +2470,25 @@ void JitTranslator::EmitAtomicExchange(ir::Inst* inst) {
     if (ir::GetValueSizeByte(type) > 1) {
         __ Tst(address, ir::GetValueSizeByte(type) - 1);
         __ B(&aligned, eq);
-        if (lse) {
-            tso_emission_stats.Increment(tso_emission_stats.dmb_instructions);
-            __ Dmb(InnerShareable, BarrierAll);
-        }
-        LoadUnalignedAtomicLockAddress(atomic_pair_scratch);
-        AcquireUnalignedAtomicLock(atomic_pair_scratch, result);
-        EmitPlainAtomicLoad(type, result, address);
-        EmitPlainAtomicStore(type, context.R(desired, true), address);
-        ReleaseUnalignedAtomicLock(atomic_pair_scratch);
-        if (lse) {
-            tso_emission_stats.Increment(tso_emission_stats.dmb_instructions);
-            __ Dmb(InnerShareable, BarrierAll);
+        if (auto* fallback = GetUnalignedAtomicFallback(inst)) {
+            Label fallback_return;
+            __ Adr(atomic_pair_scratch, &fallback_return);
+            __ B(fallback);
+            __ Bind(&fallback_return);
+        } else {
+            if (lse) {
+                tso_emission_stats.Increment(tso_emission_stats.dmb_instructions);
+                __ Dmb(InnerShareable, BarrierAll);
+            }
+            LoadUnalignedAtomicLockAddress(atomic_pair_scratch);
+            AcquireUnalignedAtomicLock(atomic_pair_scratch, result);
+            EmitPlainAtomicLoad(type, result, address);
+            EmitPlainAtomicStore(type, context.R(desired, true), address);
+            ReleaseUnalignedAtomicLock(atomic_pair_scratch);
+            if (lse) {
+                tso_emission_stats.Increment(tso_emission_stats.dmb_instructions);
+                __ Dmb(InnerShareable, BarrierAll);
+            }
         }
         __ B(&done);
     }
@@ -2542,23 +2556,30 @@ void JitTranslator::EmitAtomicFetchAdd(ir::Inst* inst) {
     if (ir::GetValueSizeByte(type) > 1) {
         __ Tst(address, ir::GetValueSizeByte(type) - 1);
         __ B(&aligned, eq);
-        if (lse) {
-            tso_emission_stats.Increment(tso_emission_stats.dmb_instructions);
-            __ Dmb(InnerShareable, BarrierAll);
-        }
-        LoadUnalignedAtomicLockAddress(atomic_pair_scratch);
-        AcquireUnalignedAtomicLock(atomic_pair_scratch, result);
-        EmitPlainAtomicLoad(type, result, address);
-        if (ir::GetValueSizeByte(type) == 8) {
-            __ Add(atomic_scratch, result, context.X(addend));
+        if (auto* fallback = GetUnalignedAtomicFallback(inst)) {
+            Label fallback_return;
+            __ Adr(atomic_pair_scratch, &fallback_return);
+            __ B(fallback);
+            __ Bind(&fallback_return);
         } else {
-            __ Add(atomic_scratch.W(), result.W(), context.W(addend));
-        }
-        EmitPlainAtomicStore(type, atomic_scratch, address);
-        ReleaseUnalignedAtomicLock(atomic_pair_scratch);
-        if (lse) {
-            tso_emission_stats.Increment(tso_emission_stats.dmb_instructions);
-            __ Dmb(InnerShareable, BarrierAll);
+            if (lse) {
+                tso_emission_stats.Increment(tso_emission_stats.dmb_instructions);
+                __ Dmb(InnerShareable, BarrierAll);
+            }
+            LoadUnalignedAtomicLockAddress(atomic_pair_scratch);
+            AcquireUnalignedAtomicLock(atomic_pair_scratch, result);
+            EmitPlainAtomicLoad(type, result, address);
+            if (ir::GetValueSizeByte(type) == 8) {
+                __ Add(atomic_scratch, result, context.X(addend));
+            } else {
+                __ Add(atomic_scratch.W(), result.W(), context.W(addend));
+            }
+            EmitPlainAtomicStore(type, atomic_scratch, address);
+            ReleaseUnalignedAtomicLock(atomic_pair_scratch);
+            if (lse) {
+                tso_emission_stats.Increment(tso_emission_stats.dmb_instructions);
+                __ Dmb(InnerShareable, BarrierAll);
+            }
         }
         __ B(&done);
     }
