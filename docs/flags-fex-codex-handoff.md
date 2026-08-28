@@ -2428,6 +2428,23 @@ peepholes.
   same 123 cycle/SMC assertions. No stress run, probe, diagnostic source path or environment switch
   remains.
 
+- Full-NZCV publication on a bypassable direct link now uses a two-instruction deoptimization site:
+  `ADR x17, resume; B region_merge`. Compatible pending-flags targets patch the first instruction to
+  skip both words; incompatible targets branch to one code-region merge trampoline and return through
+  `x17`. This preserves the host continuation in `x30`, unlike a callable per-unit stub. Disk-cache
+  format v14 records and normalizes the merge-branch offset, then relocates it to the current region
+  trampoline on revival. Exact SQLite `main/10` static-only A/B keeps all 1,999 units and moves
+  `344,221 -> 340,875` host instructions (`-3,346`, `-0.972050%`), with 1,049 shrinking units and no
+  growth. `0x4a5518` moves `615 -> 599`, `0x4a882e` moves `766 -> 752`, and `0x401e94` moves
+  `549 -> 535`. Timing-normalized SQLite output remains byte-identical with SHA-256
+  `9fb4d81a33c7f75c5b122f609410088c3be8a2a0bf5458d1e1164ecfc19f22f2`; bounded smallpt retains
+  SHA-256 `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. Mac passes 476
+  assertions across production bypass execution, disk-cache serialization/revival and continuation
+  preservation, plus the unchanged 123 cycle/SMC assertions. Orb passes the same cycle/SMC set and
+  302 final production/cache/continuation assertions. A per-unit `BL`-return outline was rejected: it
+  both grew SQLite by 1,717 instructions and overwrote `x30` before continuation-preserving direct
+  links. No probe, diagnostic path or environment switch from that evaluation remains.
+
 ## Orb loop
 
 ```
