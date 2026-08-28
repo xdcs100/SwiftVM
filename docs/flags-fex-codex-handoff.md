@@ -3025,6 +3025,22 @@ peepholes.
   libc string-memory lowering gaps. The old two-instruction BFXIL merge, global carry polarity,
   larger region and full-pin attempts remain measured regressions.
 
+- The `freeSpace` boundary audit rules out the 64-block region cap as its main cause. Its unit emits
+  37 guest blocks and ten fault-backed cycle polls: one is the internal DFS backedge and nine are
+  static cut edges to three entries inside blocks decoded earlier (`0x4498c9`, `0x449a5b` and
+  `0x449b0c`); seven error paths share `0x449b0c`. A cross-frontier HIR replay prototype reduced
+  exact SQLite `273,723 -> 270,992`, smallpt `38,713 -> 38,457` and CoreMark `38,686 -> 38,434`,
+  with byte-identical SQLite output, the canonical smallpt image and `crcfinal=0x382f`. Repeated
+  identical SQLite runs later exposed nondeterministic `malloc_consolidate` corruption, so the
+  planner, test and CMake entry were fully removed. Inferring interior region edges from trailing
+  `SetLocation`, even when restricted to direct `E9/EB` joins or a 16-byte duplicate-tail threshold,
+  separately produced guest Signal exits or heap corruption; those variants were also removed.
+  The restored Orb translator is byte-identical to the `ae6471c` baseline
+  (`ef3548a9d472a15c5444ecf3e759f88df88023bdaed9dce6c743646ffcf32c4c`) and returns to 2,167
+  roots / 273,723 instructions. Do not retry heuristic replay or `SetLocation` internalization.
+  Closing this `freeSpace` pool requires an explicit split-entry ownership contract that preserves
+  overlapping x86 streams, call-return ownership and public-entry recovery semantics.
+
 ## Orb loop
 
 ```
