@@ -1,6 +1,6 @@
 # Codex handoff: Align SVM flags with FEX
 
-Date: 2026-08-28
+Date: 2026-08-29
 Repo: `/Users/swift/CLionProjects/SwiftVM` (macOS). Linux identity runs on Orb: `ubuntu@orb`, tree `/home/swift/svm-phasec/SwiftVM`, build `/home/swift/svm-phasec/build`.
 Author on git: `swift_gan`. **Do not push** until asked. English commits, no task IDs, no AI trailer.
 
@@ -8,7 +8,7 @@ Author on git: `swift_gan`. **Do not push** until asked. English commits, no tas
 
 ## Git / mission
 
-- Product code tip: **`9ac80fd`** `perf: share compact byte movemask`
+- Product code tip: **`4d8e1f0`** `perf: share paired helper call preservation`
 - Tracked tree is clean before this documentation update. Preserve the existing untracked build/images/placement tools.
 - Pi mission: `9306cb64-ce70-4726-a5e0-76fce2d23556` (goal mode ON). Rollback remains `SVM_FLAGS_REGS=0` (`ParseNonZero`; unset → ON).
 - `npm:pi-codex-goal` is installed user-wide; `/goal` tools need a **new** Pi session.
@@ -2963,6 +2963,14 @@ peepholes.
   fixed seeds 101/424242 pass 100 DIV/IDIV iterations, CPUID passes 29 assertions, and Orb pin
   levels 0-3 each pass a 30-iteration DIV/IDIV check. No stress run, probe, diagnostic path or
   environment switch remains.
+
+- The post-`4d8e1f0` FEX refresh leaves the largest positive SQLite root gaps at `freeSpace`
+  `440/309`, `_IO_new_file_xsputn` `474/383`, `powerOfTen` `242/153`, `__strcspn_sse42`
+  `326/241`, `setupLookaside` `411/333` and `pagerPagecount` `254/177` (SwiftVM/FEX). The shared
+  excess is now dominated by path-sensitive PSTATE/PF/AF publication and cycle/link edges, not a
+  broad GetHost/SetHost or composite-EA pool. The old two-instruction BFXIL merge, global carry
+  polarity, larger region and full-pin attempts remain measured regressions; the next flags stage
+  needs an explicit edge/carrier contract rather than another local mask peephole.
 
 ## Orb loop
 
