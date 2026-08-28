@@ -2726,6 +2726,24 @@ peepholes.
   MOVS/STOS retain the baseline's exact 402/391 mismatch sets with zero candidate-only case, and
   CMPS/SCAS remains clean. No stress run, probe, diagnostic path or environment switch remains.
 
+- `da63f32` keeps the same REP helpers under the installed guest FPCR. Their complete call graph is
+  integer-only: mapped-range atomics and callbacks plus memcpy/memmove/memcmp operations. The
+  existing signal path already restores host FPCR before entering a handler and sigreturn restores
+  the interrupted guest value. Pinned-state calls return one result through `x16` when it is not a
+  live snapshot or argument reload; conflicting high-pressure units fail closed to the existing
+  stack slot. This removes every per-site FPCR switch/rebuild and the result stack round-trip from
+  the hot REP roots. Exact SQLite `main/10` keeps all 2,215 roots and moves
+  `301,712 -> 300,650` (`-1,062`, `-0.351991%`) with no growth. `sqlite3BitvecSet@0x418450`
+  moves `602 -> 548`, leaving 77 instructions to FEX's 471. Three interleaved short timing pairs
+  remain within noise: wall medians `1.669 -> 1.682s`, internal medians `1.393 -> 1.401s`.
+  Bounded smallpt keeps all 262 roots, moves `41,962 -> 41,890`, and retains PPM SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. Mac and Orb pass the
+  helper metadata, resident-XMM and AFP-transparent focuses. Fixed-seed 424242 MOVS/STOS retain
+  the baseline's exact 402/391 mismatch sets with zero candidate-only case, and CMPS/SCAS remains
+  clean. The REP helper-fault results are unchanged; the two JIT `fxrstor` scratch-budget failures
+  still reproduce on the exact baseline. No stress run, probe, diagnostic path or environment
+  switch remains.
+
 ## Orb loop
 
 ```
