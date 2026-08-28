@@ -2842,6 +2842,21 @@ peepholes.
   and static-pin groups pass 225 assertions. No stress run, probe, diagnostic path or environment
   switch remains.
 
+- `df82e5b` removes the whole-unit Linux x18 spill reservation that amplified the register pressure
+  from the fifteenth pin. Scalar spill reloads and definitions now take x18 only when it is free at
+  the current instruction; the verified reload headroom handles conflicts and further temporaries.
+  Adjacent spill forwarding also checks the consumer's active GPR mask and marks a forwarded x18
+  live before emitter scratch allocation. The obsolete allocation rerun and unit-reservation API
+  are removed. A fresh same-command static SQLite A/B keeps all 2,171 roots and moves
+  `290,394 -> 290,165` (`-229`, `-0.078858%`); `sqlite3_randomness@0x423620`, which exposed the
+  spill avalanche, moves `1,225 -> 1,004` (`-221`). Three interleaved short pairs move wall median
+  `1.080353 -> 1.062930s`; the internal median `0.794 -> 0.799s` remains within short-run noise.
+  Bounded smallpt `4 8 6` exits zero and retains PPM SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. The saturated scratch
+  test passes 763 Mac and 779 Orb assertions; the dedicated free/conflicting-x18 forwarding cases
+  pass 2 Mac and 9 Orb assertions. No stress run, probe, diagnostic path or environment switch
+  remains.
+
 ## Orb loop
 
 ```
