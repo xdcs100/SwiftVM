@@ -1347,9 +1347,6 @@ bool JitTranslator::FoldCcFromCarryTest(ir::Inst* test_flags) {
     if (!FlagsRegsEnabled() || !cur_block || !test_flags) {
         return false;
     }
-    if (CanonicalCarryEnabled()) {
-        return false;
-    }
     if (test_flags->GetArg<ir::Flags>(0) != ir::Flags::Carry) {
         return false;
     }
@@ -1369,15 +1366,30 @@ bool JitTranslator::FoldCcFromCarryTest(ir::Inst* test_flags) {
         return false;
     }
     const auto zcond = other->GetArg<ir::Cond>(0);
-    if (pred->GetOp() == ir::OpCode::TestZero &&
-        combine->GetOp() == ir::OpCode::And && zcond == ir::Cond::NE) {
+    const bool above = pred->GetOp() == ir::OpCode::TestZero &&
+                       combine->GetOp() == ir::OpCode::And &&
+                       zcond == ir::Cond::NE;
+    const bool below_equal = pred->GetOp() == ir::OpCode::TestNotZero &&
+                             combine->GetOp() == ir::OpCode::Or &&
+                             zcond == ir::Cond::EQ;
+    if (!above && !below_equal) {
+        return false;
+    }
+    if (CanonicalCarryEnabled()) {
+        if (!RecordLocalCondition(combine,
+                                  above ? ir::Cond::EQ : ir::Cond::NE)) {
+            return false;
+        }
+        MergeNZCV();
+        const auto mask = static_cast<u64>(GuestNZCVToHost(
+                ir::Flags::Carry | ir::Flags::Zero));
+        __ Tst(flags, mask);
+        return true;
+    }
+    if (above) {
         return RecordLocalCondition(combine, ir::Cond::HI);
     }
-    if (pred->GetOp() == ir::OpCode::TestNotZero &&
-        combine->GetOp() == ir::OpCode::Or && zcond == ir::Cond::EQ) {
-        return RecordLocalCondition(combine, ir::Cond::LS);
-    }
-    return false;
+    return RecordLocalCondition(combine, ir::Cond::LS);
 }
 
 void JitTranslator::EmitTestFlags(ir::Inst* inst) {
