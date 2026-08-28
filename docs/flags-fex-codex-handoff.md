@@ -2613,6 +2613,22 @@ peepholes.
   CoreMark retains `crcfinal=0x382f`. No stress run, probe, diagnostic path or environment switch
   remains.
 
+- `0ed6eb9` lowers the dominant implicit-length `PCMPISTRI 0x1a` form through one AAPCS vector
+  helper call. The call path snapshots live SIMD state, loads the two operands into `q0/q1`, passes
+  the control word in `x0`, and skips preserving flags because the instruction overwrites all six
+  arithmetic flags. Repeated sites share the existing function-cold host-call target thunk; other
+  SSE4.2 string controls retain the inline lowering. Exact SQLite `main/10` keeps all 2,087 roots and
+  versions, moves `292,116 -> 291,811` host instructions (`-305`, `-0.104411%`), and has 14
+  shrinking roots with no growth. All savings are in `__strcmp_sse42`, which moves `3,949 -> 3,644`
+  and closes about 18% of its previous FEX gap. Five interleaved short pairs are timing-neutral within
+  noise (`1.086915 -> 1.094917s` median), with identical timing-normalized output. Bounded smallpt
+  stays byte-identical at 42,204 host instructions and retains PPM SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`; CoreMark retains
+  `crcfinal=0x382f`. Mac and Orb pass the SSE4.2 differential, scratch, evaluator, CallLambda,
+  direct-link and memory-boundary focuses. A cache-compatible two-run SQLite check stores 680 units,
+  reloads all 680 on the second process, and keeps normalized output identical. No stress run, probe,
+  diagnostic path or environment switch remains.
+
 ## Orb loop
 
 ```
