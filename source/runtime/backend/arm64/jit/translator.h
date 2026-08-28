@@ -607,9 +607,11 @@ private:
                       const std::vector<ir::DataClass> &args,
                       bool has_result,
                       const Register &result,
-                      std::optional<Register> secondary_result = std::nullopt,
-                      std::span<const VRegister> vector_args = {},
-                      bool preserve_flags = true);
+                      std::optional<Register> secondary_result = std::nullopt);
+    void EmitSse42StrVectorCall(const VRegister& left,
+                                const VRegister& right,
+                                const WRegister& result,
+                                VAddr target);
     void PrepareHostCallThunks(const std::vector<ir::Block*>& blocks);
     void MaterializeHostCallTarget(u64 target);
     bool TryEmitSharedHostCall(const ir::Lambda& lambda);

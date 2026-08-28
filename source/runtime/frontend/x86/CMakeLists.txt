@@ -34,5 +34,9 @@ add_library(fronted_x86 STATIC decoder.cc
     vex_decoder.h
     cpu.h)
 
+if ("arm64" IN_LIST ARCHITECTURE)
+    target_sources(fronted_x86 PRIVATE sse42str_helper_arm64.S)
+endif ()
+
 target_link_libraries(fronted_x86 PUBLIC swift_runtime distorm softfloat_3e)
 add_library(swift::runtime::fronted_x86 ALIAS fronted_x86)

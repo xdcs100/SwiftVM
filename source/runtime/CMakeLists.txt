@@ -159,6 +159,7 @@ add_library(swift_runtime STATIC
         backend/arm64/jit/translator_alu_vec_fp.cpp
         backend/arm64/jit/translator_alu_scalar_bits.cpp
         backend/arm64/jit/translator_control.cpp
+        backend/arm64/jit/translator_sse42str_call.cpp
         backend/arm64/jit/translator_sse42str.cpp
         backend/arm64/jit/translator_x87.cpp
         backend/arm64/jit/translator_flags.cpp

@@ -8055,7 +8055,7 @@ TEST_CASE("Scratch pool survives a register file saturated across a VecFAdd") {
 #endif
 }
 
-TEST_CASE("SSE4.2 string inline stays within its declared scratch contract") {
+TEST_CASE("SSE4.2 string lowering stays within its declared scratch contract") {
     using namespace swift::runtime::ir;
     using namespace swift::runtime::backend;
 
@@ -8086,7 +8086,12 @@ TEST_CASE("SSE4.2 string inline stays within its declared scratch contract") {
 
         RegAlloc alloc{block.MaxInstrId(), gprs, fprs, FeatureSet{}};
         RegisterAllocPass::Run(&block, &alloc, false, FeatureSet{});
-        REQUIRE(ScratchBudget(*result.Def(), FeatureSet{}).gpr == 4);
+#if defined(__aarch64__)
+        const swift::u32 expected_gprs = imm == 0x1au ? 0u : 4u;
+#else
+        const swift::u32 expected_gprs = 4u;
+#endif
+        REQUIRE(ScratchBudget(*result.Def(), FeatureSet{}).gpr == expected_gprs);
 
         arm64::JitContext context{module, alloc};
         arm64::JitTranslator translator{context};
@@ -8094,7 +8099,7 @@ TEST_CASE("SSE4.2 string inline stays within its declared scratch contract") {
         context.TickIR(result.Def());
         translator.EmitSse42Str(result.Def());
         context.EndInstructionScratch();
-        REQUIRE(context.LastInstructionScratchGPR() == 4);
+        REQUIRE(context.LastInstructionScratchGPR() == expected_gprs);
         context.Finish();
     }
 }

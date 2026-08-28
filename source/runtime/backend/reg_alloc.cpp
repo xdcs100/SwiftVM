@@ -449,6 +449,13 @@ ScratchNeed ScratchBudget(const ir::Inst& inst, const FeatureSet& features) {
             case ir::OpCode::PublishSse42StrFlags:
                 need.gpr = 1;
                 break;
+            case ir::OpCode::Sse42Str:
+#if defined(__aarch64__)
+                if (inst.GetArg<ir::Imm>(2).Get() == 0x1au) {
+                    return {0, 0};
+                }
+#endif
+                break;
             case ir::OpCode::SetCarry:
             case ir::OpCode::SetOverflow:
                 need.gpr = 2;

@@ -29,20 +29,7 @@ void JitTranslator::EmitSse42Str(ir::Inst* inst) {
     if (imm == 0x1au) {
         const auto target = swift::x86::Sse42StrVectorHelperAddress();
         if (target) {
-            const std::array vector_args{a, b};
-            EmitHostCall(
-                    ir::Lambda{
-                            ir::DataClass{ir::Imm{target}},
-                            ir::HelperCallTraits{
-                                    .uniform = ir::UniformEffectId::None,
-                                    .host_fp = ir::HostFpEffect::FPCRTransparent,
-                            }},
-                    {ir::DataClass{ir::Imm{u64(imm)}}},
-                    true,
-                    result,
-                    std::nullopt,
-                    vector_args,
-                    false);
+            EmitSse42StrVectorCall(a, b, result, target);
             return;
         }
     }

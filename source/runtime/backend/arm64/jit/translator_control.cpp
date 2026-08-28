@@ -236,21 +236,11 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
                                  const std::vector<ir::DataClass>& args,
                                  bool has_result,
                                  const Register& result,
-                                 std::optional<Register> secondary_result,
-                                 std::span<const VRegister> vector_args,
-                                 bool preserve_flags) {
+                                 std::optional<Register> secondary_result) {
     ASSERT(args.size() <= 8);
-    if (preserve_flags) {
-        MergeNZCV(FlagsRegsAuditMergeCause::Helper,
-                  FlagsRegsAuditEdgeKind::Host);
-        FlushFlags();
-    } else {
-        flags_set = ir::Flags::None;
-        flags_clear = ir::Flags::None;
-        nzcv_dirty = false;
-        nzcv_requested = {};
-        InvalidateFlagsToken();
-    }
+    MergeNZCV(FlagsRegsAuditMergeCause::Helper,
+              FlagsRegsAuditEdgeKind::Host);
+    FlushFlags();
 
     // Materialize value arguments before taking the register snapshot. In
     // function mode an argument can be RegAlloc::MEM; context.X() then reloads
@@ -365,9 +355,6 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
     boost::container::small_vector<u32, 32> save_fprs;
     if (!general_registers_only) {
         FPRSMask live_fprs = context.GetLiveFPRs();
-        for (const auto& reg : vector_args) {
-            live_fprs.Mark(reg.GetCode());
-        }
         for (const auto& desc : context.GetConfig().buffers_static_alloc) {
             if (desc.is_float) {
                 live_fprs.Mark(desc.reg);
@@ -437,13 +424,6 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
                    "host call argument in an unsaved register");
         return u32(gpr_slot[code]);
     };
-    auto saved_fpr_offset = [&](u32 code) -> u32 {
-        const auto it = std::find(save_fprs.begin(), save_fprs.end(), code);
-        ASSERT_MSG(it != save_fprs.end(),
-                   "host call vector argument in an unsaved register");
-        return kSimdSaveOffset + u32(std::distance(save_fprs.begin(), it)) * 16u;
-    };
-
     __ Sub(sp, sp, kSaveBytes);
     for (size_t i = 0; i + 1 < save_gprs.size(); i += 2) {
         __ Stp(XRegister(save_gprs[i]),
@@ -480,11 +460,6 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
             }
         }
     }
-    for (u32 i = 0; i < vector_args.size(); ++i) {
-        __ Ldr(VRegister::GetQRegFromCode(i),
-               MemOperand(sp, saved_fpr_offset(vector_args[i].GetCode())));
-    }
-
     // Conservative helpers execute under the caller's native FP environment.
     // A direct call site may explicitly certify FPCR transparency; only that
     // narrow allowlist keeps the AFP guest FPCR installed across BLR. The

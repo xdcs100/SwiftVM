@@ -1023,18 +1023,6 @@ u64 Sse42StrEvalFast(u64 a_lo, u64 a_hi, u64 b_lo, u64 b_hi, u64 ctl_word) {
 #endif
 }
 
-#if SVM_SSE42STR_NEON
-u64 Sse42StrEvalVector(uint8x16_t a, uint8x16_t b, u64 ctl_word) {
-    const auto a64 = vreinterpretq_u64_u8(a);
-    const auto b64 = vreinterpretq_u64_u8(b);
-    return Sse42StrEvalFast(vgetq_lane_u64(a64, 0),
-                            vgetq_lane_u64(a64, 1),
-                            vgetq_lane_u64(b64, 0),
-                            vgetq_lane_u64(b64, 1),
-                            ctl_word);
-}
-#endif
-
 // The CallLambda target.  `token` is Sse42StrStage's return: an ordering edge,
 // never read.
 u64 Sse42StrEval(u64 b_lo, u64 b_hi, u64 token) {
@@ -1056,9 +1044,13 @@ ir::Value VecConst(ir::Assembler* as, u64 lo, u64 hi) {
 
 }  // namespace
 
+#if defined(__aarch64__)
+extern "C" void SwiftSse42StrEqualEachNegIndex();
+#endif
+
 VAddr Sse42StrVectorHelperAddress() {
-#if SVM_SSE42STR_NEON
-    return reinterpret_cast<VAddr>(&Sse42StrEvalVector);
+#if defined(__aarch64__)
+    return reinterpret_cast<VAddr>(&SwiftSse42StrEqualEachNegIndex);
 #else
     return 0;
 #endif
