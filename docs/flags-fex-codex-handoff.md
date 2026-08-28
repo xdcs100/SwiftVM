@@ -2907,6 +2907,33 @@ peepholes.
   retains the baseline's exact 107 mismatch keys with zero candidate-only case. No stress run,
   probe, diagnostic path or environment switch remains.
 
+- `d490189` removes the production indirect-L1 value-zero comparison. Production publishes the
+  value before its key and replaces an invalidated key hit with the nonzero shared miss trampoline;
+  only the diagnostic profiler retains zero as a distinct miss value. A matching production key is
+  therefore already branch-safe, so `CMP + CCMP` becomes one `CMP` while key mismatches retain the
+  same miss/continuation paths. Exact SQLite keeps all 2,170 roots and moves `287,228 -> 286,301`
+  (`-927`, `-0.322740%`) with no growth. Bounded smallpt keeps all 263 roots, moves
+  `40,412 -> 40,235` (`-177`, `-0.437989%`) and retains PPM SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. CoreMark keeps all
+  294 roots, moves `40,489 -> 40,310` (`-179`, `-0.442095%`) and retains `crcfinal=0x382f`.
+  Timing-normalized SQLite output is byte-identical; three interleaved short pairs move wall median
+  `1.032095 -> 1.014797s` and internal median `0.761 -> 0.756s`. Mac and Orb L1/SMC/interrupt
+  focuses pass 59 assertions each. No stress run, probe, diagnostic path or environment switch
+  remains.
+
+- The numbered 1-5 ledger was re-audited after the packed-branch and production-L1 stages. Full
+  Linux GPR pinning reduces static SQLite `287,228 -> 284,162` (`-1.067445%`), smallpt
+  `40,412 -> 40,172` (`-0.593883%`) and CoreMark `40,489 -> 40,215` (`-0.676727%`), but grows
+  126 SQLite roots by 391 instructions and regresses three-pair wall/internal medians
+  `1.059766/0.796 -> 1.089001/0.808s`; Apple also lacks the extra safe scratch slot for the
+  high-pressure full-pin ABI. The default flip was fully removed. A late x14 call-continuation
+  handoff changes zero of 2,171 roots because every feasible return value is already assigned x14.
+  A fallthrough-first 64-block region queue changes unit formation, covers only 86.35% of the old
+  static shape and grows its common subset by 0.897911%; it was removed. Remaining FPR publications
+  are guest-XMM copies or fault snapshots, and the remaining composite EAs already use the direct
+  `UXTW` path when their 32-bit wrap, bias and scale are encodable. No prototype, diagnostic source
+  path or new environment switch remains.
+
 ## Orb loop
 
 ```
