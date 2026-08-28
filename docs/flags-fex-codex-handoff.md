@@ -2709,6 +2709,23 @@ peepholes.
   1,000 fixed-seed bit-op cases report no BSF/BSR mismatch and only the established ROL/BT
   divergence families. No long benchmark, probe, diagnostic path or environment switch remains.
 
+- `4aaf88b` gives REP MOVS/STOS/CMPS/SCAS calls a shared pinned-state ABI instead of expanding the
+  generic AAPCS snapshot at every guest site. The AArch64 wrappers preserve `x3-x15` and
+  `v16-v31`; the caller saves only live clobbers, argument cycles and the `x11` host-target
+  scratch. The previous `v16-v23`-only C++ guard was removed. Existing `ClampGuestWalk`
+  mapped-range checks and guest fault returns remain unchanged. Exact SQLite `main/10` keeps all
+  2,215 roots and moves
+  `302,834 -> 301,712` host instructions (`-1,122`, `-0.370500%`) with no growth.
+  `sqlite3BitvecSet@0x418450` moves `658 -> 602`; its remaining FEX gap is `131` instructions.
+  Three interleaved short pairs are timing-neutral within noise: wall medians move
+  `1.708 -> 1.712s`, while internal medians move `1.414 -> 1.423s`. Bounded smallpt keeps all 262
+  roots, moves `42,040 -> 41,962`, and retains PPM SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. Mac and Orb pass the
+  helper metadata, resident-XMM and FPCR focuses. The helper-fault suite retains all REP results;
+  its two JIT `fxrstor` scratch-budget failures reproduce on the exact baseline. Fixed-seed 424242
+  MOVS/STOS retain the baseline's exact 402/391 mismatch sets with zero candidate-only case, and
+  CMPS/SCAS remains clean. No stress run, probe, diagnostic path or environment switch remains.
+
 ## Orb loop
 
 ```
