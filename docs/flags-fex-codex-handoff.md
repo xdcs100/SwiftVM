@@ -2581,6 +2581,22 @@ peepholes.
   CoreMark retains `crcfinal=0x382f`. No stress run, probe, diagnostic path or environment switch
   remains.
 
+- `3ae5a00` gives REP MOVS/STOS/CMPS/SCAS helpers a narrow resident-SIMD preservation contract.
+  The shared guard saves and restores `v16-v23` around the complete helper call, including the
+  guest-range callback and libc paths; other live SIMD registers keep the normal per-site snapshot.
+  This avoids the invalid stronger assumption that the helper call graph is general-register-only.
+  An exact same-host SQLite `main/10` A/B keeps all 2,087 roots and moves `297,402 -> 296,954`
+  host instructions (`-448`, `-0.150638%`) with no growth; `sqlite3_randomness@0x423620` moves
+  `997 -> 981`. Bounded smallpt keeps all 262 roots and moves `42,832 -> 42,800` (`-32`,
+  `-0.074710%`) with PPM SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. Three interleaved
+  SQLite pairs are timing-neutral within noise (`1.047817 -> 1.049457s` median). Same-host fixed-seed
+  424242 comparisons retain the baseline's exact 126 MOVS and 121 STOS established mismatches and
+  zero CMPS/SCAS mismatches. Mac and Orb pass the helper-trait and resident-snapshot checks; the
+  Release wrapper contains only the four expected Q-register save/restore pairs around the helper.
+  CoreMark retains `crcfinal=0x382f`. No stress run, probe, diagnostic path or environment switch
+  remains.
+
 ## Orb loop
 
 ```
