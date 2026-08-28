@@ -2980,13 +2980,29 @@ peepholes.
   CheckHalt merge-to-return entry changed zero roots; both were fully removed. No stress run, probe,
   diagnostic path or environment switch remains.
 
-- The post-`218383a` FEX refresh leaves the largest positive SQLite root gaps at `freeSpace`
-  `438/309`, `_IO_new_file_xsputn` `474/383`, `powerOfTen` `242/153`, `__strcspn_sse42`
-  `326/241`, `setupLookaside` `411/333` and `pagerPagecount` `254/177` (SwiftVM/FEX). The shared
-  excess is now dominated by path-sensitive PSTATE/PF/AF publication and cycle/link edges, not a
-  broad GetHost/SetHost or composite-EA pool. The old two-instruction BFXIL merge, global carry
-  polarity, larger region and full-pin attempts remain measured regressions; the next flags stage
-  needs an explicit edge/carrier contract rather than another local mask peephole.
+- `ab19937` combines a terminal full-NZCV publication with the host-return trampoline. Eligible
+  cold exits previously emitted `ADR + merge branch`, resumed locally and then emitted a second
+  return branch. The terminal now consumes only the immediately preceding merge recipe, removes
+  its pending patch record, rewinds that sequence and emits one branch to a shared merge-and-return
+  entry. AF remains in x26 and the token entry inserts parity from x12. Direct-link recipes already
+  consumed by a link site and the deferred-BL form are unchanged. A strict paired SQLite capture
+  keeps all 2,167 roots and moves `281,959 -> 274,241` (`-7,718`, `-2.737277%`) with no growth.
+  Bounded smallpt keeps all 263 roots, moves `39,656 -> 38,762` (`-894`, `-2.254388%`) and retains
+  PPM SHA-256 `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`.
+  CoreMark keeps all 294 roots, moves `39,705 -> 38,735` (`-970`, `-2.443017%`) and retains
+  `crcfinal=0x382f`. Timing-normalized SQLite output is byte-identical; three short
+  interleaved/reverse-order pairs keep wall median `1.022 -> 1.022s` and move internal median
+  `0.769 -> 0.771s`, used only as a consistency check. Mac and Orb pass 61 cycle assertions,
+  25 return/flags assertions and 105 direct-link/flags assertions each. No stress run, probe,
+  diagnostic path or environment switch remains.
+
+- The post-`ab19937` FEX refresh leaves the largest positive SQLite root gaps at `freeSpace`
+  `436/309`, `powerOfTen` `242/153`, `__strcspn_sse42` `326/241`, `__memcmp_sse2` `626/547`,
+  `_IO_new_file_xsputn` `460/383`, `pagerPagecount` `252/177` and `setupLookaside` `405/333`
+  (SwiftVM/FEX). The shared terminal return tax is no longer the dominant bucket. The next tranche
+  should separate `freeSpace`'s allocator/flags shape from the libc string-memory roots before
+  extending the edge/carrier contract. The old two-instruction BFXIL merge, global carry polarity,
+  larger region and full-pin attempts remain measured regressions.
 
 ## Orb loop
 
