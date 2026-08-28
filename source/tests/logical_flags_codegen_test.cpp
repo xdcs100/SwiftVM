@@ -171,7 +171,8 @@ std::vector<std::string> EmitNarrowArithmetic(OpCode op,
     return Disassemble(context);
 }
 
-std::vector<std::string> EmitCompoundLogicalClear(bool exact_clear) {
+std::vector<std::string> EmitPackedCVAFClear(bool exact_clear,
+                                             bool arithmetic = false) {
     Config config{
             .loc_start = 0,
             .loc_end = 1ull << 48,
@@ -185,7 +186,9 @@ std::vector<std::string> EmitCompoundLogicalClear(bool exact_clear) {
     IntrusivePtr<Block> block{new Block(0, Location{0x8a20})};
     auto source = block->LoadUniform<TypedValue<ValueType::U32>>(
             Uniform{0, ValueType::U32});
-    auto result = block->And(source, Operand{source}).SetType(ValueType::U32);
+    auto result = arithmetic
+            ? block->Add(source, Operand{Imm{1u}}).SetType(ValueType::U32)
+            : block->And(source, Operand{source}).SetType(ValueType::U32);
     const auto clear = exact_clear
             ? Flags::CV | Flags::AuxiliaryCarry
             : Flags::CV;
@@ -293,14 +296,18 @@ TEST_CASE("parity-only logical publication leaves NZCV clean") {
 }
 
 TEST_CASE("logical NZ publication absorbs an adjacent CVAF clear") {
-    const auto exact = EmitCompoundLogicalClear(true);
+    const auto exact = EmitPackedCVAFClear(true);
     REQUIRE(Contains(exact, "mrs x26, nzcv"));
     REQUIRE(Count(exact, "ubfx ") == 0);
     REQUIRE_FALSE(Contains(exact, "#26, #6"));
     REQUIRE_FALSE(Contains(exact, "bfc x26, #26, #4"));
 
-    const auto partial = EmitCompoundLogicalClear(false);
+    const auto partial = EmitPackedCVAFClear(false);
     REQUIRE_FALSE(Contains(partial, "#26, #6"));
+
+    const auto arithmetic = EmitPackedCVAFClear(true, true);
+    REQUIRE(Contains(arithmetic, "uxtb w26"));
+    REQUIRE_FALSE(Contains(arithmetic, "bfc x26, #26, #4"));
 }
 
 TEST_CASE("narrow register self tests skip the redundant AND") {

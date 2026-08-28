@@ -645,6 +645,15 @@ void JitTranslator::ClearFlags(ir::Flags guest) {
         nzcv_requested = {};
         return;
     }
+    if (guest == cv_af && FlagsRegsEnabled() && nzcv_dirty &&
+        nzcv_requested == HostFlags::NZ && flags_token_valid &&
+        !flags_token_keep) {
+        const u32 begin = context.CurrentBufferSize();
+        __ Uxtb(flags.W(), FlagsTokenResult().W());
+        RecordPFAFDensity(PFAFDensityKind::AFWrite, begin);
+        InvalidateFlagsToken();
+        return;
+    }
     if (True(guest & ir::Flags::NZCV)) {
         // ClearFlags is an independent IR write, not merely an annotation on
         // the preceding flag producer. Flag elimination can delete a dead
