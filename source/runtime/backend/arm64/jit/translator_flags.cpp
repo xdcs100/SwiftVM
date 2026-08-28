@@ -613,14 +613,22 @@ void JitTranslator::ClearFlags(ir::Flags guest) {
     const bool compound_logical = compound_logical_clear_pending &&
             guest == cv_af && FlagsRegsEnabled() && nzcv_dirty &&
             nzcv_requested == HostFlags::NZ;
+    const bool compound_logical_zero =
+            compound_logical && compound_logical_zero_pending;
     compound_logical_clear_pending = false;
+    compound_logical_zero_pending = false;
     if (compound_logical) {
         PublishFlagsToken();
-        const auto scratch = context.GetSharedTmpX();
         constexpr u32 width = HostFlagsBit::N - HostFlagsBit::AuxiliaryCarry + 1;
-        __ Mrs(scratch, NZCV);
-        __ Ubfx(scratch, scratch, HostFlagsBit::AuxiliaryCarry, width);
-        __ Bfi(flags, scratch, HostFlagsBit::AuxiliaryCarry, width);
+        if (compound_logical_zero) {
+            __ Bfc(flags, HostFlagsBit::AuxiliaryCarry, width);
+            __ Orr(flags, flags, u64{1} << HostFlagsBit::Z);
+        } else {
+            const auto scratch = context.GetSharedTmpX();
+            __ Mrs(scratch, NZCV);
+            __ Ubfx(scratch, scratch, HostFlagsBit::AuxiliaryCarry, width);
+            __ Bfi(flags, scratch, HostFlagsBit::AuxiliaryCarry, width);
+        }
         nzcv_dirty = false;
         nzcv_requested = {};
         return;
@@ -993,6 +1001,8 @@ void JitTranslator::EmitClearFlags(ir::Inst* inst) {
     // See EmitSaveFlags: merge instead of asserting on a pending window.
     compound_logical_clear_pending =
             flags_clear == ir::Flags::None && MatchCompoundLogicalClear(inst);
+    compound_logical_zero_pending = compound_logical_clear_pending &&
+            MatchCompoundZeroLogicalClear(inst);
     flags_clear |= inst->GetArg<ir::Flags>(0);
 }
 

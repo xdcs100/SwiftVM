@@ -110,4 +110,5 @@ TEST_CASE("self XOR emits zero and logical flags together") {
     REQUIRE_FALSE(Contains(instructions, "eor "));
     REQUIRE_FALSE(Contains(instructions, "tst "));
     REQUIRE_FALSE(Contains(instructions, "lsr "));
+    REQUIRE_FALSE(Contains(instructions, "mrs "));
 }

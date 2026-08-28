@@ -40,4 +40,13 @@ bool JitTranslator::MatchCompoundLogicalClear(ir::Inst* inst) const {
     }
 }
 
+bool JitTranslator::MatchCompoundZeroLogicalClear(ir::Inst* inst) const {
+    if (!MatchCompoundLogicalClear(inst)) {
+        return false;
+    }
+    auto& list = cur_block->GetInstList();
+    auto producer = std::prev(list.iterator_to(*inst));
+    return scalar_identity_analysis.IsSelfXor(&*producer);
+}
+
 }  // namespace swift::runtime::backend::arm64
