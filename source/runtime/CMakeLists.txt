@@ -147,6 +147,8 @@ add_library(swift_runtime STATIC
         backend/trampolines.h
         backend/arm64/jit/jit_context.cpp
         backend/arm64/jit/jit_context.h
+        backend/arm64/jit/div128_narrowing_analysis.cpp
+        backend/arm64/jit/div128_narrowing_analysis.h
         backend/arm64/jit/translator.cpp
         backend/arm64/jit/terminal_location_publication.cpp
         backend/arm64/jit/terminal_location_publication.h

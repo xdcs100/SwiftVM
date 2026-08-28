@@ -1,5 +1,7 @@
 #include "translator.h"
 
+#include "div128_narrowing_analysis.h"
+
 #include <algorithm>
 #include <cstring>
 #include <functional>
@@ -12,40 +14,6 @@
 namespace swift::runtime::backend::arm64 {
 
 #define __ masm.
-
-static ir::Value ResolvePlainDivOperand(ir::Value value) {
-    while (value.Def()) {
-        while (value.Def() && value.Def()->GetOp() == ir::OpCode::BitCast) {
-            value = value.Def()->GetArg<ir::Value>(0);
-        }
-        if (!value.Def() || value.Def()->GetOp() != ir::OpCode::GetOperand) {
-            break;
-        }
-        const auto operand = value.Def()->GetArg<ir::Operand>(0);
-        if (operand.GetOp().type != ir::OperandOp::None ||
-            !operand.GetRight().Null() || !operand.GetLeft().IsValue()) {
-            break;
-        }
-        value = operand.GetLeft().value;
-    }
-    return value;
-}
-
-static bool IsNarrowDiv128Dividend(ir::Value high,
-                                   ir::Value low,
-                                   bool sign) {
-    auto* definition = high.Def();
-    if (!definition) {
-        return false;
-    }
-    if (!sign) {
-        return definition->GetOp() == ir::OpCode::LoadImm &&
-               definition->GetArg<ir::Imm>(0).Get() == 0;
-    }
-    return definition->GetOp() == ir::OpCode::AsrImm &&
-           definition->GetArg<ir::Imm>(1).Get() == 63 &&
-           definition->GetArg<ir::Value>(0).Def() == low.Def();
-}
 
 void JitTranslator::EmitAdd(ir::Inst* inst) {
     if (auto fusion = narrow_carry_fusions.find(inst);
@@ -883,9 +851,7 @@ void JitTranslator::EmitDiv128(ir::Inst* inst) {
     const auto high = inst->GetArg<ir::Value>(0);
     const auto low = inst->GetArg<ir::Value>(1);
     const auto divisor = inst->GetArg<ir::Value>(2);
-    const auto narrow_high = ResolvePlainDivOperand(high);
-    const auto narrow_low = ResolvePlainDivOperand(low);
-    if (IsNarrowDiv128Dividend(narrow_high, narrow_low, sign)) {
+    if (Div128NarrowingAnalysis{cur_block}.CanLowerNatively(inst)) {
         const auto secondary_results =
                 inst->GetPseudoOperations(ir::OpCode::Div128Remainder);
         ASSERT(secondary_results.size() <= 1);

@@ -3117,6 +3117,23 @@ peepholes.
   CMPXCHG mismatch; their only failures are the established ROL family. No stress run, probe,
   diagnostic path or environment switch remains.
 
+- `Div128NarrowingAnalysis` now preserves the existing native `SDIV/UDIV + MSUB` path when a
+  standard narrow dividend crosses pinned architectural state. It resolves only exact same-block
+  `StoreUniform` to `LoadUniform` chains and plain operand wrappers; overlapping writes,
+  `UniformBarrier`, host calls, x87 and SSE4.2 helpers stop the proof. This recovers `CQO; IDIV`
+  pairs whose RDX sign extension was previously hidden from the backend while arbitrary 128-bit
+  dividends retain the paired helper. Exact SQLite keeps all 2,167 roots and moves
+  `272,701 -> 272,312` (`-389`, `-0.142647%`) with 18 shrinking roots and no growth.
+  `sqlite3BtreeSetSpillSize` moves `133 -> 100`, narrowing its FEX gap from 69 to 36, and
+  `setupLookaside` moves `403 -> 373`, narrowing its gap from 70 to 40. The bounded
+  `smallpt_wh_x64 4 8 6` screen keeps all 263 roots, moves `38,386 -> 38,371`, and retains PPM
+  SHA-256 `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. The shortened
+  CoreMark screen keeps all 294 reached roots, moves `38,334 -> 38,319`, and retains
+  `crcfinal=0x382f`. Mac and Orb fixed-seed 424242 DIV/IDIV screens pass 256 iterations; Orb pin
+  levels 0 through 3 also pass fixed-seed 101 at 100 iterations with zero mismatch. SQLite's
+  timing-normalized output is byte-identical. No stress run, probe, diagnostic path or environment
+  switch remains.
+
 ## Orb loop
 
 ```
