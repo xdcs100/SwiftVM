@@ -62,3 +62,59 @@
 1:
     .byte 0, 1, 2, 3, 4, 5, 6, 7
     .byte 8, 9, 10, 11, 12, 13, 14, 15
+
+.def SwiftSse42StrEqualAnyIndex
+    cmeq v3.16b, v0.16b, #0
+    shrn v3.8b, v3.8h, #4
+    fmov x10, d3
+    rbit x10, x10
+    clz x10, x10
+    lsr x10, x10, #2
+    cmeq v3.16b, v1.16b, #0
+    shrn v3.8b, v3.8h, #4
+    fmov x11, d3
+    rbit x11, x11
+    clz x11, x11
+    lsr x11, x11, #2
+
+    eor v2.16b, v2.16b, v2.16b
+    orr v3.16b, v0.16b, v0.16b
+    mov w13, w10
+    cbz w13, 2f
+1:
+    dup v4.16b, v3.b[0]
+    cmeq v4.16b, v4.16b, v1.16b
+    ext v3.16b, v3.16b, v3.16b, #1
+    orr v2.16b, v2.16b, v4.16b
+    subs w13, w13, #1
+    b.ne 1b
+2:
+    ldur q5, [x28, #-32]
+    and v5.16b, v2.16b, v5.16b
+    addp v5.16b, v5.16b, v5.16b
+    addp v5.8b, v5.8b, v5.8b
+    addp v5.8b, v5.8b, v5.8b
+    umov w16, v5.h[0]
+
+    mov w14, #1
+    lsl w14, w14, w11
+    sub w14, w14, #1
+    and w16, w16, w14
+    and w16, w16, #0xffff
+    rbit w13, w16
+    orr w13, w13, #0x8000
+    clz w13, w13
+    orr w16, w16, w13, lsl #16
+
+    cmp w10, #16
+    cset w13, lt
+    bfi x16, x13, #24, #1
+    cmp w11, #16
+    cset w13, lt
+    bfi x16, x13, #25, #1
+    and w13, w16, #0xffff
+    cmp w13, #0
+    cset w13, ne
+    bfi x16, x13, #26, #1
+    bfi x16, x16, #27, #1
+    ret

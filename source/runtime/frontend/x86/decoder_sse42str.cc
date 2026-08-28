@@ -1046,14 +1046,21 @@ ir::Value VecConst(ir::Assembler* as, u64 lo, u64 hi) {
 
 #if defined(__aarch64__)
 extern "C" void SwiftSse42StrEqualEachNegIndex();
+extern "C" void SwiftSse42StrEqualAnyIndex();
 #endif
 
-VAddr Sse42StrVectorHelperAddress() {
+VAddr Sse42StrVectorHelperAddress(u32 control) {
 #if defined(__aarch64__)
-    return reinterpret_cast<VAddr>(&SwiftSse42StrEqualEachNegIndex);
+    if (control == 0x1a) {
+        return reinterpret_cast<VAddr>(&SwiftSse42StrEqualEachNegIndex);
+    }
+    if (control == 0x02) {
+        return reinterpret_cast<VAddr>(&SwiftSse42StrEqualAnyIndex);
+    }
 #else
-    return 0;
+    (void)control;
 #endif
+    return 0;
 }
 
 // ---------------------------------------------------------------------------
