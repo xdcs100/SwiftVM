@@ -2466,6 +2466,28 @@ peepholes.
   SQLite only `333,452 -> 333,347` (`-105`) across 22 units. Neither prototype remains. No census
   logging, probe path, stress run or environment switch remains.
 
+- `fb93462` moves the repeated cycle-exit reason tail into the existing code-region trampoline.
+  Single-stub exits and function-shared cycle labels now branch to one region entry, which performs
+  the acquire request load, selects `CodeMiss` or `Signal`, publishes the halt reason and reaches the
+  existing shared return entry. A unit that cannot use a reachable region trampoline retains the
+  inline tail through the existing non-direct re-emission path. The entry offset is derived from the
+  fixed pending-flags trampoline layout, so `CodeRegion` and link-patch metadata do not grow. Exact
+  SQLite `main/10` static-only A/B keeps all 1,999 units and moves `333,452 -> 319,814` host
+  instructions (`-13,638`, `-4.089944%`), with 1,266 shrinking units, 733 unchanged units and no
+  growth. `0x529e28` moves `753 -> 675`, `0x4675b0` moves `769 -> 697`, and `0x4a5518` moves
+  `584 -> 536`. Timing-normalized SQLite output remains byte-identical with SHA-256
+  `9fb4d81a33c7f75c5b122f609410088c3be8a2a0bf5458d1e1164ecfc19f22f2`; bounded smallpt retains
+  SHA-256 `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. Mac and Orb pass the
+  non-stress direct-link, SMC, continuation and region groups with 941 and 875 assertions. The new
+  focused region entry check covers both reason values with six assertions. No stress run, probe,
+  diagnostic path or environment switch remains.
+
+- Moving static `current_loc` publication from callers into shared call entries was evaluated and
+  fully removed. Even after terminal-level continuation eligibility filtering, the rebuilt short
+  SQLite run halted at guest `rip=0x3e8`; the publication is part of a stricter call-entry/state
+  ordering contract than the link-site metadata alone proves. Do not retry this as a simple store
+  relocation without first representing that ordering in the continuation ABI.
+
 ## Orb loop
 
 ```
