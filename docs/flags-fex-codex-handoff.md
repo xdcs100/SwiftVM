@@ -2551,6 +2551,22 @@ peepholes.
   self-consistency over 935 function units, then trips its stale `>3000` unit-count threshold before
   the golden comparison. No stress run, probe, diagnostic path or environment switch remains.
 
+- `763cefc` keeps lazy function regions within 8 KiB of their root. More distant direct successors
+  remain undecoded external edges and use the existing on-demand L2/direct-link path; eager
+  interpreter decoding is unchanged. This prevents split `.cold` sections from being pulled into
+  hot units: `read_encoded_value_with_base@0x57c710` no longer embeds 21 blocks rooted at
+  `0x401a54` and moves `306 -> 72` host instructions, versus FEX at 69. Against `371d04b`, bounded
+  SQLite total static code moves `308,727 -> 304,646` (`-4,081`, `-1.321880%`); three interleaved
+  short pairs move wall-clock median `1.368843 -> 1.353392s` and internal median
+  `1.139 -> 1.123s`. Bounded smallpt keeps the same 262 roots with no growth and moves
+  `43,776 -> 42,990` (`-786`, `-1.795504%`); its PPM SHA-256 remains
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. The 4 KiB screen reduced
+  more total code but fragmented SQLite from 2,063 to 2,225 roots; the 16 KiB screen left more cold
+  code, so neither threshold remains. Mac and Orb pass 302 assertions across function formation,
+  SMC, direct-link and disk-cache focuses. CoreMark retains `crcfinal=0x382f`, and the fingerprint
+  harness retains cross-process host-byte self-consistency over 935 function units before its stale
+  `>3000` threshold. No stress run, probe, diagnostic path or environment switch remains.
+
 ## Orb loop
 
 ```
