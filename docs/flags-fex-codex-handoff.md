@@ -2812,6 +2812,23 @@ peepholes.
   zero on both sides. A temporary two-site unaligned XADD probe confirmed two entries sharing one
   cold stub and was deleted. No stress run, diagnostic path or environment switch remains.
 
+- The numbered 1-5 ledger was re-audited against the current `297,973`-instruction SQLite shape.
+  Cross-edge carry remains limited by live mixed joins; an N/Z region-trampoline prototype changed
+  zero of 2,212 roots and was removed. Return-L1 is already at its current base-ISA
+  `LDP + CMP + conditional miss + BLR` continuation contract. Remaining FPR publications are real
+  guest-XMM copies or fault snapshots, and the remaining composite EAs require 32-bit wrap,
+  unencodable shifts/scales or bias handling. Do not reopen those pools without a new representation
+  contract rather than another local whitelist.
+
+- A level-2 R13 fifteenth-pin screen is rejected. It moved SQLite `297,973 -> 293,869`
+  (`-4,104`, `-1.377306%`) and smallpt `41,099 -> 40,813` (`-286`, `-0.695881%`), but
+  `sqlite3_randomness` grew by 211 instructions, three SQLite wall pairs regressed from median
+  `1.708 -> 1.736s`, and Mac exhausted the guest stack through a continuation interaction before
+  test 130. Disabling FLAGS/continuation avoided that failure, while a terminal spill-flush
+  prototype broke the ordinary 14-pin control and was removed. Replacing R14 with R13 at the same
+  pin count instead grew SQLite by 180 instructions. No pin-map, allocator, fault probe, trace path
+  or environment switch from these screens remains.
+
 ## Orb loop
 
 ```
