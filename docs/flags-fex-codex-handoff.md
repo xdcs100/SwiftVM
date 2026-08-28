@@ -2881,6 +2881,21 @@ peepholes.
   ALU differential retains the baseline's exact 182 mismatch keys with zero candidate-only case.
   No stress run, probe, diagnostic path or environment switch remains.
 
+- `3dc5157` removes the next packed-flags duplication. For an exact CV/AF clear with N/Z still
+  pending in host PSTATE and a complete parity token, every old x26 field is either explicitly
+  cleared, pending in PSTATE or replaced by that token. One `UXTB w26,wToken` therefore replaces
+  the separate `BFC x26,#26,#4 + BFXIL x26,token,#0,#8` publication without changing carry
+  polarity or crossing an observation boundary. Exact SQLite keeps all 2,171 roots and moves
+  `289,189 -> 287,411` (`-1,778`, `-0.614823%`) with no growth. Bounded smallpt keeps all 263 roots,
+  moves `40,697 -> 40,469` (`-228`, `-0.560238%`) and retains PPM SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. Five interleaved SQLite
+  pairs move wall median `1.107450 -> 1.064690s` and internal median `0.842 -> 0.796s`; treat these
+  short timings as a consistency check, not a throughput claim. Timing-normalized SQLite output is
+  byte-identical, CoreMark 20k retains `crcfinal=0x382f`, and Mac/Orb logical-flags focuses pass
+  23 assertions each. Fixed-seed 424242 ALU differential retains the baseline's exact 182 mismatch
+  keys with zero candidate-only case. No stress run, probe, diagnostic path or environment switch
+  remains.
+
 ## Orb loop
 
 ```
