@@ -21,6 +21,7 @@ public:
     using ReturnHost = void (*)();
     using CallHost = void (*)();
     using IndirectL1Miss = void (*)();
+    using PairCall = void (*)();
 
     explicit Trampolines(const Config& config,
                          const FeatureSet& features = FeatureSet{});
@@ -35,6 +36,8 @@ public:
         return indirect_l1_miss;
     }
 
+    [[nodiscard]] PairCall GetPairCall() const { return pair_call; }
+
     [[nodiscard]] GPRSMask GetGPRRegs() const { return gpr_regs; }
 
     [[nodiscard]] FPRSMask GetFPRRegs() const { return fpr_regs; }
@@ -47,6 +50,7 @@ protected:
     ReturnHost return_host{};
     CallHost call_host{};
     IndirectL1Miss indirect_l1_miss{};
+    PairCall pair_call{};
     GPRSMask gpr_regs{};
     GPRSMask fpr_regs{};
     std::shared_mutex lock{};

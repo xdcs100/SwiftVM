@@ -235,6 +235,7 @@ public:
     // decision in EmitMemOperand).
     [[nodiscard]] const Config& GetConfig() { return module->GetAddressSpace().GetConfig(); }
     [[nodiscard]] const FeatureSet& GetFeatures() const { return features; }
+    [[nodiscard]] u64 GetPairCallTrampoline() const;
     [[nodiscard]] bool IsHostWriteCoalesced(u32 id) const {
         return reg_alloc.IsHostWriteCoalesced(id);
     }

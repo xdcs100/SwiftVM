@@ -1,10 +1,12 @@
 #include "translator.h"
 
+#include <array>
 #include <limits>
 
 #include "runtime/backend/context.h"
 #include "runtime/backend/arm64/defines.h"
 #include "runtime/backend/arm64/fpcr_mode.h"
+#include "runtime/backend/arm64/pair_call_trampoline.h"
 #include "runtime/common/helper_abi.h"
 #include "runtime/common/svm_config.h"
 #include "runtime/frontend/x86/sse42str_helper.h"
@@ -572,22 +574,58 @@ void JitTranslator::EmitPreserveAllPairCall(ir::Inst* inst,
                                             const std::vector<ir::DataClass>& args,
                                             ir::OpCode secondary,
                                             ir::HostRegisterEffect host_registers) {
+    ASSERT(args.size() == 3);
+    ASSERT(host_registers == ir::HostRegisterEffect::GeneralOnly);
     const auto secondary_results = inst->GetPseudoOperations(secondary);
     ASSERT(secondary_results.size() <= 1);
-    const ir::Lambda lambda{
-            ir::DataClass{ir::Imm{target}},
-            ir::HelperCallTraits{
-                    .uniform = ir::UniformEffectId::None,
-                    .abi = ir::HelperABI::PreserveAllLeaf,
-                    .host_fp = ir::HostFpEffect::FPCRTransparent,
-                    .host_registers = host_registers,
-            }};
+    MergeNZCV(FlagsRegsAuditMergeCause::Helper,
+              FlagsRegsAuditEdgeKind::Host);
+    FlushFlags();
+
+    std::array<std::optional<XRegister>, 3> value_args;
+    for (u32 index = 0; index < args.size(); ++index) {
+        if (args[index].IsValue()) {
+            value_args[index] = context.X(args[index].value);
+        }
+    }
     const auto primary_result = context.R(ir::Value{inst});
     const auto secondary_result = secondary_results.empty()
             ? std::optional<Register>{}
             : std::optional<Register>{
                       context.RForWrite(ir::Value{secondary_results.front()})};
-    EmitHostCall(lambda, args, true, primary_result, secondary_result);
+
+    __ Sub(sp, sp, PairCallFrame::Size);
+    __ Stp(x30, ip, MemOperand(sp, PairCallFrame::Link));
+    __ Str(ip0, MemOperand(sp, PairCallFrame::SavedX16));
+    for (u32 index = 0; index < args.size(); ++index) {
+        if (value_args[index]) {
+            __ Str(*value_args[index],
+                   MemOperand(sp, PairCallFrame::Argument(index)));
+        }
+    }
+    for (u32 index = 0; index < args.size(); ++index) {
+        if (args[index].IsImm()) {
+            __ Mov(ip, args[index].imm.Get());
+            __ Str(ip, MemOperand(sp, PairCallFrame::Argument(index)));
+        }
+    }
+    MaterializeHostCallTarget(target);
+    const u64 trampoline = context.GetPairCallTrampoline();
+    ASSERT(trampoline);
+    __ movz(ip0, trampoline & 0xFFFFu, 0);
+    __ movk(ip0, (trampoline >> 16) & 0xFFFFu, 16);
+    __ movk(ip0, (trampoline >> 32) & 0xFFFFu, 32);
+    __ movk(ip0, (trampoline >> 48) & 0xFFFFu, 48);
+    __ Blr(ip0);
+    __ Ldp(x30, ip, MemOperand(sp, PairCallFrame::Link));
+    __ Ldr(ip0, MemOperand(sp, PairCallFrame::SavedX16));
+    __ Ldr(primary_result,
+           MemOperand(sp, PairCallFrame::PrimaryResult));
+    if (secondary_result) {
+        __ Ldr(*secondary_result,
+               MemOperand(sp, PairCallFrame::SecondaryResult));
+    }
+    __ Add(sp, sp, PairCallFrame::Size);
 }
 
 void JitTranslator::EmitCallLambda(ir::Inst* inst) {

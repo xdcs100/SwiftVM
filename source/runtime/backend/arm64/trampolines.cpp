@@ -5,6 +5,7 @@
 #include "runtime/backend/cache_clear.h"
 #include "runtime/backend/context.h"
 #include "runtime/backend/arm64/fpcr_mode.h"
+#include "runtime/backend/arm64/pair_call_trampoline.h"
 #include "runtime/common/backedge_control.h"
 #include "runtime/common/svm_config.h"
 #include "runtime/externals/vixl/svm-vixl-prof.h"
@@ -70,6 +71,17 @@ void TrampolinesArm64::Build() {
                                            label_call_host.GetLocation());
     indirect_l1_miss = reinterpret_cast<IndirectL1Miss>(
             code_buffer->exec_data + label_indirect_l1_miss.GetLocation());
+    MacroAssembler pair_assembler{};
+    EmitPairCallTrampoline(pair_assembler);
+    pair_assembler.FinalizeCode();
+    const auto pair_size = pair_assembler.GetBuffer()->GetSizeInBytes();
+    const auto pair_buffer = code_cache.AllocCode(pair_size);
+    ASSERT(pair_buffer);
+    std::memcpy(pair_buffer->rw_data,
+                pair_assembler.GetBuffer()->GetStartAddress<u8*>(),
+                pair_size);
+    pair_buffer->Flush();
+    pair_call = reinterpret_cast<PairCall>(pair_buffer->exec_data);
     if (GetSvmConfig().exec_map_is_set && GetSvmConfig().exec_map != "0") {
         std::fprintf(stderr,
                      "[svm-exec-map] trampoline=%p..%p entry=%p return=%p call=%p size=%zu\n",

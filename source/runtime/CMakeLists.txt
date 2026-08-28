@@ -188,6 +188,8 @@ add_library(swift_runtime STATIC
         backend/arm64/jit/flags.cpp
         backend/arm64/trampolines.cpp
         backend/arm64/trampolines.h
+        backend/arm64/pair_call_trampoline.cpp
+        backend/arm64/pair_call_trampoline.h
         backend/arm64/region_link_trampoline.cpp
         backend/arm64/region_link_trampoline.h
         backend/riscv64/jit/jit_context.cpp

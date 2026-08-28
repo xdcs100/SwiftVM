@@ -83,6 +83,11 @@ JitContext::JitContext(const std::shared_ptr<Module>& module,
             module->PrepareDirectLinkRegion();
 }
 
+u64 JitContext::GetPairCallTrampoline() const {
+    return reinterpret_cast<u64>(
+            module->GetAddressSpace().GetTrampolines().GetPairCall());
+}
+
 void JitContext::RecordExecCounter(u32 offset, u32 amount) {
     if (!exec_profile_enabled || amount == 0) return;
     ASSERT(amount < 4096);
