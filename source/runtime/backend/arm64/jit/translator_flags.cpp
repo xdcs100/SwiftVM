@@ -1381,9 +1381,7 @@ bool JitTranslator::FoldCcFromCarryTest(ir::Inst* test_flags) {
     if (test_flags->GetArg<ir::Flags>(0) != ir::Flags::Carry) {
         return false;
     }
-    if (!CarryStillInPstate(cur_block, test_flags)) {
-        return false;
-    }
+    const bool carry_in_pstate = CarryStillInPstate(cur_block, test_flags);
     auto* pred = SoleUserInBlock(cur_block, test_flags);
     if (!pred) {
         return false;
@@ -1416,6 +1414,9 @@ bool JitTranslator::FoldCcFromCarryTest(ir::Inst* test_flags) {
                 ir::Flags::Carry | ir::Flags::Zero));
         __ Tst(flags, mask);
         return true;
+    }
+    if (!carry_in_pstate) {
+        return false;
     }
     if (above) {
         return RecordLocalCondition(combine, ir::Cond::HI);

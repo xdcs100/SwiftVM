@@ -642,6 +642,55 @@ TEST_CASE("dead-edge integer compares branch on raw host flags") {
     }
 }
 
+TEST_CASE("incoming packed carry-zero branches test the flags carrier") {
+    for (const auto opcode : {swift::u8{0x77}, swift::u8{0x76}}) {
+        const std::array<swift::u8, 9> code{
+                opcode, 0x04,
+                0x39, 0xc0,
+                0xf4, 0x90,
+                0x39, 0xc9,
+                0xf4,
+        };
+        DirectMemory memory;
+        const auto address = reinterpret_cast<swift::VAddr>(code.data());
+        IntrusivePtr<Block> block{new Block(0, Location{address})};
+        Assembler assembler{block.get()};
+        FeatureSet features{};
+        constexpr auto arm64_features = Arm64Features::FlagM;
+        swift::x86::X64Decoder decoder{
+                address, &memory, &assembler, true, arm64_features, false, false,
+                features};
+        decoder.Decode();
+
+        block->ReIdInstr();
+        Config config{
+                .loc_start = 0,
+                .loc_end = 1ull << 48,
+                .enable_jit = true,
+                .has_local_operation = false,
+                .backend_isa = kArm64,
+                .global_opts = Optimizations::All,
+                .arm64_features = arm64_features,
+        };
+        AddressSpace address_space{config};
+        RegAlloc alloc{block->MaxInstrId(),
+                       address_space.GetTrampolines().GetGPRRegs(),
+                       address_space.GetTrampolines().GetFPRRegs(), features};
+        RegisterAllocPass::Run(block.get(), &alloc, false, features);
+        arm64::JitContext context{address_space.GetDefaultModule(), alloc};
+        arm64::JitTranslator translator{context};
+        translator.Translate(block.get());
+        context.Finish();
+
+        const auto instructions = Disassemble(context);
+        CAPTURE(opcode, instructions);
+        REQUIRE(Count(instructions, "tst ") == 1);
+        REQUIRE(Count(instructions, "ubfx") == 0);
+        REQUIRE(Count(instructions, "cset") == 0);
+        REQUIRE((Contains(instructions, "b.eq") || Contains(instructions, "b.ne")));
+    }
+}
+
 TEST_CASE("branch-only narrow equality compares extend the register operand") {
     for (const auto opcode : {swift::u8{0x74}, swift::u8{0x75}}) {
         const std::array<swift::u8, 14> code{
