@@ -2567,6 +2567,20 @@ peepholes.
   harness retains cross-process host-byte self-consistency over 935 function units before its stale
   `>3000` threshold. No stress run, probe, diagnostic path or environment switch remains.
 
+- `d77ffd8` extends the composite carry-condition fold to the canonical FlagM representation.
+  `TestFlags(C) -> TestZero -> And(CondSet(NE))` and the inverse below-or-equal chain now publish
+  pending NZCV once, test the packed C/Z pair, and feed the identity `Select` through a local
+  EQ/NE condition. This removes the scalar boolean-normalization chain without assuming that the
+  pre-fold PSTATE can survive later flag consumers. Against `763cefc`, bounded SQLite keeps all
+  2,155 roots and moves `304,646 -> 304,116` host instructions (`-530`, `-0.173972%`) with no
+  growth; `sqlite3PagerSetFlags@0x409f00` moves `159 -> 149` and `sqlite3_randomness` moves
+  `1,003 -> 997`. Bounded smallpt keeps all 262 roots and moves `42,990 -> 42,832` (`-158`,
+  `-0.367527%`) with its canonical PPM SHA-256 unchanged. Mac and Orb pass 121 focused carry,
+  CondSet and narrow-branch assertions. A same-host fixed-seed 424242 setcc/cmov/jcc comparison
+  retains the baseline's exact 1,214 established differences with zero candidate-only mismatch.
+  CoreMark retains `crcfinal=0x382f`. No stress run, probe, diagnostic path or environment switch
+  remains.
+
 ## Orb loop
 
 ```
