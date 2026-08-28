@@ -2762,6 +2762,20 @@ peepholes.
   not finish inside their 8/6-second caps and were stopped rather than extended; no result is
   claimed from them. No stress run, probe, diagnostic path or environment switch remains.
 
+- `2ca20a2` publishes the compound logical flags of a proved self-XOR zero directly. The existing
+  self-identity analysis proves the result, so the pending `N=0,Z=1,C=0,V=0,AF=0` word no longer
+  executes `MRS NZCV + UBFX + BFI`; it clears the six stored bits and sets Z directly. Other
+  logical producers retain the existing PSTATE merge. Exact SQLite `main/10` keeps all 2,212 roots
+  and moves `300,175 -> 298,111` (`-2,064`, `-0.687599%`) with no growth. Bounded smallpt keeps
+  all 263 roots, moves complete total `41,415 -> 41,251` (`-164`, `-0.395992%`), and retains PPM
+  SHA-256 `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. Two three-pair
+  timing batches reverse sign with ordering: un-warmed
+  medians move internal/wall `1.372/1.647 -> 1.382/1.663s`, while warmed reverse-order medians move
+  `1.400/1.678 -> 1.386/1.665s`; treat wall as neutral. Fixed-seed 424242 ALU, setcc/cmov/jcc and
+  mixed comparisons retain the baseline's exact 1,424/1,214/682 mismatch sets with zero
+  candidate-only case. Mac and Orb pass the self-XOR shape and function-liveness focuses. No
+  stress run, probe, diagnostic path or environment switch remains.
+
 ## Orb loop
 
 ```
