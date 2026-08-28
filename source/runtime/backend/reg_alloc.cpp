@@ -86,6 +86,7 @@ bool X86PinExtLevel3AluScratchEnabled(const GPRSMask& pool, ir::OpCode op) {
     return X86PinExtLevel3Enabled(pool) && pool.Get(10) &&
            (op == ir::OpCode::Add || op == ir::OpCode::Sub ||
             op == ir::OpCode::Or || op == ir::OpCode::Select ||
+            op == ir::OpCode::SelectZero ||
             op == ir::OpCode::VecFCvtFloatToInt ||
             op == ir::OpCode::CallLambda || op == ir::OpCode::CallDynamic ||
             op == ir::OpCode::CallLocation);

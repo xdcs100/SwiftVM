@@ -128,6 +128,16 @@ void JitTranslator::EmitSelect(ir::Inst* inst) {
     __ Csel(result, context.R(true_value), context.R(false_value), ne);
 }
 
+void JitTranslator::EmitSelectZero(ir::Inst* inst) {
+    auto test = inst->GetArg<ir::Value>(0);
+    auto zero_value = inst->GetArg<ir::Value>(1);
+    auto nonzero_value = inst->GetArg<ir::Value>(2);
+    auto result = context.R(ir::Value{inst});
+    MergeNZCV();
+    __ Cmp(context.R(test), 0);
+    __ Csel(result, context.R(zero_value), context.R(nonzero_value), eq);
+}
+
 #undef __
 
 }  // namespace swift::runtime::backend::arm64

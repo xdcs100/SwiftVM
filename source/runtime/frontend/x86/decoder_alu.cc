@@ -1217,8 +1217,7 @@ void X64Decoder::DecodeBitScan(_DInst& insn, bool reverse) {
     auto dst_old = __ ZeroExtend64(ToValue(Src(insn, op0)));
     // SetType(U64): the Select's return type would otherwise be inferred as
     // U8 from the BOOL condition, truncating the result to its low byte.
-    auto result64 = __ Select(__ TestNotZero(src64), scan, dst_old)
-                            .SetType(ir::ValueType::U64);
+    auto result64 = __ SelectZero(src64, dst_old, scan).SetType(ir::ValueType::U64);
     if (width == 16) {
         // Write only the low 16 bits of the destination register.
         auto& info = x86_regs_table[op0.index];

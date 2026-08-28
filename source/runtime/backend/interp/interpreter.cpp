@@ -299,6 +299,11 @@ void Interpreter::RunSelect(ir::Inst* inst, InterpStack& stack) {
     WriteScalar(stack, inst, ReadScalar(stack, inst->GetArg<ir::Value>(cond ? 1 : 2)));
 }
 
+void Interpreter::RunSelectZero(ir::Inst* inst, InterpStack& stack) {
+    const bool zero = ReadScalar(stack, inst->GetArg<ir::Value>(0)) == 0;
+    WriteScalar(stack, inst, ReadScalar(stack, inst->GetArg<ir::Value>(zero ? 1 : 2)));
+}
+
 void Interpreter::RunCondSelect(ir::Inst* inst, InterpStack& stack) {
     const bool cond = EvalCondition(inst->GetArg<ir::Cond>(0));
     WriteScalar(stack, inst, ReadScalar(stack, inst->GetArg<ir::Value>(cond ? 1 : 2)));

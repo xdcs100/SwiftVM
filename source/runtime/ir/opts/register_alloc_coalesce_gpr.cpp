@@ -60,6 +60,7 @@ bool IsPinnedCoalesceProducer(OpCode op) {
         case OpCode::BitExtract:
         case OpCode::BitClear:
         case OpCode::Select:
+        case OpCode::SelectZero:
         case OpCode::CondSelect:
         case OpCode::MulHigh:
             return true;

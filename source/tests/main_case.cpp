@@ -4679,6 +4679,7 @@ TEST_CASE("guest GPR coalescing keeps publication and snapshot proofs local") {
             ExpandedProducer{OpCode::BitExtract, "BitExtract"},
             ExpandedProducer{OpCode::BitClear, "BitClear"},
             ExpandedProducer{OpCode::Select, "Select"},
+            ExpandedProducer{OpCode::SelectZero, "SelectZero"},
             ExpandedProducer{OpCode::CondSelect, "CondSelect"},
             ExpandedProducer{OpCode::MulHigh, "MulHigh"},
     };
@@ -4778,6 +4779,12 @@ TEST_CASE("guest GPR coalescing keeps publication and snapshot proofs local") {
                 auto on_true = load_scalar(0x123456789abcdef0ull);
                 auto on_false = load_scalar(0x0102030405060708ull);
                 return block->Select(cond, on_true, on_false).SetType(type);
+            }
+            case OpCode::SelectZero: {
+                auto test = load_scalar(1);
+                auto zero_value = load_scalar(0x123456789abcdef0ull);
+                auto nonzero_value = load_scalar(0x0102030405060708ull);
+                return block->SelectZero(test, zero_value, nonzero_value).SetType(type);
             }
             case OpCode::CondSelect: {
                 auto on_true = load_scalar(0x123456789abcdef0ull);

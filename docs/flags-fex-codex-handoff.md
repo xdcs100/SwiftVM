@@ -2694,6 +2694,21 @@ peepholes.
   1,034-assertion resident-XMM test and the complete AVX integer reference set. No long benchmark,
   probe, diagnostic path or environment switch remains.
 
+- BSF/BSR zero-source destination selection now uses explicit `SelectZero(test, zero, nonzero)` IR.
+  ARM64 lowers it to `CMP + CSEL`, the interpreter implements the same choice, and the test source
+  remains a named SSA input through register allocation. This replaces the former
+  `TestNotZero -> CSET -> CMP -> CSEL` chain without making architectural ZF artificially live.
+  A backend-only hidden-source fusion was rejected after SQLite reported a malformed database; it
+  allowed RA to reuse the source register before the select and has been removed. Against the
+  resident-compare baseline, exact SQLite `main/10` keeps all 2,101 roots and moves
+  `291,227 -> 291,138` (`-89`, `-0.030560%`) with 15 shrinking roots and no growth.
+  `__strrchr_sse2` moves `633 -> 610` and `__memcmp_sse2` moves `649 -> 635`.
+  Timing-normalized output is byte-identical. Bounded smallpt moves `42,086 -> 42,040` and retains
+  PPM SHA-256 `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`.
+  Mac and Orb pass the 395-assertion GPR publication proof and the directed BMI/BSF split test;
+  1,000 fixed-seed bit-op cases report no BSF/BSR mismatch and only the established ROL/BT
+  divergence families. No long benchmark, probe, diagnostic path or environment switch remains.
+
 ## Orb loop
 
 ```

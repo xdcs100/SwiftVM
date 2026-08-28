@@ -87,6 +87,7 @@ bool IsU32Consumer(Inst* consumer, Inst* definition) {
         case OpCode::ByteSwap:
         case OpCode::BitClear:
         case OpCode::Select:
+        case OpCode::SelectZero:
         case OpCode::CondSelect:
             return consumer->ReturnType() == ValueType::U32;
         case OpCode::ZeroExtend32:

@@ -58,6 +58,7 @@ bool IsHostCoalesceProducer(ir::OpCode op, bool width_chain) {
         case O::BitExtract:
         case O::BitClear:
         case O::Select:
+        case O::SelectZero:
         case O::CondSelect:
         case O::MulHigh:
             return true;
