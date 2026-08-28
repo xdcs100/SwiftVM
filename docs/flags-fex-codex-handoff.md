@@ -2996,12 +2996,33 @@ peepholes.
   25 return/flags assertions and 105 direct-link/flags assertions each. No stress run, probe,
   diagnostic path or environment switch remains.
 
-- The post-`ab19937` FEX refresh leaves the largest positive SQLite root gaps at `freeSpace`
-  `436/309`, `powerOfTen` `242/153`, `__strcspn_sse42` `326/241`, `__memcmp_sse2` `626/547`,
-  `_IO_new_file_xsputn` `460/383`, `pagerPagecount` `252/177` and `setupLookaside` `405/333`
-  (SwiftVM/FEX). The shared terminal return tax is no longer the dominant bucket. The next tranche
-  should separate `freeSpace`'s allocator/flags shape from the libc string-memory roots before
-  extending the edge/carrier contract. The old two-instruction BFXIL merge, global carry polarity,
+- `ae6471c` replaces the block-wide ADC/SBB flags-elimination bailout with guest-region protection.
+  `flags_carry_regions` partitions IR at `AdvancePC`, marks each carry consumer and walks backwards
+  through intervening regions to the actual carry writer. The flags pass resets both its needed
+  mask and local-label snapshots at those barriers while continuing ordinary dead-write elimination
+  in unrelated regions. `SVM_FLAG_CARRY_ELIM=0` retains the exact whole-block bailout. A strict
+  paired SQLite capture keeps all 2,167 roots and moves `274,241 -> 273,723` (`-518`,
+  `-0.188885%`) with no growth; `powerOfTen` moves `242 -> 199` and `sqlite3BitvecSet` moves
+  `516 -> 436`. Bounded smallpt keeps all 263 roots and moves `38,762 -> 38,713` (`-49`,
+  `-0.126412%`) while retaining PPM SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. CoreMark keeps all
+  294 roots, moves `38,735 -> 38,686` (`-49`, `-0.126501%`) and retains `crcfinal=0x382f`.
+  Timing-normalized SQLite output is byte-identical; three short interleaved pairs move wall median
+  `1.013 -> 1.006s` and internal median `0.762 -> 0.753s`, used only as a consistency check. Mac
+  and Orb pass 54 flag-elimination assertions and 57 carry assertions each. Fixed-seed 424242 ALU
+  retains the baseline's exact 100 mismatch keys, and mixed seed 101 retains all 105 keys exactly.
+  Mixed seed 424242 reports two nominal candidate-only keys in blocks containing no ADC/SBB; their
+  baseline/candidate AArch64 streams have identical instruction counts, mnemonics and normalized
+  operands, differing only in the ASLR-derived SetLocation immediate. The unsafe unrestricted
+  bailout removal and the one-instruction adjacent-chain prototype were fully removed. No probe,
+  diagnostic path or environment switch remains.
+
+- The post-`ae6471c` FEX refresh leaves the largest positive SQLite root gaps at `freeSpace`
+  `436/309`, `__strcspn_sse42` `326/241`, `__memcmp_sse2` `626/547`, `_IO_new_file_xsputn`
+  `460/383`, `setupLookaside` `405/333` and `pagerPagecount` `238/177` (SwiftVM/FEX).
+  `powerOfTen` falls from an 89-instruction gap to 46 and is no longer a top-five root. The next
+  tranche should attack the repeated cycle/link boundaries in `freeSpace` and then separate the
+  libc string-memory lowering gaps. The old two-instruction BFXIL merge, global carry polarity,
   larger region and full-pin attempts remain measured regressions.
 
 ## Orb loop
