@@ -2525,6 +2525,18 @@ peepholes.
   the region window from 64 to 128 blocks reduces observed units `2,123 -> 1,956` but grows total
   static code `318,921 -> 334,380` because it decodes too many cold blocks.
 
+- `875b49c` routes complete-NZCV backedge materialization through the existing code-region flags
+  merge trampoline. The fixed x17 resume ABI preserves x30 continuations and replaces each eligible
+  three-instruction inline merge with `ADR + B`; partial masks and configurations without a reachable
+  region trampoline retain inline emission. The bounded SQLite `main/1` screen keeps all 2,080 PCs
+  and moves `311,544 -> 310,538` host instructions (`-1,006`, `-0.322908%`) with no growing PC.
+  `sqlite3_randomness` moves `1,163 -> 1,159`. The bounded smallpt shape keeps all 262 PCs and moves
+  `43,960 -> 43,829` (`-131`, `-0.297998%`) with no growth; its PPM SHA-256 remains
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. Mac and Orb pass the
+  focused region-flags, shared-merge, continuation-preservation and cycle/SMC groups, and short
+  CoreMark retains `crcfinal=0x382f`. No stress run, probe, diagnostic path or environment switch
+  remains.
+
 ## Orb loop
 
 ```
