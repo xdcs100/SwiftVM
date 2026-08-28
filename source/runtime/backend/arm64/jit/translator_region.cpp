@@ -1203,6 +1203,9 @@ void JitTranslator::EmitBackedgeExitStub() {
     if (backedge_flags_plan && backedge_flags_plan->optimized) {
         EmitBackedgeMaterialize(*backedge_flags_plan);
     } else if (FlagsRegsEnabled()) {
+        if (TryEmitCycleExitFlags()) {
+            return;
+        }
         EmitSplitFlagsPublish();
     }
     if (shared_reason) {
@@ -1231,27 +1234,35 @@ void JitTranslator::EmitDirectCycleExitStubs() {
         return;
     }
     Label local_reason;
-    Label* reason = &local_reason;
-    if (translating_function && share_cycle_exit_reason) {
-        if (!cycle_exit_reason) {
-            cycle_exit_reason = std::make_unique<Label>();
-        }
-        reason = cycle_exit_reason.get();
-    }
+    Label* reason = translating_function && share_cycle_exit_reason
+            ? nullptr
+            : &local_reason;
+    bool reason_referenced{};
     for (auto it = direct_cycle_exits.begin(); it != direct_cycle_exits.end(); ++it) {
         auto& [target, label] = *it;
         ASSERT(label);
         __ Bind(label.get());
         ResolveExitPollFaults(label.get(), ir::Location{target});
         if (FlagsRegsEnabled()) {
+            if (TryEmitCycleExitFlags()) {
+                continue;
+            }
             EmitSplitFlagsPublish();
+        }
+        reason_referenced = true;
+        if (!reason) {
+            if (!cycle_exit_reason) {
+                cycle_exit_reason = std::make_unique<Label>();
+            }
+            reason = cycle_exit_reason.get();
         }
         if ((translating_function && share_cycle_exit_reason) ||
             std::next(it) != direct_cycle_exits.end()) {
             __ B(reason);
         }
     }
-    if (!translating_function || !share_cycle_exit_reason) {
+    if ((!translating_function || !share_cycle_exit_reason) &&
+        reason_referenced) {
         EmitCycleExitReasonTail(reason);
     }
     direct_cycle_exits.clear();

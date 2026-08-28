@@ -42,6 +42,12 @@ enum class FlagsMergeTrampolineKind : u8 {
     NZCVToken,
 };
 
+enum class CycleReasonTrampolineKind : u8 {
+    Plain,
+    NZCV,
+    NZCVToken,
+};
+
 // Allocation-relative description retained after emission so disk cache
 // can normalize every site without reading a concurrently patched code word.
 struct DirectLinkSiteInfo {
@@ -159,6 +165,7 @@ public:
     }
     void EmitFlagsMergeBranch(FlagsMergeTrampolineKind kind);
     void EmitCycleReasonBranch();
+    void EmitCycleFlagsMergeBranch(bool token);
     // Dispatch to a compile-time-constant guest location, for the
     // "SetLocation(imm) + ReturnToDispatch" shape a direct jmp/call decodes to.
     // Prefer a tracked direct-link site and retain the inline L2 lookup when the
@@ -445,7 +452,11 @@ private:
         FlagsMergeTrampolineKind kind{};
     };
     std::vector<FlagsMergeSiteInfo> flags_merge_sites;
-    std::vector<u32> cycle_reason_sites;
+    struct CycleReasonSiteInfo {
+        u32 code_offset{};
+        CycleReasonTrampolineKind kind{};
+    };
+    std::vector<CycleReasonSiteInfo> cycle_reason_sites;
 
     GPRSMask cur_dirty_gprs{};
     GPRSMask cur_dirty_fprs{};

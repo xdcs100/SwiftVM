@@ -32,7 +32,9 @@ struct RegionLinkTrampolineCode {
 
 constexpr u32 kFlagsMergeOffsetFromPending = 4 * sizeof(u32);
 constexpr u32 kFlagsMergeTokenOffsetFromPending = 8 * sizeof(u32);
-constexpr u32 kCycleReasonOffsetFromPending = 13 * sizeof(u32);
+constexpr u32 kCycleFlagsMergeOffsetFromPending = 13 * sizeof(u32);
+constexpr u32 kCycleFlagsMergeTokenOffsetFromPending = 17 * sizeof(u32);
+constexpr u32 kCycleReasonOffsetFromPending = 22 * sizeof(u32);
 
 [[nodiscard]] RegionLinkTrampolineCode BuildRegionLinkTrampoline(
         const Config& config,

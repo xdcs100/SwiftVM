@@ -740,7 +740,16 @@ void JitContext::EmitFlagsMergeBranch(FlagsMergeTrampolineKind kind) {
 }
 
 void JitContext::EmitCycleReasonBranch() {
-    cycle_reason_sites.push_back(CurrentBufferSize());
+    cycle_reason_sites.push_back(
+            {CurrentBufferSize(), CycleReasonTrampolineKind::Plain});
+    __ dc32(*EncodeB(0));
+}
+
+void JitContext::EmitCycleFlagsMergeBranch(bool token) {
+    cycle_reason_sites.push_back(
+            {CurrentBufferSize(),
+             token ? CycleReasonTrampolineKind::NZCVToken
+                   : CycleReasonTrampolineKind::NZCV});
     __ dc32(*EncodeB(0));
 }
 
@@ -1128,15 +1137,24 @@ u8* JitContext::Flush(const CodeBuffer& code_cache) {
     if (!cycle_reason_sites.empty()) {
         auto* cache = module->GetCodeCache(code_cache.exec_data);
         ASSERT(cache);
-        auto* trampoline = static_cast<u8*>(
-                cache->GetCycleReasonRegionTrampoline());
-        ASSERT(trampoline && cache->GetRegion().ContainsRx(trampoline));
         auto* emitted = masm.GetBuffer()->GetStartAddress<u8*>();
-        for (const u32 offset : cycle_reason_sites) {
-            auto* rx_site = code_cache.exec_data + offset;
+        for (const auto& site : cycle_reason_sites) {
+            auto* trampoline = static_cast<u8*>([&] {
+                switch (site.kind) {
+                    case CycleReasonTrampolineKind::Plain:
+                        return cache->GetCycleReasonRegionTrampoline();
+                    case CycleReasonTrampolineKind::NZCV:
+                        return cache->GetCycleFlagsMergeRegionTrampoline();
+                    case CycleReasonTrampolineKind::NZCVToken:
+                        return cache->GetCycleFlagsMergeTokenRegionTrampoline();
+                }
+                PANIC();
+            }());
+            ASSERT(trampoline && cache->GetRegion().ContainsRx(trampoline));
+            auto* rx_site = code_cache.exec_data + site.code_offset;
             const auto branch = EncodeB(trampoline - rx_site);
             ASSERT(branch);
-            std::memcpy(emitted + offset, &*branch, sizeof(*branch));
+            std::memcpy(emitted + site.code_offset, &*branch, sizeof(*branch));
         }
     }
     if (!pending_return_sites.empty()) {

@@ -234,6 +234,26 @@ void JitTranslator::EmitSplitFlagsPublish() {
               flags_audit_block_edge);
 }
 
+bool JitTranslator::TryEmitCycleExitFlags() {
+    const auto requested = PendingNZCVMergeMask(
+            FlagsRegsAuditMergeCause::ClearOrPartialWrite);
+    if (!FlagsRegsEnabled() || !context.CanUseRegionTrampoline() ||
+        !requested || *requested != static_cast<u64>(HostFlags::NZCV)) {
+        return false;
+    }
+    const bool token = flags_token_valid;
+    if (token) {
+        MaterializeFlagsTokenResult();
+    }
+    context.EmitCycleFlagsMergeBranch(token);
+    if (!flags_token_keep) {
+        nzcv_dirty = false;
+        nzcv_requested = {};
+        InvalidateFlagsToken();
+    }
+    return true;
+}
+
 void JitTranslator::MergeNZCV() {
     (void)MergeNZCV(FlagsRegsAuditMergeCause::PStateClobber,
                     flags_audit_block_edge);

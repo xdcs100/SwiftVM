@@ -161,6 +161,24 @@ void* CodeCache::GetFlagsMergeTokenRegionTrampoline() const {
            arm64::kFlagsMergeTokenOffsetFromPending;
 }
 
+void* CodeCache::GetCycleFlagsMergeRegionTrampoline() const {
+    if (region.pending_flags_trampoline_offset ==
+        CodeRegion::kInvalidTrampolineOffset) {
+        return nullptr;
+    }
+    return region.rx_base + region.pending_flags_trampoline_offset +
+           arm64::kCycleFlagsMergeOffsetFromPending;
+}
+
+void* CodeCache::GetCycleFlagsMergeTokenRegionTrampoline() const {
+    if (region.pending_flags_trampoline_offset ==
+        CodeRegion::kInvalidTrampolineOffset) {
+        return nullptr;
+    }
+    return region.rx_base + region.pending_flags_trampoline_offset +
+           arm64::kCycleFlagsMergeTokenOffsetFromPending;
+}
+
 void* CodeCache::GetCycleReasonRegionTrampoline() const {
     if (region.pending_flags_trampoline_offset ==
         CodeRegion::kInvalidTrampolineOffset) {

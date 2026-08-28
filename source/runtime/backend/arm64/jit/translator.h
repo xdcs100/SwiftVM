@@ -757,6 +757,7 @@ private:
     void MaterializeFlagsTokenResult();
     void InvalidateFlagsToken();
     void EmitSplitFlagsPublish();
+    [[nodiscard]] bool TryEmitCycleExitFlags();
     [[nodiscard]] bool MatchCompoundLogicalClear(ir::Inst* inst) const;
     [[nodiscard]] bool MatchCompoundZeroLogicalClear(ir::Inst* inst) const;
     void ParkFlagsHot();

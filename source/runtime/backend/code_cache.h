@@ -83,6 +83,8 @@ public:
     [[nodiscard]] void* GetPendingFlagsRegionTrampoline() const;
     [[nodiscard]] void* GetFlagsMergeRegionTrampoline() const;
     [[nodiscard]] void* GetFlagsMergeTokenRegionTrampoline() const;
+    [[nodiscard]] void* GetCycleFlagsMergeRegionTrampoline() const;
+    [[nodiscard]] void* GetCycleFlagsMergeTokenRegionTrampoline() const;
     [[nodiscard]] void* GetCycleReasonRegionTrampoline() const;
     [[nodiscard]] void* GetReturnRegionTrampoline() const;
     [[nodiscard]] arm64::RegionLinkContext* GetRegionLinkContext() const {

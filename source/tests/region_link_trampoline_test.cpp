@@ -149,7 +149,7 @@ u32 LoadInsn(const void* address) {
 }  // namespace
 
 TEST_CASE("region cycle reason trampoline publishes the pending reason",
-          "[direct-link][trampoline][cycle]") {
+           "[direct-link][trampoline][cycle]") {
 #if defined(__aarch64__)
     std::vector<UniformMapDesc> descriptors;
     auto config = TestConfig(descriptors);
@@ -178,6 +178,57 @@ TEST_CASE("region cycle reason trampoline publishes the pending reason",
         test_state.state->exit_request = request;
         REQUIRE(runtime_trampolines.GetRuntimeEntry()(test_state.state,
                                                        code->exec_data) == expected);
+    }
+#else
+    SUCCEED("region trampoline execution requires an AArch64 host");
+#endif
+}
+
+TEST_CASE("cycle reason trampoline merges flags before returning",
+          "[direct-link][trampoline][cycle][flags]") {
+#if defined(__aarch64__)
+    std::vector<UniformMapDesc> descriptors;
+    auto config = TestConfig(descriptors);
+    TrampolinesArm64 runtime_trampolines{config, FeatureSet{}};
+    LinkManager manager;
+    CodeCache cache{config, 1u << 20, FeatureSet{}};
+    auto* return_host = reinterpret_cast<void*>(runtime_trampolines.GetReturnHost());
+    REQUIRE(cache.InitializeRegionTrampoline(manager, return_host, return_host));
+
+    constexpr u64 packed_af = u64{1} << 26;
+    constexpr u64 packed_zc = (u64{1} << 30) | (u64{1} << 29);
+    constexpr u64 old_parity = 0xa5;
+    constexpr u64 token_parity = 0x3c;
+    for (const bool token : {false, true}) {
+        auto code = cache.AllocCode(128);
+        REQUIRE(code);
+        MacroAssembler masm;
+        masm.Mov(x26, packed_af | old_parity);
+        masm.Mov(x12, token_parity);
+        masm.Mov(x0, 1);
+        masm.Cmp(x0, x0);
+        const u32 branch_offset =
+                static_cast<u32>(masm.GetBuffer()->GetSizeInBytes());
+        masm.dc32(*EncodeB(0));
+        CopyAssembler(*code, 0, masm);
+
+        auto* trampoline = static_cast<u8*>(
+                token ? cache.GetCycleFlagsMergeTokenRegionTrampoline()
+                      : cache.GetCycleFlagsMergeRegionTrampoline());
+        REQUIRE(trampoline);
+        const auto branch = EncodeB(
+                trampoline - (code->exec_data + branch_offset));
+        REQUIRE(branch);
+        std::memcpy(code->rw_data + branch_offset, &*branch, sizeof(*branch));
+        code->Flush();
+
+        TestState test_state{config.uniform_buffer_size};
+        REQUIRE(runtime_trampolines.GetRuntimeEntry()(test_state.state,
+                                                       code->exec_data) ==
+                HaltReason::CodeMiss);
+        const u64 parity = token ? token_parity : old_parity;
+        REQUIRE(test_state.state->host_cpu_flags ==
+                (packed_zc | packed_af | parity));
     }
 #else
     SUCCEED("region trampoline execution requires an AArch64 host");
