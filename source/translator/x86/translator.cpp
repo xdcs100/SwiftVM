@@ -475,6 +475,12 @@ static size_t RegionFuncBudget() {
     return budget == 1 ? 64 : budget;
 }
 
+static bool IsLocalFunctionTarget(VAddr root, VAddr target) {
+    constexpr u64 kMaxDistance = 8 * 1024;
+    return target >= root ? target - root <= kMaxDistance
+                          : root - target <= kMaxDistance;
+}
+
 struct X86Instance::Impl final {
     // memory_base: guest->host bias (host addr = guest addr + bias), installed
     // by the linux loader; nullptr keeps the identity-mapped fast path.
@@ -709,6 +715,10 @@ struct X86Instance::Impl final {
                         // duplicates work: at budget 4 on func_tests it compiled
                         // 1628 blocks where only 1147 are ever executed.
                         if (lazy && address_space->GetCodeCache(addr)) {
+                            continue;
+                        }
+                        // Split cold sections stay external and compile through the lazy edge.
+                        if (lazy && !IsLocalFunctionTarget(pc, addr)) {
                             continue;
                         }
                         to_decode.push_back(addr);
