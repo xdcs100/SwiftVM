@@ -1,6 +1,6 @@
 # Codex handoff: Align SVM flags with FEX
 
-Date: 2026-08-27
+Date: 2026-08-28
 Repo: `/Users/swift/CLionProjects/SwiftVM` (macOS). Linux identity runs on Orb: `ubuntu@orb`, tree `/home/swift/svm-phasec/SwiftVM`, build `/home/swift/svm-phasec/build`.
 Author on git: `swift_gan`. **Do not push** until asked. English commits, no task IDs, no AI trailer.
 
@@ -2646,6 +2646,25 @@ peepholes.
   retains `crcfinal=0x382f`. Mac and Orb pass 16,255 Rosetta/SDM assertions, the 512-assertion
   scratch contract, memory-boundary, alias and CallLambda focuses. A cache-compatible two-run
   SQLite check stores and reloads all 680 eligible units with identical output. No stress run,
+  probe, diagnostic path or environment switch remains.
+
+- The next whole-function audit rejected global approaches for `balance_nonroot`: raising the
+  region window grows the full SQLite shape, level-3 GPR pinning reduces that function by 221
+  instructions but regresses the five-pair SQLite wall median by 12.054%, and every fixed r13/r15
+  home substitution grows total code. The remaining gap requires an explicit cross-block state
+  transfer ABI rather than a global pin or decode-window override; none of the audit variants
+  remains.
+
+- `PALIGNR` and `VPALIGNR` now share `VecExtractBytes`, a full-width vector primitive lowered to
+  one AArch64 `EXT`; offsets beyond one vector reuse the existing zero-backed `VecByteShift`.
+  The interpreter and resident-XMM publication proof implement the same operation. On the exact
+  2,101-root SQLite `main/10` A/B, total static code moves `292,481 -> 291,437` (`-1,044`,
+  `-0.356947%`) with 40 shrinking roots and no growth. `__memmove_ssse3` moves `1,990 -> 1,140`
+  (`-850`); its repeated roots move from 62 to 30 instructions, versus FEX at 31, and root
+  `0x4f9840` contains the expected three `EXT` instructions. Timing-normalized SQLite output is
+  byte-identical. Mac and Orb pass the 914-assertion resident-XMM test and the complete AVX integer
+  reference set. Bounded smallpt remains at 42,204 instructions with PPM SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. No long benchmark,
   probe, diagnostic path or environment switch remains.
 
 ## Orb loop

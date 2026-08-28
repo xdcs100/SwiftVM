@@ -238,6 +238,7 @@ INST(VecShuffle32Indexed, Value, Value, Value)
 // One-instruction all-zero vector, block-local CSE-able like VecLoadConst.
 INST(VecSharedZero, Value)
 INST(VecShuffle16, Value, Value, Imm, Imm)
+INST(VecExtractBytes, Value, Value, Value, Imm)
 INST(VecZip, Value, Value, Value, Imm, Imm)
 INST(VecDupPairs32, Value, Value, Imm)
 INST(VecDup64, Value, Value)

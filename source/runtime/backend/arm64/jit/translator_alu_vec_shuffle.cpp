@@ -376,6 +376,15 @@ void JitTranslator::EmitVecZip(ir::Inst* inst) {
     }
 }
 
+void JitTranslator::EmitVecExtractBytes(ir::Inst* inst) {
+    auto low = context.V(inst->GetArg<ir::Value>(0));
+    auto high = context.V(inst->GetArg<ir::Value>(1));
+    auto result = context.V(ir::Value{inst});
+    const u32 offset = inst->GetArg<ir::Imm>(2).Get();
+    ASSERT(offset > 0 && offset < 16);
+    __ Ext(result.V16B(), low.V16B(), high.V16B(), offset);
+}
+
 void JitTranslator::EmitVecDupPairs32(ir::Inst* inst) {
     auto src = context.V(inst->GetArg<ir::Value>(0));
     auto result = context.V(ir::Value{inst});

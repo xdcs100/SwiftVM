@@ -1351,48 +1351,25 @@ void X64Decoder::DecodeMovddup(_DInst& insn) {
 
 void X64Decoder::DecodePalignr(_DInst& insn) {
     auto dst = static_cast<_RegisterType>(insn.ops[0].index);
-    u64 imm = insn.imm.byte;
-    auto a_lo = XmmLo(dst);
-    auto a_hi = XmmHi(dst);
-    auto b = LoadSrcHalves(insn, insn.ops[1]);
-    // 256-bit concat c = {b.lo, b.hi, a.lo, a.hi} (src low, dst high);
-    // result = c >> (imm * 8), low 128 bits.
+    const u32 imm = insn.imm.byte;
     if (imm >= 32) {
-        XmmLo(dst, __ LoadImm(ir::Imm(u64(0))));
-        XmmHi(dst, __ LoadImm(ir::Imm(u64(0))));
+        XmmWrite(dst, __ VecSharedZero().SetType(ir::ValueType::V128));
         return;
     }
-    auto c = [&](u32 i) -> ir::Value {
-        switch (i) {
-            case 0:
-                return b.lo;
-            case 1:
-                return b.hi;
-            case 2:
-                return a_lo;
-            default:
-                return a_hi;
-        }
-    };
-    u32 q = u32(imm / 8);
-    u32 s = u32((imm % 8) * 8);
-    auto extract = [&](u32 i) -> ir::Value {
-        // out qword i = bytes [imm + 8i, imm + 8i + 8) of the concat.
-        u32 idx = q + i;
-        if (idx > 3) {
-            return __ LoadImm(ir::Imm(u64(0)));
-        }
-        if (s == 0) {
-            return c(idx);
-        }
-        auto lo_part = __ LsrImm(c(idx), ir::Imm(u64(s)));
-        if (idx + 1 > 3) {
-            return lo_part;
-        }
-        return __ Or(lo_part, ir::Operand{__ LslImm(c(idx + 1), ir::Imm(u64(64 - s)))});
-    };
-    XmmLo(dst, extract(0));
-    XmmHi(dst, extract(1));
+    auto high = XmmRead(dst);
+    auto low = LoadSrcVec(insn, insn.ops[1]);
+    ir::Value result;
+    if (imm == 0) {
+        result = low;
+    } else if (imm < 16) {
+        result = __ VecExtractBytes(low, high, ir::Imm(imm));
+    } else if (imm == 16) {
+        result = high;
+    } else {
+        auto zero = __ VecSharedZero().SetType(ir::ValueType::V128);
+        result = __ VecByteShift(high, zero, ir::Imm(imm - 16), ir::Imm(0));
+    }
+    XmmWrite(dst, result.SetType(ir::ValueType::V128));
 }
 
 void X64Decoder::DecodePshufb(_DInst& insn) {

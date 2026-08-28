@@ -5194,6 +5194,9 @@ TEST_CASE("resident XMM coalescing preserves snapshots and fixed-home windows") 
             case OpCode::VecShuffle32Indexed:
                 produced = block->VecShuffle32Indexed(left, right);
                 break;
+            case OpCode::VecExtractBytes:
+                produced = block->VecExtractBytes(left, right, Imm{7u});
+                break;
             case OpCode::VecZip: produced = block->VecZip(left, right, Imm{64u}, Imm{0u}); break;
             case OpCode::VecFAdd: produced = block->VecFAdd(left, right, Imm{32u}); break;
             case OpCode::VecFSub: produced = block->VecFSub(left, right, Imm{32u}); break;
@@ -5245,7 +5248,7 @@ TEST_CASE("resident XMM coalescing preserves snapshots and fixed-home windows") 
             OpCode::LoadUniform, OpCode::LoadMemory,
             OpCode::VecAnd, OpCode::VecOr, OpCode::VecXor,
             OpCode::VecAdd, OpCode::VecSub, OpCode::VecMul,
-            OpCode::VecShuffle32Indexed, OpCode::VecZip,
+            OpCode::VecShuffle32Indexed, OpCode::VecExtractBytes, OpCode::VecZip,
             OpCode::VecFAdd, OpCode::VecFSub, OpCode::VecFMul, OpCode::VecFDiv,
     };
     std::size_t index = 0;

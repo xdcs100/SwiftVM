@@ -114,6 +114,7 @@ bool IsHostFPRCoalesceProducer(ir::OpCode op, bool scalar_insert,
         case O::VecSub:
         case O::VecMul:
         case O::VecShuffle32Indexed:
+        case O::VecExtractBytes:
         case O::VecZip:
         case O::VecFAdd:
         case O::VecFSub:

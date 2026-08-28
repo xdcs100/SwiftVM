@@ -525,6 +525,15 @@ void Interpreter::RunVecDupPairs32(ir::Inst* inst, InterpStack& stack) {
     WriteVec(stack, inst, result);
 }
 
+void Interpreter::RunVecExtractBytes(ir::Inst* inst, InterpStack& stack) {
+    const auto low = ReadVec(stack, inst->GetArg<ir::Value>(0));
+    const auto high = ReadVec(stack, inst->GetArg<ir::Value>(1));
+    const u32 offset = inst->GetArg<ir::Imm>(2).Get();
+    ASSERT(offset > 0 && offset < 16);
+    const u32 shift = offset * 8;
+    WriteVec(stack, inst, (low >> shift) | (high << (128 - shift)));
+}
+
 void Interpreter::RunVecDup64(ir::Inst* inst, InterpStack& stack) {
     const u64 src = ReadScalar(stack, inst->GetArg<ir::Value>(0));
     WriteVec(stack, inst, static_cast<u128>(src) | (static_cast<u128>(src) << 64));

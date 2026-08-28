@@ -298,43 +298,23 @@ ir::Value OpBlendImm(ir::Assembler* as, ir::Value a, ir::Value b, u32 param, u32
             .SetType(ir::ValueType::V128);
 }
 
-// vpalignr: shift the 256-bit concatenation a:b (a is the HIGH half) right by
-// imm8 bytes and keep the low 128 bits, per 128-bit lane.  Structured like
-// DecodePalignr, but building a V128 result instead of writing register halves.
 ir::Value OpAlignr(ir::Assembler* as, ir::Value a, ir::Value b, u32 param, u32) {
     const u32 imm = Flag(param);
-    ir::Value cache[4];
-    bool cached[4] = {false, false, false, false};
-    // Extract lazily: a qword no output depends on must not be materialized.
-    auto source = [&](u32 index) -> ir::Value {
-        if (!cached[index]) {
-            cache[index] = as->VecExtract64(index < 2 ? b : a, ir::Imm(index & 1u))
-                                   .SetType(ir::ValueType::U64);
-            cached[index] = true;
-        }
-        return cache[index];
-    };
-    const u32 first = imm / 8;
-    const u32 shift = (imm % 8) * 8;
-    auto out = [&](u32 which) -> ir::Value {
-        const u32 index = first + which;
-        if (index > 3) {
-            return as->LoadImm(ir::Imm(u64(0))).SetType(ir::ValueType::U64);
-        }
-        if (shift == 0) {
-            return source(index);
-        }
-        auto low = as->LsrImm(source(index), ir::Imm(u64(shift))).SetType(ir::ValueType::U64);
-        if (index + 1 > 3) {
-            return low;
-        }
-        auto high = as->LslImm(source(index + 1), ir::Imm(u64(64 - shift)))
-                            .SetType(ir::ValueType::U64);
-        return as->Or(low, ir::Operand{high}).SetType(ir::ValueType::U64);
-    };
-    auto q0 = out(0);
-    auto q1 = out(1);
-    return VecPairQ(as, q0, q1);
+    if (imm >= 32) {
+        return as->VecSharedZero().SetType(ir::ValueType::V128);
+    }
+    if (imm == 0) {
+        return b;
+    }
+    if (imm < 16) {
+        return as->VecExtractBytes(b, a, ir::Imm(imm)).SetType(ir::ValueType::V128);
+    }
+    if (imm == 16) {
+        return a;
+    }
+    auto zero = as->VecSharedZero().SetType(ir::ValueType::V128);
+    return as->VecByteShift(a, zero, ir::Imm(imm - 16), ir::Imm(0))
+            .SetType(ir::ValueType::V128);
 }
 
 // vpsllv/vpsrlv/vpsrav: every lane shifts by ITS OWN count.  The IR's packed
