@@ -821,17 +821,18 @@ JitContext::ForwardIndirectL1(const Register& location, Label* miss) {
         return {fault_begin, fault_end};
     }
 
+    // Production publishes value before key and invalidates a key hit to the
+    // nonzero miss trampoline, so a matching key is already branch-safe.
     __ Cmp(index, location);
-    __ Ccmp(entry, xzr, ZFlag, eq);
     if (miss) {
-        __ B(miss, eq);
+        __ B(miss, ne);
     } else if (ContinuationActive()) {
         Label hit;
-        __ B(&hit, ne);
+        __ B(&hit, eq);
         ReturnHost();
         __ Bind(&hit);
     } else {
-        __ Csel(entry, entry, x30, ne);
+        __ Csel(entry, entry, x30, eq);
     }
     if (FlagsRegsEnabled()) {
         __ Msr(NZCV, flags);
