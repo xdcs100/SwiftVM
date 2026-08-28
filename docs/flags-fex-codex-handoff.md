@@ -2857,6 +2857,30 @@ peepholes.
   pass 2 Mac and 9 Orb assertions. No stress run, probe, diagnostic path or environment switch
   remains.
 
+- The refreshed same-input SQLite/FEX attribution still puts `balance_nonroot` first: SwiftVM
+  reaches it through 28 lazy roots covering 316 decoded blocks and emits 3,799 instructions,
+  while FEX emits one 3,087-instruction multiblock unit. Raising the region window remains invalid:
+  the existing 64-to-128 audit reduced unit count but compiled enough cold blocks to grow total
+  SQLite code. R15 accounts for 138 SwiftVM state loads/stores in those roots, but every examined
+  outgoing carry candidate crossed a guest-fault observation after its last safe R15 SSA value.
+  Passing that value directly would make signal return restore State while translated code retained
+  a stale register. No cross-edge prototype or diagnostic path was retained.
+
+- `16de8d5` fuses the largest recurring flags-publication sequence found by the same audit. When a
+  logical result has a retained parity token and the adjacent clear completes the compound NZ/CV/AF
+  update, x26's final live representation is exactly current NZCV plus the low parity byte. The
+  emitter now builds that representation with `MRS x26,NZCV + BFI` instead of publishing the token
+  and then extracting/reinserting bits 26-31 through a scratch register. Tokenless partial updates
+  retain the preserving merge. Exact SQLite keeps all 2,171 roots and moves
+  `290,165 -> 289,189` (`-976`, `-0.336360%`) with no growth. Bounded smallpt keeps all 263 roots,
+  moves `40,809 -> 40,697` (`-112`, `-0.274449%`) and retains PPM SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. Five interleaved SQLite
+  pairs move wall median `1.078718 -> 1.076245s`; internal median `0.814 -> 0.817s` remains within
+  short-run noise. Timing-normalized SQLite output is byte-identical, CoreMark 20k retains
+  `crcfinal=0x382f`, and Mac/Orb logical-flags focuses pass 21 assertions each. Fixed-seed 424242
+  ALU differential retains the baseline's exact 182 mismatch keys with zero candidate-only case.
+  No stress run, probe, diagnostic path or environment switch remains.
+
 ## Orb loop
 
 ```
