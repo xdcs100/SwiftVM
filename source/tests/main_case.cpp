@@ -3871,8 +3871,8 @@ TEST_CASE("Flag elimination removes only overwritten in-block carry writes") {
     REQUIRE(contains(carry_condition, invert));
     REQUIRE(contains(carry_condition, last));
 
-    // (8) Gate A remains block-wide: any Adc/Sbb leaves every instruction
-    // untouched, including otherwise-covered C writers.
+    // (8) A carry consumer protects its guest region and producer region. A
+    // one-region block therefore remains untouched.
     Block gate_a{11, Location{0x3b00}};
     lhs = gate_a.LoadImm(Imm{13u});
     rhs = gate_a.LoadImm(Imm{14u});
@@ -3895,6 +3895,27 @@ TEST_CASE("Flag elimination removes only overwritten in-block carry writes") {
     REQUIRE(count_op(gate_a, OpCode::ClearFlags) == 1);
     REQUIRE(count_op(gate_a, OpCode::SetCarry) == 1);
     REQUIRE(count_op(gate_a, OpCode::InvertCarry) == 1);
+
+    Block segmented{12, Location{0x3c00}};
+    lhs = segmented.LoadImm(Imm{21u});
+    rhs = segmented.LoadImm(Imm{22u});
+    auto* protected_save = append_carry_save(segmented, lhs, rhs);
+    segmented.AppendInst(OpCode::AdvancePC, Imm{1u});
+    segmented.LoadImm(Imm{23u});
+    segmented.AppendInst(OpCode::AdvancePC, Imm{1u});
+    auto adc_result = segmented.Adc(lhs, Operand{rhs});
+    auto* adc_save = segmented.AppendInst(
+            OpCode::SaveFlags, adc_result, Flags::All);
+    segmented.AppendInst(OpCode::AdvancePC, Imm{1u});
+    auto* tail_old = append_carry_save(segmented, lhs, rhs);
+    auto* tail_new = append_carry_save(segmented, lhs, rhs);
+
+    FlagsEliminationPass::Run(&segmented, nullptr, FeatureSet{});
+
+    REQUIRE(contains(segmented, protected_save));
+    REQUIRE(contains(segmented, adc_save));
+    REQUIRE_FALSE(contains(segmented, tail_old));
+    REQUIRE(contains(segmented, tail_new));
 }
 
 TEST_CASE("Register allocation gives every spilled value a private slot") {

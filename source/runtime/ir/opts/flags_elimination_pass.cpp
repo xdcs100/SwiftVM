@@ -20,6 +20,7 @@
 // remains an independent write even when a sibling SaveFlags is removed.
 
 #include "flags_elimination_pass.h"
+#include "flags_carry_regions.h"
 
 #include <algorithm>
 #include <cstring>
@@ -662,25 +663,19 @@ void FlagsEliminationPass::Run(Block* block, HIRFunction* hir_function,
         }
     }
 
-    // Adc/Sbb read the carry written by the preceding guest instruction.
-    // A block can contain multiple guest instruction regions, each with a
-    // SaveFlags boundary. The block-wide backward `needed` set cannot model
-    // that boundary: a later Adc/Sbb may make an earlier, unrelated writer
-    // appear live (or kill the bits needed by its real carry producer).
-    //
-    // Keep this conservative until liveness is tracked per guest instruction
-    // region. Skipping the entire block means the carry producer and every
-    // instruction in its flag-normalization chain remain intact.
-    for (const auto& inst : inst_list) {
-        if (inst.GetOp() == OpCode::Adc || inst.GetOp() == OpCode::Sbb) {
-            return;
-        }
-    }
-
     // Bisect switch for deleting carry writes that are overwritten on every
     // in-block path before a read. With the switch off, preserve the old
     // cross-block-conservative handling exactly.
     const bool carry_elim_off = !features.flag_carry_elim;
+    const bool has_carry_consumer =
+            std::any_of(inst_list.begin(), inst_list.end(),
+                        [](const Inst& inst) {
+                            return inst.GetOp() == OpCode::Adc ||
+                                   inst.GetOp() == OpCode::Sbb;
+                        });
+    if (carry_elim_off && has_carry_consumer) {
+        return;
+    }
 
     Flags needed = live_out;
     // Needed-set snapshots at bound labels, keyed by the Goto/NotGoto inst
@@ -688,6 +683,12 @@ void FlagsEliminationPass::Run(Block* block, HIRFunction* hir_function,
     // current frontends; an unseen target falls back to needing everything).
     std::unordered_map<Inst*, Flags> label_needed;
     std::vector<Inst*> victims;
+    std::vector<bool> carry_protected;
+    if (has_carry_consumer) {
+        carry_protected = FlagsCarryRegions::Classify(block);
+    }
+    size_t carry_region = carry_protected.empty() ? 0 : carry_protected.size() - 1;
+    bool crossed_carry_barrier{};
 
     u32 stat_save{}, stat_save_dead{}, stat_clear{}, stat_clear_dead{}, stat_setcv{},
         stat_setcv_dead{}, stat_shrunk{}, stat_carry_save{}, stat_carry_save_dead{},
@@ -695,6 +696,21 @@ void FlagsEliminationPass::Run(Block* block, HIRFunction* hir_function,
 
     for (auto it = inst_list.rbegin(); it != inst_list.rend(); ++it) {
         Inst& inst = *it;
+        if (has_carry_consumer && inst.GetOp() == OpCode::AdvancePC &&
+            carry_region != 0) {
+            --carry_region;
+        }
+        if (has_carry_consumer && carry_protected[carry_region]) {
+            needed = Flags::All;
+            label_needed.clear();
+            crossed_carry_barrier = true;
+            continue;
+        }
+        if (crossed_carry_barrier) {
+            needed = Flags::All;
+            label_needed.clear();
+            crossed_carry_barrier = false;
+        }
         switch (inst.GetOp()) {
             case OpCode::BranchOnlyFlags:
                 // TryBranchOnly already proved both outgoing edges dead and
