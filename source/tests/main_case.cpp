@@ -4621,11 +4621,16 @@ TEST_CASE("fixed GPR class is level3-only and keeps fixed clobbers disjoint") {
         REQUIRE_FALSE(alloc.IsFixedGPR(value.Id()));
     }
 
-    const swift::u32 cas_clobbers = FixedGPRClobbers(
-            OpCode::CompareAndSwap128, features);
-    REQUIRE((cas_clobbers & ((1u << 12) | (1u << 13))) ==
-            ((1u << 12) | (1u << 13)));
-    REQUIRE((cas_clobbers & kX86FixedGPRHomes) == 0);
+    for (const auto op : {OpCode::CompareAndSwap,
+                          OpCode::AtomicExchange,
+                          OpCode::AtomicFetchAdd,
+                          OpCode::AtomicRMW,
+                          OpCode::CompareAndSwap128}) {
+        const swift::u32 clobbers = FixedGPRClobbers(op, features);
+        REQUIRE((clobbers & ((1u << 12) | (1u << 13))) ==
+                ((1u << 12) | (1u << 13)));
+        REQUIRE((clobbers & kX86FixedGPRHomes) == 0);
+    }
 }
 
 TEST_CASE("guest GPR coalescing keeps publication and snapshot proofs local") {

@@ -250,13 +250,13 @@ u32 FixedGPRClobbers(ir::OpCode op, const FeatureSet& features,
         return exec_profile_clobbers;
     }
     switch (op) {
-        // x11 is the exclusive-store status register; x12 holds the value
-        // that must survive until the store-exclusive.
+        // x11 is the exclusive-store status register; x12/x13 hold the
+        // atomic value and unaligned fallback lock address.
         case ir::OpCode::CompareAndSwap:
         case ir::OpCode::AtomicExchange:
         case ir::OpCode::AtomicFetchAdd:
         case ir::OpCode::AtomicRMW:
-            return exec_profile_clobbers | x11 | x12;
+            return exec_profile_clobbers | x11 | x12 | x13;
         // Pair CAS additionally holds the second observed half in x13.
         case ir::OpCode::CompareAndSwap128:
             return exec_profile_clobbers | x11 | x12 | x13;
