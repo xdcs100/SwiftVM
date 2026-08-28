@@ -26,10 +26,12 @@ void JitTranslator::EmitSse42Str(ir::Inst* inst) {
     const u32 all = (1u << n) - 1u;
 
     auto result = context.W(ir::Value{inst});
-    const auto target = swift::x86::Sse42StrVectorHelperAddress(imm);
-    if (target) {
-        EmitSse42StrVectorCall(a, b, result, target);
-        return;
+    if (imm == 0x1au) {
+        const auto target = swift::x86::Sse42StrVectorHelperAddress();
+        if (target) {
+            EmitSse42StrVectorCall(a, b, result, target);
+            return;
+        }
     }
     ir::Flags publish_flags = cur_block ? ir::Flags::None : ir::Flags::All;
     if (cur_block) {

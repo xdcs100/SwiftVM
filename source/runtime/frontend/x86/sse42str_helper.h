@@ -12,6 +12,6 @@ struct Sse42StrVectorCallABI {
     static constexpr u32 FPRClobbers = 0xffu;
 };
 
-VAddr Sse42StrVectorHelperAddress(u32 control);
+VAddr Sse42StrVectorHelperAddress();
 
 }  // namespace swift::x86

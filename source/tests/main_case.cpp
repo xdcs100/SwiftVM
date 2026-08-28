@@ -8118,7 +8118,7 @@ TEST_CASE("SSE4.2 string lowering stays within its declared scratch contract") {
         RegAlloc alloc{block.MaxInstrId(), gprs, fprs, FeatureSet{}};
         RegisterAllocPass::Run(&block, &alloc, false, FeatureSet{});
 #if defined(__aarch64__)
-        const swift::u32 expected_gprs = imm == 0x02u || imm == 0x1au ? 0u : 4u;
+        const swift::u32 expected_gprs = imm == 0x1au ? 0u : 4u;
 #else
         const swift::u32 expected_gprs = 4u;
 #endif
