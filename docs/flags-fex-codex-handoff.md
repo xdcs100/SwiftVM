@@ -2629,6 +2629,25 @@ peepholes.
   reloads all 680 on the second process, and keeps normalized output identical. No stress run, probe,
   diagnostic path or environment switch remains.
 
+- `22a0b53` replaces that general AAPCS snapshot with an exact-clobber ABI for the same hot
+  `PCMPISTRI 0x1a` form. A dedicated AArch64 leaf accepts `q0/q1`, returns the packed result in
+  `w16`, and names its complete `x10/x11/x13-x17` plus `v0-v7` clobber set; the call emitter saves
+  only live members of that set and LR. The generic `EmitHostCall` vector-argument and no-flags
+  extensions were removed rather than retained as an unused fallback. The two calls in root
+  `0x505120` move from 38/40-instruction frames to 11 each. Exact bounded SQLite keeps all 2,081
+  roots and versions, moves `290,734 -> 290,165` (`-569`, `-0.195712%`), and has ten shrinking
+  `__strcmp_sse42` roots with no growth. Those roots move `2,646 -> 2,077`; on their exact common
+  set FEX is 1,905, so this stage closes 569 of the previous 741-instruction gap. The repeated roots
+  are now 195-197 instructions versus FEX at 190; the two remaining larger roots move `325 -> 269`
+  and `331 -> 250`. Five interleaved short SQLite pairs improve wall median
+  `0.962903 -> 0.953035s` (`-1.025%`) with identical normalized output. Bounded smallpt remains
+  byte-identical at 42,204 instructions with PPM SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`, and CoreMark 20k
+  retains `crcfinal=0x382f`. Mac and Orb pass 16,255 Rosetta/SDM assertions, the 512-assertion
+  scratch contract, memory-boundary, alias and CallLambda focuses. A cache-compatible two-run
+  SQLite check stores and reloads all 680 eligible units with identical output. No stress run,
+  probe, diagnostic path or environment switch remains.
+
 ## Orb loop
 
 ```
