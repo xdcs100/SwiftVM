@@ -3484,6 +3484,22 @@ peepholes.
   the separate region-successor proof with the shared target contract, then handle inverted/mixed
   carry joins.
 
+- `d24e946` adds an explicit `RegionFlagsJoinPlan` in a separate ARM64 join module. For a full-NZCV
+  mixed successor pair, it moves the existing merge after the condition only when the canonical arm
+  is the layout fallthrough, the compatible arm is cycle-free, and any live PF/AF token is killed by
+  that compatible target. The hot compatible edge then enters before the merge; the canonical arm
+  uses the registered token-aware shared merge trampoline. Every layout that would add a static
+  branch keeps the old single pre-branch merge. The external target contract now records a four-bit
+  observed NZCV mask separately from fault/helper barriers, and disk cache v19 preserves it. The
+  same-allocation region proof remains snapshot-aware rather than inheriting the stricter external
+  fault boundary. Mac passes 48 region-flags, 42 production region-edge, 167 direct-link flags, 794
+  production direct-link, 302 JIT-cache, 682 non-stress SMC and 105 continuation assertions. Release
+  A/B is exact at 279 roots / 49,265 instructions plus canonical PPM for smallpt and 2,187 roots /
+  356,265 instructions for SQLite main/size1. A +878 strict-region regression and an unregistered
+  outline self-loop were removed during screening. No stress run, long benchmark, probe, env switch,
+  diagnostic path or fallback remains. Next establish non-FlagM Direct/Inverted/Unknown source
+  provenance before attempting non-fallthrough multi-predecessor joins.
+
 ## Orb loop
 
 ```

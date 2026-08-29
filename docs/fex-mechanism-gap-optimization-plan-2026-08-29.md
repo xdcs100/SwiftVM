@@ -851,3 +851,34 @@ env 开关、诊断路径或兼容兜底。
 EdgeFlags 剩余高优先级项是 inverted carry 的可证明 source provenance、mixed-polarity/
 multi-predecessor join，以及用同一 target contract 取代 region 内独立的
 `SuccessorCoversIncomingNzcv` 判定。
+
+### 16.17 mixed region edge-flags join
+
+提交 `d24e946` 把 region 内部边的 flags 决策从 `translator_region.cpp` 拆到独立的
+`translator_edge_flags_join.cpp`。原先的条件 terminal 只有“两个 successor 都可以 defer”与
+“两条边都先 canonical merge”两种结果；现在 `RegionFlagsJoinPlan` 能表示 mixed join。
+当且仅当 source 携带 full NZCV、canonical arm 正好是无 cycle/poll 的布局 fallthrough、
+compatible arm 可直达，且存活 PF/AF token 会被 compatible target 在观察前全部覆盖时，
+条件分支先进入 compatible target，只在 canonical fallthrough 上调用已登记的 token-aware
+shared merge trampoline。其他布局继续使用原先的单次 merge，不以增加静态分支换取局部收益。
+
+external/direct-link target contract 同时把原来的 `observes_before_commit` 布尔值拆成
+4-bit `observed_nzcv_mask` 与独立 `barrier_before_commit`。只要 source 携带位与 target
+提前观察位不相交，且所有 incoming 位在 fault/helper barrier 前被覆盖，partial observer
+不再让无关 mask 整体退化。该 ABI 写入 disk-cache v19。same-allocation region edge 仍使用
+snapshot-aware 内部观察边界，不把 external entry 的 fault-sensitive 规则错用到内部边。
+
+生产定向用例覆盖一个 successor 先观察、另一个 successor 覆盖全 flags 的 mixed join，
+验证结果与 canonical 路径一致，并直接检查 host 条件分支位于 canonical merge 之前。
+Mac 通过 48 条 region-flags、42 条 production region-edge、167 条 direct-link flags、794 条
+production direct-link、302 条 jit-cache、682 条非压力 SMC 和 105 条 continuation 断言。
+
+Release 同源 A/B 完全一致：smallpt `4 8 6` 两侧均为 279 roots / 49,265 条，
+PPM SHA-256 保持 `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`；
+SQLite `--size 1 --testset main :memory:` 两侧均为 2,187 roots / 356,265 条且正常完成。
+被拒绝的中间版本曾因错用 external fault 边界使 smallpt 增长 878 条，另一个未登记
+outline site 在 12 秒门限内被检测为自环；两条路径均已删除。没有运行长基准或压力测试，
+也没有保留 probe、env 开关、诊断日志或兼容兜底。
+
+EdgeFlags 剩余项继续收窄为非 FlagM 路径的 Direct/Inverted/Unknown source provenance，以及
+无法利用 canonical fallthrough 的多前驱 mixed-polarity join；后者需要可共享且不增长静态代码的 entry veneer。
