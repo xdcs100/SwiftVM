@@ -3587,6 +3587,21 @@ peepholes.
   boundary is fault-visible snapshots and safe diamond/backedge joins; this commit does not claim
   cross-CFG facts.
 
+- `4fd6d24` adds demand-driven fault-visible width facts and CFG joins to `GuestStateMap`. Function,
+  external and call-return roots start Unknown; internal diamonds and backedges use a fixed-point
+  predecessor meet. U32 publications establish physical high-zero state, while full/partial writes
+  and opaque calls transfer or invalidate it conservatively. Fault boundaries capture the currently
+  published `{version, home, width}` state before the faulting instruction, and an early pinned-home
+  publication is legal only when every intervening snapshot already contains that version. CFG
+  solving runs only for a block with an actual entry-width or SelectZero snapshot consumer; an eager
+  prototype added about 27 ms across SQLite's 2,114 functions and was removed. Mac Debug passes 110
+  pinned, 56 fault-snapshot, 4 SelectZero, 86 helper and 60 region-flags assertions, including
+  external-root, diamond, backedge and real PageFatal W-high-zero cases. Exact Release A/B is neutral:
+  smallpt remains 275 roots / 49,107 instructions with canonical PPM, and SQLite remains 2,114 roots /
+  354,915 instructions with full root/top-20 coverage and rc=0. No stress run, long benchmark, env
+  switch, probe, diagnostic path, temporary source/build path or fallback remains. Next add 8/16-bit
+  zero/sign-extension facts and let memory/compare consumers use the joined lattice.
+
 ## Orb loop
 
 ```

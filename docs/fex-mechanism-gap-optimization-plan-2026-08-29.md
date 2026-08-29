@@ -1040,3 +1040,32 @@ Release 同源 static-only A/B 中，smallpt `4 8 6` 两侧均为 275 roots，10
 early-clobber 使用小向量而非逐项树节点分配。没有运行压力测试或长基准，也没有保留 env 开关、
 probe、日志、临时源路径或兼容兜底。当前状态格仍是 block-local；fault snapshot、diamond/backedge
 join、`KnownZeroAbove(8/16)`、sign-extended facts 和 memory/XMM consumer 仍属于第 7 节后续工作。
+
+### 16.24 fault-visible width snapshot 与 CFG join
+
+提交 `4fd6d24` 为 `GuestStateMap` 增加函数级 W/X 宽度事实合流和 fault-visible value snapshot。
+入口 facts 使用 must lattice：函数入口、canonical external root、call-return root 和无 predecessor block
+均从 Unknown 开始；普通内部边取全部 predecessor 的交集，diamond 和 backedge 迭代到稳定点。
+零偏移 32 位 `SetHostGPR` 产生 `KnownZeroAbove32`，64 位写只在定义可证明为 zero-extend、32 位常量
+或已知 entry value 时保留该事实；partial high write 和不透明调用撤销对应 home。
+
+值版本扫描在 fault/observation 指令执行前记录当前已发布的 `{version, home, width}` 以及高位事实。
+提前写 pinned home 的 publication window 不再只询问“中间是否可能 fault”，而是要求每个 fault snapshot
+已经包含同一版本；否则仍拒绝 producer-time 写入。faulting load 不会被误当成已经写回 destination，
+外部入口也不会继承只在内部 predecessor 上成立的高位结论。
+
+函数级求解按需启动：只有当前 block 存在可消费 entry width fact 的 U32 same-home publication，或存在
+需要 fault snapshot 的 SelectZero publication window 时才遍历 CFG。最初的无条件版本在 SQLite 的
+2,114 个函数上增加约 27 ms codegen 时间，已删除；最终需求驱动版本的单次配对为 319.5 ms 与
+312.8 ms，属于运行噪声范围，不声明编译性能收益。
+
+Mac Debug 的 pinned 分组通过 110 条断言 / 30 个 case，覆盖 internal/external entry、diamond 和
+backedge；fault-snapshot 分组通过 56 条断言 / 3 个 case，真实 PageFatal 用例验证已提交的 W 写恢复为
+高 32 位清零的 GPR，同时 faulting load 的 destination 保持旧值。SelectZero 定向分组通过 4 条断言，
+helper 和 region-flags 分别通过 86 和 60 条断言。
+
+Release 同源 static-only A/B 中，smallpt 两侧均为 275 roots / 49,107 条并保持 canonical PPM；
+SQLite 两侧均为 2,114 roots / 354,915 条，100% root/top-20 覆盖且正常完成。两个短语料没有命中
+新的跨 CFG consumer，因此本阶段只声明机制覆盖和零回退，不声明宏观缩小。没有运行压力测试或长
+基准，也没有保留 env 开关、probe、日志、临时源路径或兼容兜底。第 7 节剩余项收窄为
+`KnownZeroAbove(8/16)`、`KnownSignExtended(8/16/32)` 和 memory/XMM consumer 的实际接入。
