@@ -656,6 +656,18 @@ HIRFunction* HIRBuilder::AppendFunction(Location start, Location end) {
 
 HIRFunctionList& HIRBuilder::GetHIRFunctions() { return hir_functions; }
 
+bool HIRBuilder::HasCurrentFunctionBlock(Location location) {
+    if (!current_function) {
+        return false;
+    }
+    for (auto& block : current_function->GetHIRBlockList()) {
+        if (block.GetBlock()->GetStartLocation() == location) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool HIRBuilder::FoldAdvancePC(const Imm& imm) {
     // A flag producer since the last boundary makes this AdvancePC a real
     // flush point.

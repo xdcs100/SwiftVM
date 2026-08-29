@@ -574,6 +574,7 @@ public:
     // function-level decode loop uses this to stop decoding and avoid a second
     // (corrupting) EndFunction call.
     [[nodiscard]] bool HasCurrentFunction() const { return current_function != nullptr; }
+    [[nodiscard]] bool HasCurrentFunctionBlock(Location location);
 
     HIRFunctionList& GetHIRFunctions();
 

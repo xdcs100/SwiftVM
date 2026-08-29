@@ -63,4 +63,8 @@ bool Assembler::EndCommit() const {
     return end_decode;
 }
 
+bool Assembler::HasFunctionBlock(Location location) const {
+    return hir_builder && hir_builder->HasCurrentFunctionBlock(location);
+}
+
 }

@@ -12,8 +12,13 @@ void X64Decoder::DecodeCondJump(_DInst& insn, Cond cond) {
     auto address = ir::Lambda{Src(insn, op0)};
 
     if (cond == Cond::AL) {
-        // Direct: constant target, indirect (reg / mem): value target. Both
-        // terminate the block and hand the target back to the dispatcher.
+        if (!address.IsValue()) {
+            const auto target = ir::Location{address.GetImm().Get()};
+            if (assembler->HasFunctionBlock(target)) {
+                assembler->LinkBlock(ir::terminal::LinkBlock{target});
+                return;
+            }
+        }
         __ SetLocation(address);
         __ ReturnToDispatcher();
     } else {

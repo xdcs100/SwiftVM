@@ -2064,6 +2064,64 @@ TEST_CASE("function decoder replays at a late block entry") {
                           }) == 1);
 }
 
+TEST_CASE("function decoder links an unconditional jump only to an existing block") {
+    using namespace swift::runtime;
+    using namespace swift::runtime::ir;
+    using namespace swift::x86;
+
+    std::array<swift::u8, 32> code{};
+    code[0] = 0xeb;
+    code[1] = 0x02;
+    code[4] = 0xf4;
+    struct MemIf final : MemoryInterface {
+        bool Read(void* dest, size_t addr, size_t size) override {
+            return std::memcpy(dest, reinterpret_cast<const void*>(addr), size);
+        }
+        bool Write(void* src, size_t addr, size_t size) override {
+            return std::memcpy(reinterpret_cast<void*>(addr), src, size);
+        }
+        void* GetPointer(void* src) override { return src; }
+    } memory;
+
+    const auto start = reinterpret_cast<VAddr>(code.data());
+    const auto target = Location{start + 4};
+    auto decode = [&](bool create_target) {
+        HIRBuilder builder{1, true, false, FeatureSet{}};
+        auto* function = builder.AppendFunction(Location{start});
+        auto* entry = function->GetCurrentBlock();
+        if (create_target) {
+            function->CreateOrGetBlock(target);
+        }
+        Assembler assembler{&builder};
+        X64Decoder decoder{start,
+                           &memory,
+                           &assembler,
+                           true,
+                           Arm64Features::None,
+                           false,
+                           false,
+                           FeatureSet{}};
+        decoder.Decode();
+        const bool has_set_location = std::any_of(
+                entry->GetInstList().begin(), entry->GetInstList().end(),
+                [](const Inst& inst) { return inst.GetOp() == OpCode::SetLocation; });
+        const bool links_target = VisitVariant<bool>(
+                entry->GetBlock()->GetTerminal(), [&](const auto& value) {
+                    using T = std::decay_t<decltype(value)>;
+                    if constexpr (std::is_same_v<T, terminal::LinkBlock>) {
+                        return value.next == target;
+                    }
+                    return false;
+                });
+        return std::pair{has_set_location, links_target};
+    };
+
+    const auto external = decode(false);
+    const auto internal = decode(true);
+    REQUIRE(external == std::make_pair(true, false));
+    REQUIRE(internal == std::make_pair(false, true));
+}
+
 TEST_CASE("structured V128 address wraps inside the 4GB guest window") {
     using namespace swift::translator;
     using namespace swift::translator::x86;

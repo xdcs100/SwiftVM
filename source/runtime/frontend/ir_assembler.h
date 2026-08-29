@@ -103,6 +103,7 @@ public:
 
     bool EndCommit() const;
     [[nodiscard]] bool IsFunctionMode() const { return hir_builder != nullptr; }
+    [[nodiscard]] bool HasFunctionBlock(Location location) const;
 
     void AddGuestCodeDependency(Location start, Location end) {
         if (hir_builder) {
