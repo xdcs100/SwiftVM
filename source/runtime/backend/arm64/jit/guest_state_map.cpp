@@ -43,12 +43,18 @@ bool GuestStateMap::PublicationWindowSafe(
         if (inst.Id() <= after || inst.Id() >= before || &inst == ignored) {
             continue;
         }
-        if (MayFaultOrObserve(inst.GetOp()) ||
+        if (MayFaultOrObserve(inst) ||
             ClobbersFixedHome(inst, home)) {
             return false;
         }
     }
     return true;
+}
+
+bool GuestStateMap::MayFaultOrObserve(const ir::Inst& inst) const {
+    const auto helper = HelperCallContract::Resolve(inst, features);
+    return helper ? helper->RequiresGuestStatePublication()
+                  : MayFaultOrObserve(inst.GetOp());
 }
 
 bool GuestStateMap::MayFaultOrObserve(ir::OpCode op) {

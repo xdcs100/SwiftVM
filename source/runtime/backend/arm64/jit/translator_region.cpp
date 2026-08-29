@@ -1,5 +1,7 @@
 #include "translator.h"
 
+#include "runtime/backend/arm64/helper_call_contract.h"
+
 #include <algorithm>
 #include <array>
 #include <cstdio>
@@ -641,7 +643,7 @@ JitTranslator::PlanBackedgeFlags(ir::Block* block) {
             if (&inst == first_producer) {
                 break;
             }
-            if (!PreservesHostNZCV(inst.GetOp())) {
+            if (!RetainsPendingHostNZCV(inst)) {
                 if (GetSvmConfig().dump_ir) {
                     fmt::print(stderr,
                                "[backedge-proof] {:#x} reject pre-producer op={} id={}\n",
@@ -658,7 +660,11 @@ JitTranslator::PlanBackedgeFlags(ir::Block* block) {
             ? final_save->GetArg<ir::Value>(0).Def()
             : first_producer;
     for (auto& inst : block->GetInstList()) {
-        if (inst.Id() > lazy_producer->Id() && MayFaultOrObserve(inst.GetOp())) {
+        if (inst.Id() <= lazy_producer->Id()) {
+            continue;
+        }
+        const auto helper = HelperCallContract::Resolve(inst, context.GetFeatures());
+        if (MayFaultOrObserve(inst) || (helper && !helper->RetainsPendingNZCV())) {
             if (GetSvmConfig().dump_ir) {
                 fmt::print(stderr,
                            "[backedge-proof] {:#x} reject post-producer fault op={} id={} producer={}\n",
@@ -1005,6 +1011,16 @@ bool JitTranslator::PreservesHostNZCV(ir::OpCode op) {
         default:
             return false;
     }
+}
+
+bool JitTranslator::RetainsPendingHostNZCV(const ir::Inst& inst) const {
+    const auto helper = HelperCallContract::Resolve(inst, context.GetFeatures());
+    return helper ? helper->RetainsPendingNZCV()
+                  : PreservesHostNZCV(inst.GetOp());
+}
+
+bool JitTranslator::MayFaultOrObserve(const ir::Inst& inst) const {
+    return guest_state_map.MayFaultOrObserve(inst);
 }
 
 bool JitTranslator::MayFaultOrObserve(ir::OpCode op) {

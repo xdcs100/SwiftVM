@@ -1252,7 +1252,7 @@ bool JitTranslator::CanUseCompactFCmpCarrier(ir::Inst* fcmp) const {
         auto scan = publish;
         for (++scan; scan != list.end() && &*scan != &user; ++scan) {
             if (scan->GetOp() != ir::OpCode::InvertCarry &&
-                !PreservesHostNZCV(scan->GetOp())) {
+                !RetainsPendingHostNZCV(*scan)) {
                 return false;
             }
         }
@@ -1289,8 +1289,8 @@ ir::Inst* JitTranslator::RawFCmpCondition(ir::Inst* fcmp) const {
     auto& list = cur_block->GetInstList();
     auto scan = std::next(list.iterator_to(*fcmp));
     for (; scan != list.end() && &*scan != condition; ++scan) {
-        if (!PreservesHostNZCV(scan->GetOp()) ||
-            MayFaultOrObserve(scan->GetOp())) {
+        if (!RetainsPendingHostNZCV(*scan) ||
+            MayFaultOrObserve(*scan)) {
             return nullptr;
         }
     }

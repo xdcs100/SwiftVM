@@ -224,9 +224,12 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
                                  const Register& result,
                                  std::optional<Register> secondary_result) {
     ASSERT(args.size() <= 8);
-    MergeNZCV(FlagsRegsAuditMergeCause::Helper,
-              FlagsRegsAuditEdgeKind::Host);
-    FlushFlags();
+    const auto helper = HelperCallContract::Resolve(lambda, context.GetFeatures());
+    if (!helper.RetainsPendingNZCV()) {
+        MergeNZCV(FlagsRegsAuditMergeCause::Helper,
+                  FlagsRegsAuditEdgeKind::Host);
+        FlushFlags();
+    }
 
     // Materialize value arguments before taking the register snapshot. In
     // function mode an argument can be RegAlloc::MEM; context.X() then reloads
@@ -260,12 +263,6 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
         SpillStaticFPRUniforms();
     }
 
-    // The metadata is present only on direct helpers whose definition carries
-    // the same preserve_all convention. The process-constant switch defaults
-    // off, leaving the established AAPCS snapshot byte-for-byte unchanged.
-    // Unsupported compilers cannot enable the path even if the environment
-    // variable is present.
-    const auto helper = HelperCallContract::Resolve(lambda, context.GetFeatures());
     const bool preserve_all_leaf = helper.PreserveAllLeaf();
     const bool fpcr_transparent = helper.FPCRTransparent();
     const bool general_registers_only = helper.GeneralRegistersOnly();

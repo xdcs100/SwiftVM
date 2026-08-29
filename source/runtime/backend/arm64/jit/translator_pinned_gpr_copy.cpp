@@ -342,7 +342,7 @@ std::optional<JitTranslator::PinnedGPRCopy> JitTranslator::MatchPinnedGPRCopy(
     }
     for (auto& scan : cur_block->GetInstList()) {
         if (read->Id() < scan.Id() && scan.Id() < inst->Id() &&
-            (MayFaultOrObserve(scan.GetOp()) ||
+            (MayFaultOrObserve(scan) ||
              (scan.GetOp() == ir::OpCode::SetHostGPR &&
               (scan.GetArg<ir::Imm>(1).Get() == target ||
                (source_index && scan.GetArg<ir::Imm>(1).Get() == *source_index))))) {

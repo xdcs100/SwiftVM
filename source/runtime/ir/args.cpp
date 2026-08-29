@@ -124,6 +124,10 @@ constexpr u8 kHostFpTransparentTag = 0x20;
 constexpr u8 kHostGeneralRegistersTag = 0x10;
 constexpr u8 kHostPreservesPinnedStateTag = 0x08;
 constexpr u8 kUniformEffectMask = 0x07;
+constexpr u8 kGuestStateEffectMask = 0x03;
+constexpr u8 kNoDirectFaultTag = 0x04;
+constexpr u8 kNoReentryTag = 0x08;
+constexpr u8 kHostPreservesNZCVTag = 0x10;
 constexpr size_t kMaxUniformEffectSets = kUniformEffectMask + 1;
 
 std::array<const UniformEffectSet*, kMaxUniformEffectSets> uniform_effect_sets{
@@ -192,6 +196,16 @@ Lambda::Lambda(const DataClass& value, HelperCallTraits traits) : address(value)
     if (tags) {
         address.type = static_cast<ArgType>(tags);
     }
+    helper_effects = static_cast<u8>(traits.guest_state) & kGuestStateEffectMask;
+    if (traits.fault == HelperFaultEffect::NoDirectFault) {
+        helper_effects |= kNoDirectFaultTag;
+    }
+    if (traits.reentry == HelperReentryEffect::NoReentry) {
+        helper_effects |= kNoReentryTag;
+    }
+    if (traits.host_flags == HostFlagsEffect::PreservesNZCV) {
+        helper_effects |= kHostPreservesNZCVTag;
+    }
 }
 
 bool Lambda::IsTaggedImm() const {
@@ -249,6 +263,28 @@ HostRegisterEffect Lambda::GetHostRegisterEffect() const {
     return (tags & kHostPreservesPinnedStateTag) != 0
             ? HostRegisterEffect::PreservesPinnedState
             : HostRegisterEffect::MayTouchSIMD;
+}
+
+HelperGuestStateEffect Lambda::GetHelperGuestStateEffect() const {
+    return static_cast<HelperGuestStateEffect>(helper_effects & kGuestStateEffectMask);
+}
+
+HelperFaultEffect Lambda::GetHelperFaultEffect() const {
+    return (helper_effects & kNoDirectFaultTag) != 0
+            ? HelperFaultEffect::NoDirectFault
+            : HelperFaultEffect::MayFault;
+}
+
+HelperReentryEffect Lambda::GetHelperReentryEffect() const {
+    return (helper_effects & kNoReentryTag) != 0
+            ? HelperReentryEffect::NoReentry
+            : HelperReentryEffect::MayReenter;
+}
+
+HostFlagsEffect Lambda::GetHostFlagsEffect() const {
+    return (helper_effects & kHostPreservesNZCVTag) != 0
+            ? HostFlagsEffect::PreservesNZCV
+            : HostFlagsEffect::MayTouch;
 }
 
 void Params::Push(const Value& data) { Push(new Param(data)); }

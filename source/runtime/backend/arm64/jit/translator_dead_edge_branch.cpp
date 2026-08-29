@@ -295,7 +295,7 @@ void JitTranslator::PrepareDeadEdgeIntegerBranch(ir::Block* block) {
         if (!after_producer || plan.discarded.contains(inst)) {
             continue;
         }
-        if (!PreservesHostNZCV(inst->GetOp()) || MayFaultOrObserve(inst->GetOp())) {
+        if (!RetainsPendingHostNZCV(*inst) || MayFaultOrObserve(*inst)) {
             return;
         }
     }

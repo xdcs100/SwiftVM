@@ -43,6 +43,12 @@ HelperCallContract HelperCallContract::Resolve(const ir::Lambda& lambda,
             lambda.GetHostRegisterEffect() == ir::HostRegisterEffect::GeneralOnly;
     contract.preserves_pinned_state =
             lambda.GetHostRegisterEffect() == ir::HostRegisterEffect::PreservesPinnedState;
+    contract.guest_state_effect = lambda.GetHelperGuestStateEffect();
+    contract.may_fault = lambda.GetHelperFaultEffect() == ir::HelperFaultEffect::MayFault;
+    contract.may_reenter =
+            lambda.GetHelperReentryEffect() == ir::HelperReentryEffect::MayReenter;
+    contract.preserves_host_nzcv =
+            lambda.GetHostFlagsEffect() == ir::HostFlagsEffect::PreservesNZCV;
     contract.uniform_effects = lambda.GetUniformEffectId();
     return contract;
 }
@@ -67,6 +73,24 @@ bool HelperCallContract::InstructionClobbersGPR(const ir::Inst& inst,
                                                 const FeatureSet& features) {
     const auto contract = Resolve(inst, features);
     return contract && contract->ClobbersGPR(code);
+}
+
+bool HelperCallContract::ReadsGuestState() const {
+    return guest_state_effect == ir::HelperGuestStateEffect::MayReadWrite ||
+           guest_state_effect == ir::HelperGuestStateEffect::ReadOnly;
+}
+
+bool HelperCallContract::WritesGuestState() const {
+    return guest_state_effect == ir::HelperGuestStateEffect::MayReadWrite ||
+           guest_state_effect == ir::HelperGuestStateEffect::WriteOnly;
+}
+
+bool HelperCallContract::RequiresGuestStatePublication() const {
+    return ReadsGuestState() || WritesGuestState() || may_fault || may_reenter;
+}
+
+bool HelperCallContract::RetainsPendingNZCV() const {
+    return preserves_host_nzcv && !RequiresGuestStatePublication();
 }
 
 bool HelperCallContract::ClobbersGPR(u32 code) const {

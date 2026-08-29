@@ -218,6 +218,10 @@ constexpr std::array<ResidentStringHelper, 4> kRepStosResident{
 constexpr ir::HelperCallTraits kResidentStringHelperTraits{
         .host_fp = ir::HostFpEffect::FPCRTransparent,
         .host_registers = ir::HostRegisterEffect::PreservesPinnedState,
+        .guest_state = ir::HelperGuestStateEffect::None,
+        .fault = ir::HelperFaultEffect::NoDirectFault,
+        .reentry = ir::HelperReentryEffect::NoReentry,
+        .host_flags = ir::HostFlagsEffect::PreservesNZCV,
 };
 
 // rep cmps/scas: run the early-terminating comparison loop and return the

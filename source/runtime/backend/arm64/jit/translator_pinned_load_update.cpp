@@ -115,7 +115,7 @@ JitTranslator::MatchPinnedLoadUpdate(ir::Inst* update) {
         if (scan.Id() <= load->Id() || scan.Id() >= update->Id()) {
             continue;
         }
-        if (MayFaultOrObserve(scan.GetOp()) ||
+        if (MayFaultOrObserve(scan) ||
             (scan.GetOp() == ir::OpCode::GetHostGPR &&
              scan.GetArg<ir::Imm>(0).Get() == target) ||
             (scan.GetOp() == ir::OpCode::SetHostGPR &&

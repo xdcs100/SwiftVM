@@ -475,7 +475,9 @@ private:
     void EmitBackedgeMaterialize(const BackedgeFlagsPlan& plan);
     void EmitRegionBranchPFAF(const BackedgeFlagsPlan& plan);
     void EmitBackedgeColdPaths();
+    [[nodiscard]] bool RetainsPendingHostNZCV(const ir::Inst& inst) const;
     [[nodiscard]] static bool PreservesHostNZCV(ir::OpCode op);
+    [[nodiscard]] bool MayFaultOrObserve(const ir::Inst& inst) const;
     [[nodiscard]] static bool MayFaultOrObserve(ir::OpCode op);
     [[nodiscard]] EdgeFlagsState PendingEdgeFlagsState(
             HostFlags valid,

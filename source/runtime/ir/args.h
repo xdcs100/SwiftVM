@@ -225,15 +225,45 @@ enum class HostRegisterEffect : u8 {
     PreservesPinnedState,
 };
 
+enum class HelperGuestStateEffect : u8 {
+    MayReadWrite = 0,
+    ReadOnly,
+    WriteOnly,
+    None,
+};
+
+enum class HelperFaultEffect : u8 {
+    MayFault = 0,
+    NoDirectFault,
+};
+
+enum class HelperReentryEffect : u8 {
+    MayReenter = 0,
+    NoReentry,
+};
+
+enum class HostFlagsEffect : u8 {
+    MayTouch = 0,
+    PreservesNZCV,
+};
+
 struct HelperCallTraits {
     UniformEffectId uniform{UniformEffectId::Unknown};
     HelperABI abi{HelperABI::NormalAAPCS};
     HostFpEffect host_fp{HostFpEffect::MayTouch};
     HostRegisterEffect host_registers{HostRegisterEffect::MayTouchSIMD};
+    HelperGuestStateEffect guest_state{HelperGuestStateEffect::MayReadWrite};
+    HelperFaultEffect fault{HelperFaultEffect::MayFault};
+    HelperReentryEffect reentry{HelperReentryEffect::MayReenter};
+    HostFlagsEffect host_flags{HostFlagsEffect::MayTouch};
 };
 
 static_assert(static_cast<u8>(HostFpEffect::MayTouch) == 0);
 static_assert(static_cast<u8>(HostRegisterEffect::MayTouchSIMD) == 0);
+static_assert(static_cast<u8>(HelperGuestStateEffect::MayReadWrite) == 0);
+static_assert(static_cast<u8>(HelperFaultEffect::MayFault) == 0);
+static_assert(static_cast<u8>(HelperReentryEffect::MayReenter) == 0);
+static_assert(static_cast<u8>(HostFlagsEffect::MayTouch) == 0);
 
 inline constexpr UniformEffectSet kNoUniformEffects{};
 
@@ -268,11 +298,16 @@ public:
     HelperABI GetHelperABI() const;
     HostFpEffect GetHostFpEffect() const;
     HostRegisterEffect GetHostRegisterEffect() const;
+    HelperGuestStateEffect GetHelperGuestStateEffect() const;
+    HelperFaultEffect GetHelperFaultEffect() const;
+    HelperReentryEffect GetHelperReentryEffect() const;
+    HostFlagsEffect GetHostFlagsEffect() const;
 
 private:
     [[nodiscard]] bool IsTaggedImm() const;
 
     mutable FuncAddr address;
+    u8 helper_effects{};
 };
 
 struct FlagsBit {

@@ -68,7 +68,7 @@ bool JitTranslator::IsDeadPinnedGPRWrite(ir::Inst* inst) const {
             scan.GetArg<ir::Imm>(0).Get() == target) {
             return false;
         }
-        if (MayFaultOrObserve(scan.GetOp()) || IsWriteBoundary(scan.GetOp())) {
+        if (MayFaultOrObserve(scan) || IsWriteBoundary(scan.GetOp())) {
             return false;
         }
         if (scan.GetOp() == ir::OpCode::SetHostGPR &&

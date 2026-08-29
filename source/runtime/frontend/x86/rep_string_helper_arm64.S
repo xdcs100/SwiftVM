@@ -18,7 +18,11 @@
     stp q26, q27, [sp, #272]
     stp q28, q29, [sp, #304]
     stp q30, q31, [sp, #336]
+    mrs x16, nzcv
+    fmov d8, x16
     bl cdecl(\target)
+    fmov x16, d8
+    msr nzcv, x16
     ldp q16, q17, [sp, #112]
     ldp q18, q19, [sp, #144]
     ldp q20, q21, [sp, #176]

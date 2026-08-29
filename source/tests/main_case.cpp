@@ -273,6 +273,11 @@ TEST_CASE("helper effects default conservative and compose with ABI metadata") {
             HostRegisterEffect::MayTouchSIMD);
     REQUIRE(ordinary.GetHelperABI() == HelperABI::NormalAAPCS);
     REQUIRE(ordinary.GetUniformEffectId() == UniformEffectId::Unknown);
+    REQUIRE(ordinary.GetHelperGuestStateEffect() ==
+            HelperGuestStateEffect::MayReadWrite);
+    REQUIRE(ordinary.GetHelperFaultEffect() == HelperFaultEffect::MayFault);
+    REQUIRE(ordinary.GetHelperReentryEffect() == HelperReentryEffect::MayReenter);
+    REQUIRE(ordinary.GetHostFlagsEffect() == HostFlagsEffect::MayTouch);
 
     const Lambda combined{
             address,
@@ -281,6 +286,10 @@ TEST_CASE("helper effects default conservative and compose with ABI metadata") {
                     .abi = HelperABI::PreserveAllLeaf,
                     .host_fp = HostFpEffect::FPCRTransparent,
                     .host_registers = HostRegisterEffect::GeneralOnly,
+                    .guest_state = HelperGuestStateEffect::ReadOnly,
+                    .fault = HelperFaultEffect::NoDirectFault,
+                    .reentry = HelperReentryEffect::NoReentry,
+                    .host_flags = HostFlagsEffect::PreservesNZCV,
             }};
     REQUIRE(combined.GetImm().Get() == swift::u64{0x1234});
     REQUIRE(combined.GetHostFpEffect() == HostFpEffect::FPCRTransparent);
@@ -288,6 +297,10 @@ TEST_CASE("helper effects default conservative and compose with ABI metadata") {
             HostRegisterEffect::GeneralOnly);
     REQUIRE(combined.GetHelperABI() == HelperABI::PreserveAllLeaf);
     REQUIRE(combined.GetUniformEffectId() == UniformEffectId::None);
+    REQUIRE(combined.GetHelperGuestStateEffect() == HelperGuestStateEffect::ReadOnly);
+    REQUIRE(combined.GetHelperFaultEffect() == HelperFaultEffect::NoDirectFault);
+    REQUIRE(combined.GetHelperReentryEffect() == HelperReentryEffect::NoReentry);
+    REQUIRE(combined.GetHostFlagsEffect() == HostFlagsEffect::PreservesNZCV);
 
     const Lambda resident{
             address,

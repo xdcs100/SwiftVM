@@ -19,6 +19,7 @@ public:
             u32 after,
             u32 before,
             const ir::Inst* ignored = nullptr) const;
+    [[nodiscard]] bool MayFaultOrObserve(const ir::Inst& inst) const;
     [[nodiscard]] static bool MayFaultOrObserve(ir::OpCode op);
 
 private:

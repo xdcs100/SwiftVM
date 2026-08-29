@@ -701,7 +701,7 @@ bool JitTranslator::IsStrictInternalAdvancePC(ir::Block* block,
             after = true;
             continue;
         }
-        if (after && MayFaultOrObserve(inst.GetOp())) {
+        if (after && MayFaultOrObserve(inst)) {
             return false;
         }
     }

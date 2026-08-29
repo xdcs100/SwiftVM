@@ -1,5 +1,6 @@
 #include "translator.h"
 
+#include "runtime/backend/arm64/helper_call_contract.h"
 #include "runtime/backend/arm64/defines.h"
 #include "runtime/backend/context.h"
 
@@ -54,7 +55,9 @@ bool JitTranslator::RegionSuccessorOverwritesFlagsToken(
     }
     ir::Flags needed = ir::Flags::Parity | ir::Flags::AuxiliaryCarry;
     for (auto& inst : found->second->GetInstList()) {
-        if (MayFaultOrObserve(inst.GetOp())) {
+        if (MayFaultOrObserve(inst) ||
+            HelperCallContract::InstructionClobbersGPR(
+                    inst, atomic_scratch.GetCode(), context.GetFeatures())) {
             return false;
         }
         if (inst.GetOp() == ir::OpCode::GetFlags ||

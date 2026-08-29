@@ -22,6 +22,13 @@ public:
     [[nodiscard]] bool FPCRTransparent() const { return fpcr_transparent; }
     [[nodiscard]] bool GeneralRegistersOnly() const { return general_registers_only; }
     [[nodiscard]] bool PreservesPinnedState() const { return preserves_pinned_state; }
+    [[nodiscard]] bool ReadsGuestState() const;
+    [[nodiscard]] bool WritesGuestState() const;
+    [[nodiscard]] bool MayFault() const { return may_fault; }
+    [[nodiscard]] bool MayReenter() const { return may_reenter; }
+    [[nodiscard]] bool PreservesHostNZCV() const { return preserves_host_nzcv; }
+    [[nodiscard]] bool RequiresGuestStatePublication() const;
+    [[nodiscard]] bool RetainsPendingNZCV() const;
     [[nodiscard]] ir::UniformEffectId UniformEffects() const { return uniform_effects; }
     [[nodiscard]] bool ClobbersGPR(u32 code) const;
     [[nodiscard]] bool ClobbersFPR(u32 code) const;
@@ -35,6 +42,10 @@ private:
     bool fpcr_transparent{};
     bool general_registers_only{};
     bool preserves_pinned_state{};
+    ir::HelperGuestStateEffect guest_state_effect{ir::HelperGuestStateEffect::MayReadWrite};
+    bool may_fault{true};
+    bool may_reenter{true};
+    bool preserves_host_nzcv{};
     ir::UniformEffectId uniform_effects{ir::UniformEffectId::Unknown};
 };
 
