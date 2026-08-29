@@ -762,7 +762,8 @@ struct X86Instance::Impl final {
                     const auto owner_start =
                             owner->GetBlock()->GetStartLocation().Value();
                     if (!builder.ResetDecodedBlock(owner)) {
-                        decode_frontier.Reject(target);
+                        decode_frontier.Reject(target,
+                                               FunctionDecodeFrontier::Rejection::OwnerResetFailed);
                         replayed_split = true;
                         break;
                     }
@@ -770,7 +771,8 @@ struct X86Instance::Impl final {
                     if (FunctionDecodeFrontier::DecodedEnd(owner->GetBlock()) == target) {
                         decode_frontier.Accept(target);
                     } else {
-                        decode_frontier.Reject(target);
+                        decode_frontier.Reject(target,
+                                               FunctionDecodeFrontier::Rejection::BoundaryMismatch);
                     }
                     replayed_split = true;
                     break;
@@ -834,6 +836,7 @@ struct X86Instance::Impl final {
                 }
             }
             PerfScope2 perf_ir_finalize{GetPerfStats2().ir_finalize};
+            hir_func->SetFunctionEntryProvenance(decode_frontier.ExportProvenance());
             hir_func->EndFunction();
             perf_ir_finalize.Stop();
             perf_decode.Stop();

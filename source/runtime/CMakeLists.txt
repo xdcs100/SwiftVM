@@ -64,6 +64,7 @@ add_library(swift_runtime STATIC
         ir/terminal.h
         ir/function.cpp
         ir/function.h
+        ir/function_entry_provenance.h
         ir/module.cpp
         ir/module.h
         ir/hir_builder.cpp
@@ -116,6 +117,8 @@ add_library(swift_runtime STATIC
         backend/interrupt_poll_state.h
         backend/address_space.cpp
         backend/address_space.h
+        backend/function_entry_contract.cpp
+        backend/function_entry_contract.h
         backend/runtime.cpp
         backend/runtime.h
         backend/signal_handler.cpp

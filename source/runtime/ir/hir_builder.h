@@ -5,10 +5,12 @@
 #pragma once
 
 #include <span>
+#include <utility>
 #include "runtime/common/mem_arena.h"
 #include "runtime/common/object_pool.h"
 #include "runtime/common/svm_config.h"
 #include "runtime/ir/function.h"
+#include "runtime/ir/function_entry_provenance.h"
 #include "runtime/ir/host_reg.h"
 #include "runtime/ir/module.h"
 
@@ -353,6 +355,12 @@ public:
     HIRBlockVector& GetHIRBlocks();
     HIRBlockList& GetHIRBlockList();
     HIRBlockList& GetHIRBlocksRPO();
+    void SetFunctionEntryProvenance(std::vector<FunctionEntryProvenance> provenance) {
+        function_entry_provenance = std::move(provenance);
+    }
+    [[nodiscard]] const std::vector<FunctionEntryProvenance>& GetFunctionEntryProvenance() const {
+        return function_entry_provenance;
+    }
     HIRValueMap& GetHIRValues();
     HIRValue* GetHIRValue(const Value& value);
     HIRPools& GetMemPool();
@@ -478,6 +486,7 @@ private:
     // second (post-pass) renumbering reuses the first one's buffer instead of
     // allocating again.
     HIRValueMap reid_scratch{};
+    std::vector<FunctionEntryProvenance> function_entry_provenance{};
     HIRBlock* current_block{};
     HIRBlock* entry_block{};
 };

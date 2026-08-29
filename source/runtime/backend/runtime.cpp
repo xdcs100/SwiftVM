@@ -10,29 +10,30 @@
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
-#include <unistd.h>
 #include <utility>
+#include <unistd.h>
 #include "runtime/backend/address_space.h"
-#include "runtime/backend/atomic_fallback.h"
 #include "runtime/backend/arm64/constant.h"
 #include "runtime/backend/arm64/defines.h"
-#include "runtime/backend/arm64/jit/translator.h"
 #include "runtime/backend/arm64/fpcr_mode.h"
+#include "runtime/backend/arm64/jit/translator.h"
+#include "runtime/backend/atomic_fallback.h"
 #include "runtime/backend/context.h"
+#include "runtime/backend/function_entry_contract.h"
 #include "runtime/backend/guarded_return_stack.h"
+#include "runtime/backend/interp/interpreter.h"
 #include "runtime/backend/interrupt_l1_mapping.h"
 #include "runtime/backend/interrupt_poll_state.h"
-#include "runtime/backend/interp/interpreter.h"
 #include "runtime/backend/runtime.h"
 #include "runtime/backend/signal_handler.h"
 #include "runtime/backend/translate_table.h"
-#include "runtime/common/hot_coalesce_prof.h"
 #include "runtime/common/backedge_control.h"
+#include "runtime/common/hot_coalesce_prof.h"
 #include "runtime/common/perf_stats.h"
 #include "runtime/include/sruntime.h"
 #include "runtime/ir/function.h"
-#include "runtime/ir/opts/pass_pipeline.h"
 #include "runtime/ir/opts/loop_invariant_hoist_pass.h"
+#include "runtime/ir/opts/pass_pipeline.h"
 #include "runtime/ir/opts/register_alloc_pass.h"
 
 namespace swift::runtime {
@@ -1098,6 +1099,8 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
         // External links, RSB return targets, and code misses are allowed to
         // land at a basic-block boundary inside this compiled unit.
         auto& mutable_address_space = module->GetAddressSpace();
+        const auto allocation_size = static_cast<u32>(buffer.size);
+        backend::FunctionEntryPublisher entry_publisher{*module, buffer.exec_data, allocation_size};
         std::vector<backend::SerialBlock> cache_blocks;
         for (auto& hir_block : function->GetHIRBlocksRPO()) {
             auto* block = hir_block.GetBlock();
@@ -1115,58 +1118,37 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
             const auto call_offset = emitted_context->GetCallCodeOffset(guest);
             const auto call_pending_flags_offset =
                     emitted_context->GetCallPendingFlagsCodeOffset(guest);
-            ASSERT(offset >= 0 && static_cast<size_t>(offset) < buffer.size);
-            ASSERT(direct_offset >= 0 &&
-                   static_cast<size_t>(direct_offset) < buffer.size);
-            ASSERT(pending_flags_offset < 0 ||
-                   static_cast<size_t>(pending_flags_offset) < buffer.size);
-            ASSERT(call_offset < 0 ||
-                   static_cast<size_t>(call_offset) < buffer.size);
-            ASSERT(call_pending_flags_offset < 0 ||
-                   static_cast<size_t>(call_pending_flags_offset) < buffer.size);
-            auto* direct_host_pc = direct_offset == offset
-                    ? nullptr
-                    : buffer.exec_data + direct_offset;
-            auto* pending_flags_host_pc = pending_flags_offset < 0
-                    ? nullptr
-                    : buffer.exec_data + pending_flags_offset;
-            auto* call_host_pc = call_offset < 0
-                    ? nullptr
-                    : buffer.exec_data + call_offset;
-            auto* call_pending_flags_host_pc = call_pending_flags_offset < 0
-                    ? nullptr
-                    : buffer.exec_data + call_pending_flags_offset;
+            const auto to_offset = [](ptrdiff_t value) {
+                return value < 0 ? backend::kInvalidFunctionEntryOffset : static_cast<u32>(value);
+            };
+            const auto entry_contract = backend::FunctionEntryContract::Build(
+                    *function,
+                    *block,
+                    {
+                            .canonical = to_offset(offset),
+                            .direct_link = to_offset(direct_offset),
+                            .pending_flags = to_offset(pending_flags_offset),
+                            .continuation = to_offset(call_offset),
+                            .pending_flags_continuation = to_offset(call_pending_flags_offset),
+                    },
+                    pending_flags_contract);
+            ASSERT(entry_contract.IsWellFormed(allocation_size));
             {
                 PerfScope2 perf_pub_l2{GetPerfStats2().publish_l2};
-                (void)module->PublishLinkTarget(
-                        ir::Location{guest}, buffer.exec_data + offset,
-                        buffer.exec_data,
-                        direct_host_pc,
-                        pending_flags_host_pc,
-                        call_host_pc,
-                        call_pending_flags_host_pc,
-                        pending_flags_contract);
-                mutable_address_space.PushCodeCache(guest, buffer.exec_data + offset);
-                if (call_host_pc) {
-                    mutable_address_space.PushCallCodeCache(guest, call_host_pc);
-                }
-                if (call_pending_flags_host_pc) {
-                    mutable_address_space.PushPendingCallCodeCache(
-                            guest, call_pending_flags_host_pc);
-                }
+                (void)entry_publisher.Publish(entry_contract);
             }
             cache_blocks.push_back({
                     .guest_start = guest,
                     .guest_end = block->GetEndLocation().Value(),
-                    .code_offset = static_cast<u32>(offset),
+                    .code_offset = entry_contract.Canonical().code_offset,
                     .guest_bytes_hash = 0,
-                    .direct_code_offset = direct_host_pc
-                            ? static_cast<u32>(direct_offset)
-                            : UINT32_MAX,
-                    .pending_flags_code_offset = pending_flags_host_pc
-                            ? static_cast<u32>(pending_flags_offset)
-                            : UINT32_MAX,
+                    .direct_code_offset = entry_contract.DirectLink().code_offset,
+                    .pending_flags_code_offset = entry_contract.PendingFlags().code_offset,
                     .pending_flags_contract = pending_flags_contract,
+                    .entry_flags = static_cast<u8>(
+                            entry_contract.Linkable()
+                                    ? backend::SerialBlock::Linkable
+                                    : 0),
             });
             if (!module->GetModuleConfig().read_only) {
                 PerfScope2 perf_pub_smc{GetPerfStats2().publish_smc};
@@ -1175,7 +1157,7 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
                         ir_function,
                         block->GetStartLocation().Value(),
                         block->GetEndLocation().Value());
-                for (const auto& dependency : block->GetGuestCodeDependencies()) {
+                for (const auto& dependency : entry_contract.Dependencies()) {
                     mutable_address_space.GetSmcTracker().RegisterNode(
                             module, ir_function, dependency.start.Value(),
                             dependency.end.Value());

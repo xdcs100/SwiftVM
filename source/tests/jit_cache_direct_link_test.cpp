@@ -36,7 +36,7 @@ using namespace swift::runtime::ir;
 constexpr const char* kPhaseEnv = "DIRECT_LINK_CACHE_PHASE";
 constexpr const char* kDirEnv = "DIRECT_LINK_CACHE_DIR";
 constexpr const char* kRoundTripTest =
-        "disk cache v16 round trips direct-link sites across processes";
+        "disk cache v17 round trips direct-link sites across processes";
 
 IntrusivePtr<Block> BuildTarget(VAddr guest, u64 fingerprint) {
     IntrusivePtr<Block> block{new Block(0, Location{guest})};
@@ -424,7 +424,7 @@ TEST_CASE("disk cache scanner keeps move-wide constants and rejects PC-relative 
     }
 }
 
-TEST_CASE("disk cache v16 serializes link and fault-site records",
+TEST_CASE("disk cache v17 serializes link and fault-site records",
           "[direct-link][jit-cache][serializer]") {
     SerialUnit input{};
     input.guest_start = 0x1000;
@@ -441,6 +441,12 @@ TEST_CASE("disk cache v16 serializes link and fault-site records",
     };
     input.blocks.push_back(
             {0x1000, 0x1004, 0, 0x1234, 16, 20, overwrite_nzcv});
+    input.blocks.push_back({
+            .guest_start = 0x1004,
+            .guest_end = 0x1008,
+            .code_offset = 4,
+            .entry_flags = 0,
+    });
     constexpr u32 kColdMerge = 0x94000004;
     constexpr u32 kLinkedPublish = 0xb3401c1a;
     constexpr u32 kMergeResumeAdr = 0x10000051;
@@ -472,10 +478,12 @@ TEST_CASE("disk cache v16 serializes link and fault-site records",
     REQUIRE(output.guest_start == input.guest_start);
     REQUIRE(output.feature_hash == input.feature_hash);
     REQUIRE(output.code == input.code);
-    REQUIRE(output.blocks.size() == 1);
+    REQUIRE(output.blocks.size() == 2);
     REQUIRE(output.blocks[0].direct_code_offset == 16);
     REQUIRE(output.blocks[0].pending_flags_code_offset == 20);
     REQUIRE(output.blocks[0].pending_flags_contract == overwrite_nzcv);
+    REQUIRE(output.blocks[0].IsLinkable());
+    REQUIRE_FALSE(output.blocks[1].IsLinkable());
     REQUIRE(output.link_sites.size() == input.link_sites.size());
     for (size_t i = 0; i < input.link_sites.size(); ++i) {
         REQUIRE(output.link_sites[i].code_offset == input.link_sites[i].code_offset);

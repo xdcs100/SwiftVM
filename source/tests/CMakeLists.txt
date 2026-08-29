@@ -9,6 +9,8 @@ add_executable(swift_test
         direct_link_production_test.cpp
         double_shift_test.cpp
         funnel_shift_codegen_test.cpp
+        function_decode_frontier_test.cpp
+        function_entry_contract_test.cpp
         flags_merge_test.cpp
         jit_cache_direct_link_test.cpp
         integer_width_elimination_test.cpp

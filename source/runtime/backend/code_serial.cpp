@@ -574,6 +574,7 @@ void WriteUnit(BlobWriter& w, const SerialUnit& unit) {
         w.U8(b.pending_flags_contract.commits_before_fault);
         w.U8(b.pending_flags_contract.observes_before_commit);
         w.U64(b.pending_flags_contract.packed_flags_version);
+        w.U8(b.entry_flags);
     }
     w.U32(static_cast<u32>(unit.relocs.size()));
     for (const auto& r : unit.relocs) {
@@ -636,18 +637,18 @@ bool ReadUnit(BlobReader& r, SerialUnit& unit) {
             !r.U32(b.pending_flags_code_offset) ||
             !r.U32(b.pending_flags_contract.overwrite_before_observe) ||
             !r.U8(commits_before_fault) || !r.U8(observes_before_commit) ||
-            !r.U64(b.pending_flags_contract.packed_flags_version)) {
+            !r.U64(b.pending_flags_contract.packed_flags_version) || !r.U8(b.entry_flags)) {
             return false;
         }
         b.pending_flags_contract.commits_before_fault = commits_before_fault;
         b.pending_flags_contract.observes_before_commit =
                 observes_before_commit;
         if (commits_before_fault > 1 || observes_before_commit > 1 ||
-            !b.pending_flags_contract.IsWellFormed() ||
-            b.code_offset >= code_size || b.guest_end < b.guest_start ||
+            (b.entry_flags & ~SerialBlock::Linkable) != 0 ||
+            !b.pending_flags_contract.IsWellFormed() || b.code_offset >= code_size ||
+            b.guest_end < b.guest_start ||
             (b.direct_code_offset != UINT32_MAX &&
-             ((b.direct_code_offset & 3u) != 0 ||
-              b.direct_code_offset >= code_size))) {
+             ((b.direct_code_offset & 3u) != 0 || b.direct_code_offset >= code_size))) {
             return false;
         }
         const bool has_pending_flags =

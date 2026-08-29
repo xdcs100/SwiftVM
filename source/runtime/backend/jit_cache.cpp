@@ -16,8 +16,9 @@
 
 #include "runtime/backend/address_space.h"
 #include "runtime/backend/arm64/region_link_trampoline.h"
-#include "runtime/common/backedge_control.h"
+#include "runtime/backend/function_entry_contract.h"
 #include "runtime/backend/module.h"
+#include "runtime/common/backedge_control.h"
 #include "runtime/common/hot_coalesce_prof.h"
 #include "runtime/common/logging.h"
 #include "runtime/common/perf_stats.h"
@@ -745,24 +746,41 @@ bool JitDiskCache::ReviveUnit(const std::shared_ptr<Module>& module, const Seria
     // 6. Target publication is deliberately last: a revived site can be found
     // by the cold linker only after every source record and signal patch record
     // for this allocation exists. Linked state is never restored from disk.
+    std::vector<FunctionEntryContract> entry_contracts;
+    entry_contracts.reserve(unit.blocks.size());
     for (const auto& block : unit.blocks) {
-        auto* direct_host_pc = block.direct_code_offset == UINT32_MAX
-                ? nullptr
-                : buffer.exec_data + block.direct_code_offset;
-        auto* pending_flags_host_pc =
-                block.pending_flags_code_offset == UINT32_MAX
-                ? nullptr
-                : buffer.exec_data + block.pending_flags_code_offset;
-        (void)module->PublishLinkTarget(ir::Location{block.guest_start},
-                                        buffer.exec_data + block.code_offset,
-                                        buffer.exec_data,
-                                        direct_host_pc,
-                                        pending_flags_host_pc,
-                                        nullptr,
-                                        nullptr,
-                                        block.pending_flags_contract);
-        address_space.PushCodeCache(ir::Location{block.guest_start},
-                                    buffer.exec_data + block.code_offset);
+        entry_contracts.push_back(FunctionEntryContract::Restore(
+                ir::Location{block.guest_start},
+                ir::Location{block.guest_end},
+                {
+                        .canonical = block.code_offset,
+                        .direct_link = block.direct_code_offset,
+                        .pending_flags = block.pending_flags_code_offset,
+                },
+                block.pending_flags_contract,
+                block.IsLinkable()));
+        if (!entry_contracts.back().IsWellFormed(static_cast<u32>(buffer.size))) {
+            module->DiscardLinkSource(buffer.exec_data);
+            module->Remove(node);
+            module->RemoveFaultEntries(buffer.exec_data);
+            if (unit.is_function) {
+                delete static_cast<ir::Function*>(node);
+            } else {
+                delete static_cast<ir::Block*>(node);
+            }
+            if (auto* cache = module->GetCodeCache(buffer.exec_data)) {
+                cache->FreeCode(buffer.exec_data);
+            }
+            stats.reject_reloc.fetch_add(1, std::memory_order_relaxed);
+            dirty = true;
+            return false;
+        }
+    }
+    FunctionEntryPublisher entry_publisher{
+            *module, buffer.exec_data, static_cast<u32>(buffer.size)};
+    for (size_t i = 0; i < unit.blocks.size(); ++i) {
+        const auto& block = unit.blocks[i];
+        (void)entry_publisher.Publish(entry_contracts[i]);
         if (!module->GetModuleConfig().read_only) {
             address_space.GetSmcTracker().RegisterNode(
                     module, node, block.guest_start, block.guest_end);

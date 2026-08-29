@@ -135,6 +135,10 @@ bool ApplyRelocations(u8* rw_code,
 // offsets of its public and optional direct-link entries inside the unit's
 // host code, and the hash of the guest bytes the translation was produced from.
 struct SerialBlock {
+    enum EntryFlags : u8 {
+        Linkable = 1 << 0,
+    };
+
     u64 guest_start{};
     u64 guest_end{};
     u32 code_offset{};
@@ -142,6 +146,9 @@ struct SerialBlock {
     u32 direct_code_offset{UINT32_MAX};
     u32 pending_flags_code_offset{UINT32_MAX};
     EdgeFlagsTargetContract pending_flags_contract{};
+    u8 entry_flags{Linkable};
+
+    [[nodiscard]] bool IsLinkable() const { return (entry_flags & Linkable) != 0; }
 };
 
 // One direct-link branch site inside the unit. The code byte at
@@ -293,7 +300,7 @@ struct ValidityKey {
     bool operator==(const ValidityKey&) const = default;
 };
 
-constexpr u64 kCacheFormatVersion = 16;
+constexpr u64 kCacheFormatVersion = 17;
 
 u64 HashBytes(const void* data, std::size_t size, u64 seed);
 u64 HashU64(u64 value, u64 seed);
