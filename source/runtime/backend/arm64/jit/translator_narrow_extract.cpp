@@ -127,12 +127,57 @@ JitTranslator::MatchNarrowMaskedInput(ir::Inst* consumer) const {
     };
 }
 
+std::optional<JitTranslator::ShiftMaskedInput>
+JitTranslator::MatchShiftMaskedInput(ir::Inst* consumer) {
+    if (!consumer || consumer->GetOp() != ir::OpCode::And ||
+        !GetPseudoFlags(consumer).Null()) {
+        return std::nullopt;
+    }
+    const auto right = consumer->GetArg<ir::Operand>(1);
+    if (!right.IsImm() || right.GetLeft().imm.Get() != 1) {
+        return std::nullopt;
+    }
+    const auto value = consumer->GetArg<ir::Value>(0);
+    auto* shift = value.Def();
+    if (!shift ||
+        (shift->GetOp() != ir::OpCode::LsrImm &&
+         shift->GetOp() != ir::OpCode::AsrImm) ||
+        !GetPseudoFlags(shift).Null() || shift->GetUses() != 1 ||
+        shift->GetUses(false) != 1 ||
+        ir::GetValueSizeByte(value.Type()) !=
+                ir::GetValueSizeByte(consumer->ReturnType()) ||
+        fused_narrow_extract_shifts.contains(shift) ||
+        scalar_identity_analysis.InputDiscarded(shift)) {
+        return std::nullopt;
+    }
+    const auto source = shift->GetArg<ir::Value>(0);
+    const u32 width = ir::GetValueSizeByte(source.Type()) * 8;
+    const u64 offset = shift->GetArg<ir::Imm>(1).Get();
+    if (!source.Defined() || width != ir::GetValueSizeByte(value.Type()) * 8 ||
+        offset >= width || !context.HasAllocation(source) ||
+        context.IsSpilled(source)) {
+        return std::nullopt;
+    }
+    auto& list = cur_block->GetInstList();
+    auto current = list.iterator_to(*consumer);
+    if (current == list.begin() || std::prev(current).operator->() != shift) {
+        return std::nullopt;
+    }
+    return ShiftMaskedInput{
+            .shift = shift,
+            .source = source,
+            .offset = static_cast<u8>(offset),
+    };
+}
+
 void JitTranslator::PrepareNarrowExtractExtensions(ir::Block* block) {
     narrow_extract_extensions.clear();
     fused_narrow_extracts.clear();
     fused_narrow_extract_shifts.clear();
     narrow_masked_inputs.clear();
     fused_narrow_masked_extracts.clear();
+    shift_masked_inputs.clear();
+    fused_shift_masked_shifts.clear();
     for (auto& inst : block->GetInstList()) {
         auto plan = MatchNarrowExtractExtension(&inst);
         if (!plan) {
@@ -151,6 +196,14 @@ void JitTranslator::PrepareNarrowExtractExtensions(ir::Block* block) {
         }
         narrow_masked_inputs.emplace(&inst, *plan);
         fused_narrow_masked_extracts.emplace(plan->extract, &inst);
+    }
+    for (auto& inst : block->GetInstList()) {
+        auto plan = MatchShiftMaskedInput(&inst);
+        if (!plan) {
+            continue;
+        }
+        shift_masked_inputs.emplace(&inst, *plan);
+        fused_shift_masked_shifts.emplace(plan->shift, &inst);
     }
 }
 

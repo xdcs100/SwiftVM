@@ -495,6 +495,15 @@ void JitTranslator::EmitSbb(ir::Inst* inst) {
 }
 
 void JitTranslator::EmitAnd(ir::Inst* inst) {
+    if (auto masked = shift_masked_inputs.find(inst);
+        masked != shift_masked_inputs.end()) {
+        const auto reproved = MatchShiftMaskedInput(inst);
+        ASSERT_MSG(reproved && *reproved == masked->second,
+                   "shift masked input proof diverged at IR {}", inst->Id());
+        __ Ubfx(context.R(ir::Value{inst}), context.R(reproved->source),
+                reproved->offset, 1);
+        return;
+    }
     if (dead_edge_integer_branch &&
         dead_edge_integer_branch->producer == inst &&
         dead_edge_integer_branch->zero_target) {
@@ -700,6 +709,9 @@ void JitTranslator::EmitNot(ir::Inst* inst) {
 }
 
 void JitTranslator::EmitAsrImm(ir::Inst* inst) {
+    if (fused_shift_masked_shifts.contains(inst)) {
+        return;
+    }
     auto value = inst->GetArg<ir::Value>(0);
     auto asr = inst->GetArg<ir::Imm>(1).Get();
     auto result = context.R(ir::Value{inst});
@@ -714,6 +726,9 @@ void JitTranslator::EmitLslImm(ir::Inst* inst) {
 }
 
 void JitTranslator::EmitLsrImm(ir::Inst* inst) {
+    if (fused_shift_masked_shifts.contains(inst)) {
+        return;
+    }
     if (auto fused = fused_narrow_extract_shifts.find(inst);
         fused != fused_narrow_extract_shifts.end()) {
         const auto plan = narrow_extract_extensions.find(fused->second);

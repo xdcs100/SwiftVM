@@ -3244,6 +3244,17 @@ peepholes.
   pass 206 focused CondSet, region-flags and dead-edge assertions. The one-shot IR dump used to
   identify the terminal shape was deleted; no diagnostic path or environment switch remains.
 
+- Adjacent single-use `LSR/ASR -> AND #1` graphs now emit one `UBFX` from the original source. The
+  matcher is isolated with the other narrow-extract plans and requires matching scalar widths, no
+  pseudo flags, an in-range immediate, a real unspilled source allocation and exact adjacency. The
+  same-input SQLite diff keeps all 2,164 roots with 100% host and entry coverage, moves
+  `268,174 -> 267,957` (`-217`, `-0.080918%`), and shrinks 90 roots with no growth.
+  `pcache1TruncateUnsafe` moves `190 -> 188` versus FEX at 141, while `powerOfTen` moves `202 -> 200`
+  versus FEX at 153. Two final SQLite shapes are byte-identical and their timing-normalized output
+  matches the baseline. Bounded smallpt moves `37,785 -> 37,745` with the same PPM SHA; CoreMark
+  moves `37,759 -> 37,717` and retains `crcfinal=0x382f`. Mac and Orb pass 273 focused shift,
+  narrow-extract and width-chain assertions. No new test, probe or debug switch remains.
+
 ## Orb loop
 
 ```

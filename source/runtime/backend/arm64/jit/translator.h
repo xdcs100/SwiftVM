@@ -230,6 +230,15 @@ private:
     };
     [[nodiscard]] std::optional<NarrowMaskedInput>
     MatchNarrowMaskedInput(ir::Inst* consumer) const;
+    struct ShiftMaskedInput {
+        ir::Inst* shift{};
+        ir::Value source{};
+        u8 offset{};
+
+        bool operator==(const ShiftMaskedInput&) const = default;
+    };
+    [[nodiscard]] std::optional<ShiftMaskedInput>
+    MatchShiftMaskedInput(ir::Inst* consumer);
     void PrepareNarrowExtractExtensions(ir::Block* block);
     void PrepareNarrowFlagsInputs(ir::Block* block);
     [[nodiscard]] std::optional<ir::Value>
@@ -800,6 +809,8 @@ private:
     std::map<ir::Inst*, ir::Inst*> fused_narrow_extract_shifts{};
     std::map<ir::Inst*, NarrowMaskedInput> narrow_masked_inputs{};
     std::map<ir::Inst*, ir::Inst*> fused_narrow_masked_extracts{};
+    std::map<ir::Inst*, ShiftMaskedInput> shift_masked_inputs{};
+    std::map<ir::Inst*, ir::Inst*> fused_shift_masked_shifts{};
     std::unordered_set<ir::Inst*> dead_pinned_gpr_writes{};
     std::map<ir::Inst*, ScalarFPRPublication> scalar_load_fpr_fusions{};
     std::map<ir::Inst*, ScalarFPRPublication> scalar_value_fpr_fusions{};
