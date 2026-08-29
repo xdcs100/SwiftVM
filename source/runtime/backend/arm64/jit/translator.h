@@ -594,12 +594,15 @@ private:
         Canonical,
         Deferred,
         Split,
+        CanonicalTail,
     };
     struct RegionFlagsJoinPlan {
         RegionFlagsJoinMode mode{RegionFlagsJoinMode::Canonical};
+        EdgeFlagsState incoming{};
         ir::Location compatible_target{};
         ir::Location canonical_target{};
         bool compatible_on_true{};
+        bool compatible_fallthrough{};
         bool canonical_fallthrough{};
         bool canonical_merge_token{};
     };
@@ -615,6 +618,9 @@ private:
             const EdgeFlagsState& incoming) const;
     [[nodiscard]] bool RegionSuccessorOverwritesFlagsToken(
             ir::Location target) const;
+    [[nodiscard]] Label* GetRegionFlagsCanonicalStub(
+            const RegionFlagsJoinPlan& plan);
+    void EmitRegionFlagsCanonicalStubs();
     [[nodiscard]] bool EmitRegionIf(const ir::terminal::If& terminal,
                                     bool allow_fallthrough);
     [[nodiscard]] bool BlockIsFlagsTransparent(ir::Block* block) const;
@@ -1119,6 +1125,17 @@ private:
         std::unique_ptr<Label> entry{};
     };
     std::vector<DeferredNZCVMergeStub> deferred_nzcv_merge_stubs{};
+    struct RegionFlagsCanonicalStubKey {
+        u64 target{};
+        u32 mask{};
+        EdgeCarryPolarity polarity{EdgeCarryPolarity::Unknown};
+        u64 version{};
+        bool token{};
+
+        auto operator<=>(const RegionFlagsCanonicalStubKey&) const = default;
+    };
+    std::map<RegionFlagsCanonicalStubKey, std::unique_ptr<Label>>
+            region_flags_canonical_stubs{};
     std::map<UnalignedAtomicFallbackKey, u32> unaligned_atomic_fallback_counts{};
     std::map<UnalignedAtomicFallbackKey, std::unique_ptr<Label>>
             unaligned_atomic_fallbacks{};

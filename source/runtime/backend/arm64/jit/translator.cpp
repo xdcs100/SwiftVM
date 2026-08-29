@@ -1371,6 +1371,7 @@ void JitTranslator::Translate(ir::HIRFunction* function) {
     }
     block_cold_path_plans.clear();
     context.BeginColdScratch();
+    EmitRegionFlagsCanonicalStubs();
     if (cycle_exit_reason) {
         EmitCycleExitReasonTail(cycle_exit_reason.get());
         cycle_exit_reason.reset();

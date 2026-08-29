@@ -44,6 +44,7 @@ void JitTranslator::PrepareRegionEdges(ir::HIRFunction* function) {
     region_blocks.clear();
     region_block_map.clear();
     region_cycle_edges.clear();
+    region_flags_canonical_stubs.clear();
     if (!region_edges_active) {
         return;
     }

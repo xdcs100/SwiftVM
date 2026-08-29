@@ -1,8 +1,11 @@
 #include "translator.h"
 
+#include "runtime/backend/arm64/defines.h"
 #include "runtime/backend/context.h"
 
 namespace swift::runtime::backend::arm64 {
+
+#define __ masm.
 
 bool JitTranslator::RegionSuccessorAcceptsEdgeFlags(
         ir::Location target,
@@ -105,24 +108,53 @@ JitTranslator::RegionFlagsJoinPlan JitTranslator::PlanRegionFlagsJoin(
         return {};
     }
     if (IsRegionCycleEdge(compatible) || IsDirectCycleCutEdge(compatible) ||
-        (allow_fallthrough && CanUseRegionSuccessorLayout(compatible))) {
+        IsRegionCycleEdge(canonical) || IsDirectCycleCutEdge(canonical)) {
         return {};
     }
+    const bool compatible_fallthrough = allow_fallthrough &&
+            CanUseRegionSuccessorLayout(compatible);
     const bool canonical_fallthrough = allow_fallthrough &&
             CanUseRegionSuccessorLayout(canonical) &&
-            !IsRegionCycleEdge(canonical) &&
-            !IsDirectCycleCutEdge(canonical);
-    if (!canonical_fallthrough) {
-        return {};
-    }
+            !compatible_fallthrough;
     return {
-            .mode = RegionFlagsJoinMode::Split,
+            .mode = canonical_fallthrough
+                    ? RegionFlagsJoinMode::Split
+                    : RegionFlagsJoinMode::CanonicalTail,
+            .incoming = incoming,
             .compatible_target = compatible,
             .canonical_target = canonical,
             .compatible_on_true = then_accepts,
+            .compatible_fallthrough = compatible_fallthrough,
             .canonical_fallthrough = canonical_fallthrough,
             .canonical_merge_token = flags_token_valid,
     };
+}
+
+Label* JitTranslator::GetRegionFlagsCanonicalStub(
+        const RegionFlagsJoinPlan& plan) {
+    RegionFlagsCanonicalStubKey key{
+            .target = plan.canonical_target.Value(),
+            .mask = plan.incoming.valid_nzcv_mask,
+            .polarity = plan.incoming.carry_polarity,
+            .version = plan.incoming.packed_flags_version,
+            .token = plan.canonical_merge_token,
+    };
+    auto& entry = region_flags_canonical_stubs[key];
+    if (!entry) {
+        entry = std::make_unique<Label>();
+    }
+    return entry.get();
+}
+
+void JitTranslator::EmitRegionFlagsCanonicalStubs() {
+    for (auto& [key, entry] : region_flags_canonical_stubs) {
+        __ Bind(entry.get());
+        __ Adr(ip1, LocalBranchTarget(ir::Location{key.target}));
+        context.EmitFlagsMergeBranch(
+                key.token ? FlagsMergeTrampolineKind::NZCVToken
+                          : FlagsMergeTrampolineKind::NZCV);
+    }
+    region_flags_canonical_stubs.clear();
 }
 
 bool JitTranslator::EmitRegionFlagsJoin(
@@ -138,6 +170,22 @@ bool JitTranslator::EmitRegionFlagsJoin(
         return false;
     }
 
+    if (plan.mode == RegionFlagsJoinMode::CanonicalTail) {
+        if (plan.canonical_merge_token) {
+            MaterializeFlagsTokenResult();
+        }
+        branch(GetRegionFlagsCanonicalStub(plan),
+               !plan.compatible_on_true);
+        context.RecordExecCounter(exec_offset_exit_direct);
+        context.RecordExecCounter(exec_offset_region_edges);
+        ++region_block_edges;
+        EmitRegionEdge(plan.compatible_target,
+                       plan.compatible_fallthrough,
+                       false,
+                       false);
+        return true;
+    }
+
     branch(LocalBranchTarget(plan.compatible_target),
            plan.compatible_on_true);
     context.RecordExecCounter(exec_offset_exit_direct);
@@ -150,5 +198,7 @@ bool JitTranslator::EmitRegionFlagsJoin(
                    false);
     return true;
 }
+
+#undef __
 
 }  // namespace swift::runtime::backend::arm64

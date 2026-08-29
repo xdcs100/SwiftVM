@@ -433,7 +433,8 @@ struct RegionBranchRun {
 RegionBranchRun RunRegionBranchFunction(bool enabled,
                                         bool observe_before_overwrite = false,
                                         bool helper_after_producer = false,
-                                        u8 initial_selector = 1) {
+                                        u8 initial_selector = 1,
+                                        bool compatible_fallthrough = false) {
     constexpr VAddr source_guest = 0x2100;
     constexpr VAddr hot_guest = 0x2180;
     constexpr VAddr cold_guest = 0x2200;
@@ -485,11 +486,20 @@ RegionBranchRun RunRegionBranchFunction(bool enabled,
     }
     function->AdvancePC(Imm{u64{1}});
     const auto condition = function->LocalCondSet(Cond::EQ).SetType(ValueType::U8);
-    auto [hot, cold] = builder.If(terminal::If{
-            condition,
-            terminal::LinkBlock{Location{cold_guest}},
-            terminal::LinkBlock{Location{hot_guest}},
-    });
+    const auto branch_terminal = compatible_fallthrough
+            ? terminal::If{
+                      condition,
+                      terminal::LinkBlock{Location{hot_guest}},
+                      terminal::LinkBlock{Location{cold_guest}},
+              }
+            : terminal::If{
+                      condition,
+                      terminal::LinkBlock{Location{cold_guest}},
+                      terminal::LinkBlock{Location{hot_guest}},
+              };
+    auto [else_block, then_block] = builder.If(branch_terminal);
+    auto* hot = compatible_fallthrough ? then_block : else_block;
+    auto* cold = compatible_fallthrough ? else_block : then_block;
     REQUIRE(hot != nullptr);
     REQUIRE(cold != nullptr);
 
@@ -2232,6 +2242,15 @@ TEST_CASE("region branch flags materialize only on the observing exit",
     REQUIRE(hot_on.selector == hot_off.selector);
     REQUIRE(hot_on.observed_flags == hot_off.observed_flags);
     REQUIRE(hot_on.branch_precedes_merge);
+
+    const auto tail_off = RunRegionBranchFunction(false, false, false, 1, true);
+    const auto tail_on = RunRegionBranchFunction(true, false, false, 1, true);
+    REQUIRE(tail_off.halt == HaltReason::CallHost);
+    REQUIRE(tail_on.halt == HaltReason::CallHost);
+    REQUIRE(tail_on.selector == tail_off.selector);
+    REQUIRE(tail_on.observed_flags == tail_off.observed_flags);
+    REQUIRE(tail_on.branch_precedes_merge);
+    REQUIRE(tail_on.code_size == hot_on.code_size);
 
     // Host calls after the final producer are committed-state boundaries.
     // They reject the plan just like a faulting memory operation.
