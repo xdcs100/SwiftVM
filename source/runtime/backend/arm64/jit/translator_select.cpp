@@ -87,16 +87,16 @@ void JitTranslator::EmitSelect(ir::Inst* inst) {
     auto true_value = inst->GetArg<ir::Value>(1);
     auto false_value = inst->GetArg<ir::Value>(2);
     auto result = context.R(ir::Value{inst});
+    auto resolve = [&](ir::Value value) {
+        return ResolvePinnedGPRUse(value, inst).value_or(context.R(value));
+    };
     if (auto direct = direct_cond_selects.find(inst); direct != direct_cond_selects.end()) {
         const bool identity = normalized_bool_selects.contains(inst);
         auto emit_direct = [&] {
             if (identity) {
                 __ Cset(result.W(), MapCond(direct->second));
             } else {
-                __ Csel(result,
-                        context.R(true_value),
-                        context.R(false_value),
-                        MapCond(direct->second));
+                __ Csel(result, resolve(true_value), resolve(false_value), MapCond(direct->second));
             }
         };
         if (save_in_nzcv && nzcv_dirty) {
@@ -120,12 +120,12 @@ void JitTranslator::EmitSelect(ir::Inst* inst) {
         return;
     }
     if (local) {
-        __ Csel(result, context.R(true_value), context.R(false_value), *local);
+        __ Csel(result, resolve(true_value), resolve(false_value), *local);
         return;
     }
     MergeNZCV();
     __ Cmp(context.W(cond), 0);
-    __ Csel(result, context.R(true_value), context.R(false_value), ne);
+    __ Csel(result, resolve(true_value), resolve(false_value), ne);
 }
 
 void JitTranslator::EmitSelectZero(ir::Inst* inst) {

@@ -3304,6 +3304,22 @@ peepholes.
   stress run was added. The next consumer is pinned-GPR `KnownZeroAbove(16/32)` for the remaining
   compare/select width bridges in the same root.
 
+- Narrow values published to pinned GPR homes now retain their proven zero-above width at exact
+  post-publication consumers. The existing ARM64 planner enumerates every use of the narrow
+  extension and records fixed-home mappings only for audited same-width U32 ALU/Select pairs;
+  unrecognized uses or a target-home overwrite reject the whole plan. `EmitSelect` consults that
+  exact definition/consumer mapping and otherwise keeps the allocated register. In
+  `sqlite3DefaultRowEst`, `ldrh w10; mov w13, w10; mov w22, w13` becomes `ldrh w22`, and the later
+  shift plus `csel` read w22 directly. The exact SQLite set retains all 2,242 roots with 100%
+  coverage and no growth, moving `264,568 -> 264,255` (`-313`, `-0.118306%`); 175 roots shrink and
+  the target moves `167 -> 164` versus FEX at 120. Timing-normalized output is byte-identical.
+  Bounded smallpt retains PPM SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`; its shared roots only
+  shrink. CoreMark 20k retains `crcfinal=0x382f`, with all 299 baseline roots covered and only
+  shrinkage. Mac/Orb pinned tests pass 97 assertions across 25 cases, including direct Select
+  consumption and invalidation by a target-home overwrite. No environment switch, diagnostic
+  path, fallback, probe or stress run remains.
+
 ## Orb loop
 
 ```

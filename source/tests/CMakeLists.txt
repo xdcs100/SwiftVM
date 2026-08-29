@@ -17,6 +17,7 @@ add_executable(swift_test
         narrow_memory_extension_test.cpp
         pinned_gpr_read_test.cpp
         pinned_gpr_transfer_test.cpp
+        pinned_gpr_width_fact_test.cpp
         pinned_load_update_test.cpp
         pinned_spill_publication_test.cpp
         register_alloc_copy_test.cpp

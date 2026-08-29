@@ -201,7 +201,7 @@ private:
         ir::Inst* extend{};
         bool signed_load{};
         std::vector<ir::Inst*> aliases{};
-        std::vector<ir::Inst*> transferred_uses{};
+        std::vector<std::pair<ir::Inst*, ir::Inst*>> transferred_uses{};
         std::optional<u16> source{};
         u16 target{};
         u8 width{};

@@ -459,3 +459,34 @@ load 直接读取 x23。短门禁结果：
 该阶段没有新增环境开关、诊断路径或运行时兜底。下一步继续在同一 root 中加入
 `KnownZeroAbove(16/32)`，让 compare/select consumer 消费宽度事实；不把 full-width transfer
 直接扩大成无法说明观察关系的通用 alias 规则。
+
+### 16.4 pinned GPR 窄值宽度事实消费
+
+窄 load 发布到 pinned GPR 后，原 planner 只允许扩展节点和少数低位 alias 使用该 fixed home。
+优化器把低 32 位 alias 消去、让 `Select` 直接消费 `ZeroExtend32` 时，planner 会因 producer 多 use
+拒绝整条发布链，后端随后为同一个已知高位为零的值保留普通临时寄存器并产生多次 move。
+
+本阶段没有增加全局宽度格或新的 IR。pinned GPR planner 现在枚举窄扩展 producer 的完整 use set，
+只为 publication 之后、精确同宽的 U32 ALU/Select consumer 建立 `(definition, consumer)` 固定 home
+映射；低位 `BitExtract` 仍按原有单 use 规则证明。目标 home 在最后一个 consumer 前被覆盖，或 use
+集合出现未审核的 consumer 时，整条计划拒绝。`Select` emitter 只在该精确映射存在时读取 pinned W
+view，其余路径继续使用寄存器分配结果。
+
+`sqlite3DefaultRowEst@0x40d240` 中的窄 load 从
+`ldrh w10; mov w13, w10; mov w22, w13` 收敛为 `ldrh w22`；后续 shift 和 `csel` 直接读取 w22，
+该 root `167 -> 164`，相对 FEX 120 条的残差降到 44 条。短门禁结果：
+
+- SQLite 精确公共集合保持 2,242 roots / 100% host 与 entry coverage，`264,568 -> 264,255`
+  （`-313` / `-0.118306%`）；175 个 root 缩短，0 个增长。时间归一化输出逐字节一致，SHA-256 为
+  `610f791a79bff6436ec37a0b7863aa9a18d26785233630ed942a2d94ab938a93`。
+- smallpt `4 8 6` 保持 PPM SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`；250 个共同 root 中 3 个
+  共减少 4 条，无增长。
+- CoreMark 显式 20k 保持 `crcfinal=0x382f`；299 个基线 root 全部覆盖，8 个共同 root 共减少 13 条，
+  无增长。
+- Mac/Orb 的 pinned 相关 25 个用例、97 条断言通过；新增边界只验证 Select 直接消费和目标 home
+  覆盖失效。
+
+该阶段没有新增环境开关、诊断日志、临时 probe 或运行时兜底。下一批继续从剩余加权 root 中选择
+能共享同一状态事实的 compare/flags consumer，或转向 continuation hot/cold contract；不把
+consumer allowlist 扩成通用寄存器别名系统。

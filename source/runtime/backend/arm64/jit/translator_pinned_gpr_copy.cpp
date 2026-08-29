@@ -4,13 +4,10 @@ namespace swift::runtime::backend::arm64 {
 
 namespace {
 
-bool IsPinnedGPR(u32 index) {
-    return index <= 9 || (index >= 19 && index <= 23) || index == 29;
-}
+bool IsPinnedGPR(u32 index) { return index <= 9 || (index >= 19 && index <= 23) || index == 29; }
 
 bool IsMemoryAddressUse(ir::Inst& inst, ir::Inst* definition) {
-    if (inst.GetOp() != ir::OpCode::LoadMemory &&
-        inst.GetOp() != ir::OpCode::StoreMemory) {
+    if (inst.GetOp() != ir::OpCode::LoadMemory && inst.GetOp() != ir::OpCode::StoreMemory) {
         return false;
     }
     const auto address = inst.GetArg<ir::Operand>(0);
@@ -20,18 +17,14 @@ bool IsMemoryAddressUse(ir::Inst& inst, ir::Inst* definition) {
            (right.IsValue() && right.value.Def() == definition);
 }
 
-bool IsLowAluAlias(ir::Block* block,
-                   ir::Inst* alias,
-                   ir::Inst* definition) {
+bool IsLowAluAlias(ir::Block* block, ir::Inst* alias, ir::Inst* definition) {
     if (alias->GetOp() != ir::OpCode::BitExtract ||
-        alias->GetArg<ir::Value>(0).Def() != definition ||
-        alias->GetArg<ir::Imm>(1).Get() != 0) {
+        alias->GetArg<ir::Value>(0).Def() != definition || alias->GetArg<ir::Imm>(1).Get() != 0) {
         return false;
     }
     const u32 width = ir::GetValueSizeByte(alias->ReturnType());
     if (alias->GetArg<ir::Imm>(2).Get() != width * 8 ||
-        (width != sizeof(u8) && width != sizeof(u16) &&
-         width != sizeof(u32)) ||
+        (width != sizeof(u8) && width != sizeof(u16) && width != sizeof(u32)) ||
         alias->GetUses() != 1) {
         return false;
     }
@@ -43,30 +36,27 @@ bool IsLowAluAlias(ir::Block* block,
         if (!uses) {
             continue;
         }
-        const bool low_alu = uses == 1 &&
-                (consumer.GetOp() == ir::OpCode::Add ||
-                 consumer.GetOp() == ir::OpCode::Sub) &&
+        const bool low_alu =
+                uses == 1 &&
+                (consumer.GetOp() == ir::OpCode::Add || consumer.GetOp() == ir::OpCode::Sub) &&
                 ir::GetValueSizeByte(consumer.ReturnType()) == width;
-        const bool logical_zero_test = uses == 1 &&
-                consumer.GetOp() == ir::OpCode::Or &&
-                ir::GetValueSizeByte(consumer.ReturnType()) == width &&
-                consumer.GetUses() == 0 &&
+        const bool logical_zero_test =
+                uses == 1 && consumer.GetOp() == ir::OpCode::Or &&
+                ir::GetValueSizeByte(consumer.ReturnType()) == width && consumer.GetUses() == 0 &&
                 consumer.GetArg<ir::Operand>(1).IsImm() &&
                 consumer.GetArg<ir::Operand>(1).GetLeft().imm.Get() == 0 &&
-                (!consumer.GetPseudoOperations(ir::OpCode::BranchOnlyFlags)
-                          .empty() ||
+                (!consumer.GetPseudoOperations(ir::OpCode::BranchOnlyFlags).empty() ||
                  !consumer.GetPseudoOperations(ir::OpCode::SaveFlags).empty());
-        return low_alu || logical_zero_test;
+        const bool select_value = uses == 1 && consumer.GetOp() == ir::OpCode::Select &&
+                                  ir::GetValueSizeByte(consumer.ReturnType()) == width;
+        return low_alu || logical_zero_test || select_value;
     }
     return false;
 }
 
-bool IsReusablePinnedLowAlias(ir::Block* block,
-                              ir::Inst* alias,
-                              ir::Inst* definition) {
+bool IsReusablePinnedLowAlias(ir::Block* block, ir::Inst* alias, ir::Inst* definition) {
     if (alias->GetOp() != ir::OpCode::BitExtract ||
-        alias->GetArg<ir::Value>(0).Def() != definition ||
-        alias->GetArg<ir::Imm>(1).Get() != 0 ||
+        alias->GetArg<ir::Value>(0).Def() != definition || alias->GetArg<ir::Imm>(1).Get() != 0 ||
         alias->GetArg<ir::Imm>(2).Get() != 32 ||
         ir::GetValueSizeByte(alias->ReturnType()) != sizeof(u32)) {
         return false;
@@ -82,13 +72,11 @@ bool IsReusablePinnedLowAlias(ir::Block* block,
             continue;
         }
         uses += consumer_uses;
-        const bool sign_extend = consumer_uses == 1 &&
-                consumer.GetOp() == ir::OpCode::SignExtend &&
-                consumer.GetArg<ir::Value>(0).Def() == alias;
-        const bool mul_left = consumer_uses == 1 &&
-                consumer.GetOp() == ir::OpCode::Mul &&
-                consumer.GetArg<ir::Value>(0).Def() == alias &&
-                ir::GetValueSizeByte(consumer.ReturnType()) == sizeof(u32);
+        const bool sign_extend = consumer_uses == 1 && consumer.GetOp() == ir::OpCode::SignExtend &&
+                                 consumer.GetArg<ir::Value>(0).Def() == alias;
+        const bool mul_left = consumer_uses == 1 && consumer.GetOp() == ir::OpCode::Mul &&
+                              consumer.GetArg<ir::Value>(0).Def() == alias &&
+                              ir::GetValueSizeByte(consumer.ReturnType()) == sizeof(u32);
         if (!sign_extend && !mul_left) {
             return false;
         }
@@ -97,10 +85,8 @@ bool IsReusablePinnedLowAlias(ir::Block* block,
 }
 
 bool IsU32AluUse(ir::Inst& consumer, ir::Inst* definition) {
-    if (consumer.GetOp() != ir::OpCode::Add &&
-        consumer.GetOp() != ir::OpCode::Sub &&
-        consumer.GetOp() != ir::OpCode::And &&
-        consumer.GetOp() != ir::OpCode::Or &&
+    if (consumer.GetOp() != ir::OpCode::Add && consumer.GetOp() != ir::OpCode::Sub &&
+        consumer.GetOp() != ir::OpCode::And && consumer.GetOp() != ir::OpCode::Or &&
         consumer.GetOp() != ir::OpCode::Xor) {
         return false;
     }
@@ -108,13 +94,20 @@ bool IsU32AluUse(ir::Inst& consumer, ir::Inst* definition) {
     for (auto value : consumer.GetValues()) {
         uses += value.Def() == definition;
     }
-    return uses == 1 &&
-           ir::GetValueSizeByte(consumer.ReturnType()) == sizeof(u32);
+    return uses == 1 && ir::GetValueSizeByte(consumer.ReturnType()) == sizeof(u32);
+}
+
+bool IsU32SelectUse(ir::Inst& consumer, ir::Inst* definition) {
+    if (consumer.GetOp() != ir::OpCode::Select ||
+        ir::GetValueSizeByte(consumer.ReturnType()) != sizeof(u32)) {
+        return false;
+    }
+    return std::ranges::count_if(consumer.GetValues(),
+                                 [&](ir::Value value) { return value.Def() == definition; }) == 1;
 }
 
 bool IsPinnedU64AliasUse(ir::Block* block, ir::Inst& consumer) {
-    if (consumer.GetOp() != ir::OpCode::Add &&
-        consumer.GetOp() != ir::OpCode::GetOperand) {
+    if (consumer.GetOp() != ir::OpCode::Add && consumer.GetOp() != ir::OpCode::GetOperand) {
         return false;
     }
     if (ir::GetValueSizeByte(consumer.ReturnType()) != sizeof(u64)) {
@@ -157,10 +150,9 @@ bool IsHelperClobber(ir::OpCode op) {
 
 }  // namespace
 
-std::optional<JitTranslator::PinnedGPRCopy>
-JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
-    if (!inst || inst->GetOp() != ir::OpCode::SetHostGPR ||
-        inst->GetArg<ir::Imm>(2).Get() != 0 ||
+std::optional<JitTranslator::PinnedGPRCopy> JitTranslator::MatchPinnedGPRCopy(
+        ir::Inst* inst) const {
+    if (!inst || inst->GetOp() != ir::OpCode::SetHostGPR || inst->GetArg<ir::Imm>(2).Get() != 0 ||
         dead_pinned_gpr_writes.contains(inst)) {
         return std::nullopt;
     }
@@ -168,8 +160,7 @@ JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
     const u32 target = inst->GetArg<ir::Imm>(1).Get();
     auto published = inst->GetArg<ir::Value>(0);
     auto* extend = published.Def();
-    if (!IsPinnedGPR(target) || !extend ||
-        extend->GetOp() != ir::OpCode::ZeroExtend32To64 ||
+    if (!IsPinnedGPR(target) || !extend || extend->GetOp() != ir::OpCode::ZeroExtend32To64 ||
         ir::GetValueSizeByte(published.Type()) != sizeof(u64)) {
         return std::nullopt;
     }
@@ -177,12 +168,10 @@ JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
     auto source = extend->GetArg<ir::Value>(0);
     ir::Inst* narrow_extend{};
     bool signed_load = false;
-    if (source.Def() &&
-        (source.Def()->GetOp() == ir::OpCode::ZeroExtend32 ||
-         source.Def()->GetOp() == ir::OpCode::SignExtend)) {
+    if (source.Def() && (source.Def()->GetOp() == ir::OpCode::ZeroExtend32 ||
+                         source.Def()->GetOp() == ir::OpCode::SignExtend)) {
         narrow_extend = source.Def();
-        if (narrow_extend->GetUses() != 1 ||
-            ir::GetValueSizeByte(source.Type()) != sizeof(u32)) {
+        if (ir::GetValueSizeByte(source.Type()) > sizeof(u32)) {
             return std::nullopt;
         }
         source = narrow_extend->GetArg<ir::Value>(0);
@@ -193,23 +182,19 @@ JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
     }
     auto* read = source.Def();
     const u32 source_width = ir::GetValueSizeByte(source.Type());
-    if (!read ||
-        (source_width != sizeof(u8) && source_width != sizeof(u16) &&
-         source_width != sizeof(u32))) {
+    if (!read || (source_width != sizeof(u8) && source_width != sizeof(u16) &&
+                  source_width != sizeof(u32))) {
         return std::nullopt;
     }
     const bool load_source = read->GetOp() == ir::OpCode::LoadMemory;
-    const bool add_source = read->GetOp() == ir::OpCode::Add &&
-            source_width == sizeof(u32) && context.IsSpilled(source) &&
-            read->GetPseudoOperations().empty();
+    const bool add_source = read->GetOp() == ir::OpCode::Add && source_width == sizeof(u32) &&
+                            context.IsSpilled(source) && read->GetPseudoOperations().empty();
     std::optional<u16> source_index;
-    if (!load_source &&
-        (signed_load || context.IsHostWriteCoalesced(inst->Id()))) {
+    if (!load_source && (signed_load || context.IsHostWriteCoalesced(inst->Id()))) {
         return std::nullopt;
     }
     if (!load_source && !add_source) {
-        if (read->GetOp() != ir::OpCode::GetHostGPR ||
-            read->GetArg<ir::Imm>(1).Get() != 0 ||
+        if (read->GetOp() != ir::OpCode::GetHostGPR || read->GetArg<ir::Imm>(1).Get() != 0 ||
             context.IsHostReadCoalesced(read->Id())) {
             return std::nullopt;
         }
@@ -221,8 +206,40 @@ JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
     }
 
     std::vector<ir::Inst*> aliases;
-    std::vector<ir::Inst*> transferred_uses;
+    std::vector<std::pair<ir::Inst*, ir::Inst*>> transferred_uses;
     u32 producer_last_use = inst->Id();
+    if (narrow_extend) {
+        bool saw_extend = false;
+        u32 narrow_uses = 0;
+        for (auto& scan : cur_block->GetInstList()) {
+            for (auto used : scan.GetValues()) {
+                if (used.Def() != narrow_extend) {
+                    continue;
+                }
+                ++narrow_uses;
+                if (&scan == extend) {
+                    saw_extend = true;
+                    continue;
+                }
+                if (scan.Id() > inst->Id() &&
+                    (IsU32AluUse(scan, narrow_extend) || IsU32SelectUse(scan, narrow_extend))) {
+                    transferred_uses.emplace_back(narrow_extend, &scan);
+                    producer_last_use = std::max<u32>(producer_last_use, scan.Id());
+                    continue;
+                }
+                const bool reusable_alias =
+                        IsLowAluAlias(cur_block, &scan, narrow_extend) ||
+                        (signed_load && IsReusablePinnedLowAlias(cur_block, &scan, narrow_extend));
+                if (!reusable_alias || scan.Id() <= inst->Id()) {
+                    return std::nullopt;
+                }
+                aliases.push_back(&scan);
+            }
+        }
+        if (!saw_extend || narrow_uses != narrow_extend->GetUses(false)) {
+            return std::nullopt;
+        }
+    }
     if (add_source) {
         bool saw_extend = false;
         u32 source_uses = 0;
@@ -237,12 +254,10 @@ JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
                     continue;
                 }
                 if (scan.Id() > inst->Id() && IsU32AluUse(scan, read)) {
-                    producer_last_use = std::max<u32>(producer_last_use,
-                                                      scan.Id());
+                    producer_last_use = std::max<u32>(producer_last_use, scan.Id());
                     continue;
                 }
-                if (!IsLowAluAlias(cur_block, &scan, read) ||
-                    scan.Id() <= inst->Id()) {
+                if (!IsLowAluAlias(cur_block, &scan, read) || scan.Id() <= inst->Id()) {
                     return std::nullopt;
                 }
                 aliases.push_back(&scan);
@@ -270,7 +285,7 @@ JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
                 if (scan.Id() <= inst->Id() || !IsU32AluUse(scan, read)) {
                     return std::nullopt;
                 }
-                transferred_uses.push_back(&scan);
+                transferred_uses.emplace_back(read, &scan);
                 producer_last_use = std::max<u32>(producer_last_use, scan.Id());
             }
         }
@@ -287,17 +302,15 @@ JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
                 continue;
             }
             ++published_uses;
-            if (&scan == inst &&
-                scan.GetArg<ir::Value>(0).Def() == extend) {
+            if (&scan == inst && scan.GetArg<ir::Value>(0).Def() == extend) {
                 saw_publication = true;
                 continue;
             }
             const bool bitcast = scan.GetOp() == ir::OpCode::BitCast &&
-                    scan.GetArg<ir::Value>(0).Def() == extend;
+                                 scan.GetArg<ir::Value>(0).Def() == extend;
             const bool low32_alias =
                     IsLowAluAlias(cur_block, &scan, extend) ||
-                    (signed_load &&
-                     IsReusablePinnedLowAlias(cur_block, &scan, extend));
+                    (signed_load && IsReusablePinnedLowAlias(cur_block, &scan, extend));
             if ((!bitcast && !low32_alias) || scan.Id() <= inst->Id()) {
                 return std::nullopt;
             }
@@ -343,13 +356,11 @@ JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
             (MayFaultOrObserve(scan.GetOp()) ||
              (scan.GetOp() == ir::OpCode::SetHostGPR &&
               (scan.GetArg<ir::Imm>(1).Get() == target ||
-               (source_index &&
-                scan.GetArg<ir::Imm>(1).Get() == *source_index))))) {
+               (source_index && scan.GetArg<ir::Imm>(1).Get() == *source_index))))) {
             return std::nullopt;
         }
         if (inst->Id() < scan.Id() && scan.Id() < last_use &&
-            ((scan.GetOp() == ir::OpCode::SetHostGPR &&
-              scan.GetArg<ir::Imm>(1).Get() == target) ||
+            ((scan.GetOp() == ir::OpCode::SetHostGPR && scan.GetArg<ir::Imm>(1).Get() == target) ||
              (target <= 9 && IsHelperClobber(scan.GetOp())))) {
             return std::nullopt;
         }
@@ -368,8 +379,7 @@ JitTranslator::MatchPinnedGPRCopy(ir::Inst* inst) const {
     };
 }
 
-std::optional<XRegister>
-JitTranslator::ResolvePinnedGPRValue(ir::Value value) const {
+std::optional<XRegister> JitTranslator::ResolvePinnedGPRValue(ir::Value value) const {
     if (!value.Def()) {
         return std::nullopt;
     }
@@ -380,9 +390,8 @@ JitTranslator::ResolvePinnedGPRValue(ir::Value value) const {
     return XRegister(pinned->second);
 }
 
-std::optional<WRegister>
-JitTranslator::ResolvePinnedGPRWUse(ir::Value value,
-                                    const ir::Inst* consumer) const {
+std::optional<WRegister> JitTranslator::ResolvePinnedGPRWUse(ir::Value value,
+                                                             const ir::Inst* consumer) const {
     if (!value.Def() || !consumer) {
         return std::nullopt;
     }
@@ -392,13 +401,12 @@ JitTranslator::ResolvePinnedGPRWUse(ir::Value value,
     }
     const auto pinned = fused_pin_gpr_reads.find(value.Def());
     return pinned == fused_pin_gpr_reads.end()
-            ? std::nullopt
-            : std::optional<WRegister>{WRegister(pinned->second)};
+                   ? std::nullopt
+                   : std::optional<WRegister>{WRegister(pinned->second)};
 }
 
-std::optional<Register>
-JitTranslator::ResolvePinnedGPRUse(ir::Value value,
-                                   const ir::Inst* consumer) const {
+std::optional<Register> JitTranslator::ResolvePinnedGPRUse(ir::Value value,
+                                                           const ir::Inst* consumer) const {
     if (const auto pinned = ResolvePinnedGPRValue(value)) {
         return Register{*pinned};
     }
@@ -443,9 +451,8 @@ void JitTranslator::PreparePinnedGPRCopies(ir::Block* block) {
                 pinned_gpr_values.emplace(alias, plan->target);
             }
         }
-        for (auto* consumer : plan->transferred_uses) {
-            pinned_gpr_use_homes.emplace(
-                    std::make_pair(plan->read, consumer), plan->target);
+        for (auto [value, consumer] : plan->transferred_uses) {
+            pinned_gpr_use_homes.emplace(std::make_pair(value, consumer), plan->target);
         }
         pinned_gpr_copies.emplace(&inst, *plan);
     }
