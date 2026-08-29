@@ -11,6 +11,7 @@
 #include <vector>
 #include "base/common_funcs.h"
 #include "jit_context.h"
+#include "raw_carry_branch_analysis.h"
 #include "resident_scalar_fpr_analysis.h"
 #include "scalar_fpr_liveness.h"
 #include "scalar_identity_analysis.h"
@@ -805,12 +806,14 @@ private:
     std::optional<DeadNarrowImmediateBranchPlan>
             dead_narrow_immediate_branch{};
     ResidentScalarFPRAnalysis resident_scalar_fpr_analysis{};
+    RawCarryBranchAnalysis raw_carry_branch_analysis{};
     ScalarFPRLiveness scalar_fpr_liveness{};
     ScalarIdentityAnalysis scalar_identity_analysis{};
     ir::Flags flags_set{};
     ir::Flags flags_clear{};
     bool save_in_nzcv{true};
     bool nzcv_dirty{false};
+    ir::Inst* raw_carry_pending{};
     bool flags_token_valid{false};
     u32 flags_token_result_code{};
     // Terminals may emit several successors. Keep the compile-time token

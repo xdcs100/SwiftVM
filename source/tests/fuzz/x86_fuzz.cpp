@@ -1627,6 +1627,35 @@ TEST_CASE("Fuzz x86 setcc cmov jcc") {
     REQUIRE(env.failures == 0);
 }
 
+TEST_CASE("x86 JA JBE carry-zero branch semantics") {
+    constexpr std::array<std::pair<u64, u64>, 4> values{{
+            {5, 3},
+            {3, 5},
+            {7, 7},
+            {0, UINT64_MAX},
+    }};
+    FuzzEnv env;
+    for (const auto [left, right] : values) {
+        for (const u8 condition : {u8{6}, u8{7}}) {
+            CodeBuf b;
+            env.InitRegs();
+            env.ctx->rax.qword = left;
+            env.ctx->rbx.qword = right;
+            EmitMovRegImm(b, 64, kR10, 0x1111111111111111ull);
+            b.B(0x48);
+            b.B(0x39);
+            b.B(0xD8);
+            CodeBuf tail;
+            EmitMovRegImm(tail, 64, kR10, 0x2222222222222222ull);
+            EmitJccRel8(b, condition, static_cast<s8>(tail.c.size()));
+            b.c.insert(b.c.end(), tail.c.begin(), tail.c.end());
+            env.RunIteration(b.c, FlagMask{0, false},
+                             condition == 6 ? "jbe" : "ja");
+        }
+    }
+    REQUIRE(env.failures == 0);
+}
+
 TEST_CASE("Fuzz x86 push pop") {
     FuzzEnv env;
     int iters = env.Iters(3000);

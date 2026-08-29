@@ -3150,6 +3150,24 @@ peepholes.
   pinned-GPR cases. SQLite's timing-normalized output is byte-identical. No stress run, probe,
   diagnostic path or environment switch remains.
 
+- `RawCarryBranchAnalysis` now proves exact same-block unsigned compare branches whose
+  `SaveFlags(Sub/Sbb) -> InvertCarry -> AdvancePC -> TestFlags(Carry)` chain feeds only JA/JBE.
+  The translator keeps the raw ARM subtraction carry in PSTATE for the terminal `HI`/`LS`
+  condition, merges it into the architectural flags word and flips only the committed carry bit.
+  This removes one `CFINV` from every matched chain without changing the continuation or flags ABI.
+  Exact SQLite keeps all 2,167 roots and moves `272,251 -> 272,049` (`-202`, `-0.074196%`) with
+  145 shrinking roots and no growth; repeated candidate captures are identical. Bounded smallpt
+  keeps all 263 roots, moves `38,336 -> 38,268` (`-68`, `-0.177379%`) with 39 shrinking roots and
+  no growth, and retains PPM SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. The shortened CoreMark
+  screen moves `38,292 -> 38,224` (`-68`, `-0.177583%`) with 39 shrinking roots, no growth and
+  `crcfinal=0x382f`. Mac and Orb pass the directed JA/JBE semantics, branch-only flags,
+  flags-liveness and extracted 72-block glibc focuses. An attempted hot-block trace scheduler was
+  fully removed after the extracted glibc function failed: the current emitter places per-block
+  cold stubs immediately after hot terminals, so arbitrary hot-block reordering cannot preserve
+  fallthrough until hot and cold emission are separated. No stress run, probe, diagnostic path or
+  environment switch remains.
+
 ## Orb loop
 
 ```

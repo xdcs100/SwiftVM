@@ -1101,6 +1101,13 @@ void JitTranslator::EmitInvertCarry(ir::Inst* inst) {
     // CFINV operates on host NZCV.  A known in-unit producer leaves its C
     // there; otherwise restore the committed ABI word first.  Mark only C as
     // pending so the eventual merge cannot overwrite unrelated guest bits.
+    if (CanonicalCarryEnabled() &&
+        raw_carry_branch_analysis.SuppressesInvert(inst)) {
+        ASSERT(save_in_nzcv && nzcv_dirty);
+        ASSERT(!raw_carry_pending);
+        raw_carry_pending = inst;
+        return;
+    }
     if (!(save_in_nzcv && nzcv_dirty)) {
         LoadNZCVFromFlags();
     }
@@ -1451,6 +1458,18 @@ bool JitTranslator::FoldCcFromCarryTest(ir::Inst* test_flags) {
                              zcond == ir::Cond::EQ;
     if (!above && !below_equal) {
         return false;
+    }
+    if (const auto raw_condition =
+                raw_carry_branch_analysis.ConditionForTest(test_flags)) {
+        ASSERT_MSG(raw_carry_pending ==
+                           raw_carry_branch_analysis.InvertForTest(test_flags),
+                   "raw carry branch state diverged at IR {}", test_flags->Id());
+        ASSERT_MSG(RecordLocalCondition(combine, *raw_condition),
+                   "raw carry branch consumer diverged at IR {}", test_flags->Id());
+        MergeNZCV();
+        __ Eor(flags, flags, static_cast<u64>(HostFlags::C));
+        raw_carry_pending = nullptr;
+        return true;
     }
     if (CanonicalCarryEnabled()) {
         if (!RecordLocalCondition(combine,

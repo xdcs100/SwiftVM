@@ -777,6 +777,8 @@ JitTranslator::PrepareBlockState(ir::Block* block) {
     }
     scalar_fpr_liveness.Analyze(block);
     scalar_identity_analysis.Analyze(block);
+    raw_carry_branch_analysis.Analyze(block);
+    raw_carry_pending = nullptr;
     PrepareNarrowExtractExtensions(block);
     PrepareScalarFPRPublications(block);
     backedge_flags_plan = dead_edge_integer_branch
@@ -1104,6 +1106,7 @@ void JitTranslator::TranslateBlockInstructions(
             audit_guest_pc += inst.GetArg<ir::Imm>(0).Get();
         }
     }
+    ASSERT(!raw_carry_pending);
     terminal_body_inst = nullptr;
 }
 
