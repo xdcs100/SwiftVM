@@ -289,6 +289,10 @@ continuation 不是空白机制。现有实现已有：
 
 backend 根据 contract 只发布真正被 helper 观察或破坏的状态。未知 helper 继续使用规范保守 ABI，这是必要的正确性边界，不建立第二套可选运行时机制。
 
+截至 `4bf7117`，GPR/FPR clobber、pinned-state、FPCR、preserve-all 与 uniform effect 已统一进入
+ARM64 `HelperCallContract`；fault、callback/reentry 和 host-NZCV observer 仍保持保守，尚未开放精确
+consumer。
+
 ### 9.2 选择规则
 
 - 只从加权 opcode ledger 证明 helper snapshot/call tax 占主导的 root 开始。
@@ -741,3 +745,30 @@ call miss 发布 external frame，key mismatch 明确清空不可信 RSB，exter
 PageFatal；单变量撤回后完整短跑恢复。该路径没有保留：terminal-only entry 必须先有 RA/live-in
 canonicalization 证明，不能依赖测试中的空 `ReturnToHost` 形态。阶段末没有 probe、调试 env、日志、
 临时源路径、兼容兜底或长基准。
+
+### 16.13 helper call state contract
+
+提交 `4bf7117` 把 `EmitHostCall` 和四个 pinned GPR planner 中分散的 helper ABI 判定收敛到独立
+`HelperCallContract`。contract 从 direct/indirect `Lambda`、`HelperABI`、`HostFpEffect`、
+`HostRegisterEffect`、`UniformEffectId` 和编译器实际支持解析出 GPR/FPR clobber、argument snapshot、
+preserve-all leaf、FPCR transparency、general-register-only 与 pinned-state preservation。CallLocation、
+CallDynamic、X87 和专用 SSE4.2 helper 继续得到 opaque contract。
+
+`EmitHostCall` 的 snapshot 选择和参数 reload 现在消费同一 contract，替换原来三组重复布尔条件。首个
+跨指令 consumer 只允许有汇编保存证明的 `PreservesPinnedState` helper 保留 x3-x9 pinned value
+version；x0-x2、x11、x16/x17、未知或间接 helper 仍判定为 clobber。resident string wrapper 明确保存
+x3-x15、q16-q31 和 x30，因此该权限不是基于 helper 地址白名单猜测。
+
+门禁结果：
+
+- contract、pinned consumer、helper metadata/uniform effect、resident XMM snapshot、AFP transparent
+  helper 和 CallLambda interaction 共通过 1,155 条断言。
+- smallpt `4 8 6` 保持 279 roots、49,520 条和 canonical PPM SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`，最终单跑 3.298s。
+- SQLite 两臂均在 8 秒上限结束；714 个公共 root 指令逐条相同，candidate 只因截断时序多到达 32 个
+  root，因此不作为收益或回退证据。
+- REP MOVS fuzz 在旧屏障与 candidate 上都出现同类 Unicorn/flags baseline mismatch，分别为 416 和
+  397；该环境结果不作为门禁，也没有为通过它加入例外。
+
+本阶段不宣称宏观代码密度收益。fault、reentry/callback 和 host-NZCV effect 没有足够静态来源，继续
+fail-closed；没有新增 env 开关、日志、probe、临时路径或运行时兜底。

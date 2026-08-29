@@ -3433,6 +3433,18 @@ peepholes.
   absent from the tree; it needs an RA/live-in canonicalization proof. No long benchmark, stress run,
   probe, env switch, diagnostic log, temporary source path or compatibility fallback remains.
 
+- `4bf7117` centralizes direct/indirect helper ABI state in ARM64 `HelperCallContract`. Host-call
+  snapshot emission and four pinned GPR planners now share one clobber model for preserve-all,
+  FPCR, general-only, pinned-state and uniform effects. The first planner consumer permits x3-x9
+  value versions to cross only `PreservesPinnedState` helpers backed by the resident string wrapper's
+  explicit x3-x15/q16-q31 save set; x0-x2, unknown and indirect helpers remain barriers. Focused
+  helper, pinned, XMM snapshot, AFP and CallLambda coverage passes 1,155 assertions. Smallpt remains
+  279 roots / 49,520 instructions with the canonical PPM SHA. An 8-second SQLite pair has 714
+  byte-identical common-root instruction counts but different truncated reachability, so no benefit
+  is claimed. REP MOVS reports the same Unicorn/flags mismatch class with the old barrier and is not
+  used as a gate. Fault, callback/reentry and host-NZCV effects stay conservative. No long benchmark,
+  stress run, probe, env switch, diagnostic log, temporary source path or fallback remains.
+
 ## Orb loop
 
 ```
