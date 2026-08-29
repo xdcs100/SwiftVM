@@ -454,6 +454,14 @@ private:
     void EmitBackedgeColdPaths();
     [[nodiscard]] static bool PreservesHostNZCV(ir::OpCode op);
     [[nodiscard]] static bool MayFaultOrObserve(ir::OpCode op);
+    [[nodiscard]] EdgeFlagsState PendingEdgeFlagsState(
+            HostFlags valid,
+            EdgeFlagsProducer producer) const;
+    [[nodiscard]] EdgeFlagsTargetContract AnalyzeEdgeFlagsTarget(
+            ir::Location target) const;
+    [[nodiscard]] bool TargetAcceptsEdgeFlags(
+            ir::Location target,
+            const EdgeFlagsState& incoming) const;
     VRegister GetVecScalarOperand(ir::Value value, u32 lane_bits);
 
     void LoadUnalignedAtomicLockAddress(const Register& lock);

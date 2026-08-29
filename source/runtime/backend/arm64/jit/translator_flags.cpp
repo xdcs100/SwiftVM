@@ -455,6 +455,14 @@ DirectLinkFlagsBypass JitTranslator::MergeNZCV(
             merge_end - begin == 3 * sizeof(u32)) {
             flags_bypass = {begin, merge_end};
         }
+        if (flags_bypass.code_offset != UINT32_MAX) {
+            flags_bypass.edge_flags = PendingEdgeFlagsState(
+                    static_cast<HostFlags>(req),
+                    save_in_nzcv && nzcv_dirty
+                            ? EdgeFlagsProducer::Arithmetic
+                            : EdgeFlagsProducer::Restore);
+            ASSERT(flags_bypass.Valid());
+        }
         if (!flags_token_keep) {
             nzcv_dirty = false;
             nzcv_requested = {};

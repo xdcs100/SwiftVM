@@ -36,7 +36,7 @@ using namespace swift::runtime::ir;
 constexpr const char* kPhaseEnv = "DIRECT_LINK_CACHE_PHASE";
 constexpr const char* kDirEnv = "DIRECT_LINK_CACHE_DIR";
 constexpr const char* kRoundTripTest =
-        "disk cache v14 round trips direct-link sites across processes";
+        "disk cache v15 round trips direct-link sites across processes";
 
 IntrusivePtr<Block> BuildTarget(VAddr guest, u64 fingerprint) {
     IntrusivePtr<Block> block{new Block(0, Location{guest})};
@@ -424,13 +424,22 @@ TEST_CASE("disk cache scanner keeps move-wide constants and rejects PC-relative 
     }
 }
 
-TEST_CASE("disk cache v14 serializes link and fault-site records",
+TEST_CASE("disk cache v15 serializes link and fault-site records",
           "[direct-link][jit-cache][serializer]") {
     SerialUnit input{};
     input.guest_start = 0x1000;
     input.feature_hash = 0x123456789abcdef0ull;
     input.code.resize(80, 0);
-    input.blocks.push_back({0x1000, 0x1004, 0, 0x1234, 16, 20});
+    constexpr auto pending_nzcv = EdgeFlagsState::Pending(
+            kEdgeNZCVMask,
+            EdgeCarryPolarity::Unknown,
+            EdgeFlagsProducer::Restore);
+    constexpr EdgeFlagsTargetContract overwrite_nzcv{
+            .overwrite_before_observe = kEdgeNZCVMask,
+            .commits_before_fault = true,
+    };
+    input.blocks.push_back(
+            {0x1000, 0x1004, 0, 0x1234, 16, 20, overwrite_nzcv});
     constexpr u32 kColdMerge = 0x94000004;
     constexpr u32 kLinkedPublish = 0xb3401c1a;
     constexpr u32 kMergeResumeAdr = 0x10000051;
@@ -442,12 +451,12 @@ TEST_CASE("disk cache v14 serializes link and fault-site records",
                 sizeof(kUnresolvedBranch));
     input.link_sites = {
             {40, 0x2000, static_cast<u8>(LinkSiteKind::ConditionalThen),
-             24, 28, kColdMerge, kLinkedPublish},
+             24, 28, kColdMerge, kLinkedPublish, UINT32_MAX, pending_nzcv},
             {44, 0x3000, static_cast<u8>(LinkSiteKind::ConditionalElse),
-             24, 28, kColdMerge, kLinkedPublish},
+             24, 28, kColdMerge, kLinkedPublish, UINT32_MAX, pending_nzcv},
             {52, 0x4000, static_cast<u8>(LinkSiteKind::SwitchArm)},
             {68, 0x5000, static_cast<u8>(LinkSiteKind::Unconditional),
-             56, 64, kMergeResumeAdr, 0, 60},
+             56, 64, kMergeResumeAdr, 0, 60, pending_nzcv},
     };
     input.fault_sites = {
             {0x1000, 4, 8, 72, 1},
@@ -465,6 +474,7 @@ TEST_CASE("disk cache v14 serializes link and fault-site records",
     REQUIRE(output.blocks.size() == 1);
     REQUIRE(output.blocks[0].direct_code_offset == 16);
     REQUIRE(output.blocks[0].pending_flags_code_offset == 20);
+    REQUIRE(output.blocks[0].pending_flags_contract == overwrite_nzcv);
     REQUIRE(output.link_sites.size() == input.link_sites.size());
     for (size_t i = 0; i < input.link_sites.size(); ++i) {
         REQUIRE(output.link_sites[i].code_offset == input.link_sites[i].code_offset);
@@ -480,6 +490,7 @@ TEST_CASE("disk cache v14 serializes link and fault-site records",
                 input.link_sites[i].flags_bypass_linked_instruction);
         REQUIRE(output.link_sites[i].flags_merge_branch_offset ==
                 input.link_sites[i].flags_merge_branch_offset);
+        REQUIRE(output.link_sites[i].edge_flags == input.link_sites[i].edge_flags);
     }
     REQUIRE(output.fault_sites.size() == 2);
     REQUIRE(output.fault_sites[0].guest_start == 0x1000);

@@ -570,6 +570,9 @@ void WriteUnit(BlobWriter& w, const SerialUnit& unit) {
         w.U64(b.guest_bytes_hash);
         w.U32(b.direct_code_offset);
         w.U32(b.pending_flags_code_offset);
+        w.U32(b.pending_flags_contract.overwrite_before_observe);
+        w.U8(b.pending_flags_contract.commits_before_fault);
+        w.U8(b.pending_flags_contract.observes_before_commit);
     }
     w.U32(static_cast<u32>(unit.relocs.size()));
     for (const auto& r : unit.relocs) {
@@ -591,6 +594,10 @@ void WriteUnit(BlobWriter& w, const SerialUnit& unit) {
         w.U32(site.flags_bypass_instruction);
         w.U32(site.flags_bypass_linked_instruction);
         w.U32(site.flags_merge_branch_offset);
+        w.U32(site.edge_flags.valid_nzcv_mask);
+        w.U8(static_cast<u8>(site.edge_flags.carry_polarity));
+        w.U8(static_cast<u8>(site.edge_flags.producer));
+        w.U64(site.edge_flags.packed_flags_version);
     }
     w.U32(static_cast<u32>(unit.fault_sites.size()));
     for (const auto& site : unit.fault_sites) {
@@ -621,20 +628,33 @@ bool ReadUnit(BlobReader& r, SerialUnit& unit) {
     }
     unit.blocks.resize(count);
     for (auto& b : unit.blocks) {
+        u8 commits_before_fault{};
+        u8 observes_before_commit{};
         if (!r.U64(b.guest_start) || !r.U64(b.guest_end) || !r.U32(b.code_offset) ||
             !r.U64(b.guest_bytes_hash) || !r.U32(b.direct_code_offset) ||
-            !r.U32(b.pending_flags_code_offset)) {
+            !r.U32(b.pending_flags_code_offset) ||
+            !r.U32(b.pending_flags_contract.overwrite_before_observe) ||
+            !r.U8(commits_before_fault) || !r.U8(observes_before_commit)) {
             return false;
         }
-        if (b.code_offset >= code_size || b.guest_end < b.guest_start ||
+        b.pending_flags_contract.commits_before_fault = commits_before_fault;
+        b.pending_flags_contract.observes_before_commit =
+                observes_before_commit;
+        if (commits_before_fault > 1 || observes_before_commit > 1 ||
+            !b.pending_flags_contract.IsWellFormed() ||
+            b.code_offset >= code_size || b.guest_end < b.guest_start ||
             (b.direct_code_offset != UINT32_MAX &&
              ((b.direct_code_offset & 3u) != 0 ||
               b.direct_code_offset >= code_size))) {
             return false;
         }
-        if (b.pending_flags_code_offset != UINT32_MAX &&
-            ((b.pending_flags_code_offset & 3u) != 0 ||
-             b.pending_flags_code_offset >= code_size)) {
+        const bool has_pending_flags =
+                b.pending_flags_code_offset != UINT32_MAX;
+        if ((has_pending_flags &&
+             ((b.pending_flags_code_offset & 3u) != 0 ||
+              b.pending_flags_code_offset >= code_size)) ||
+            has_pending_flags !=
+                    b.pending_flags_contract.CanPublishPendingEntry()) {
             return false;
         }
     }
@@ -652,21 +672,29 @@ bool ReadUnit(BlobReader& r, SerialUnit& unit) {
         rel.kind = static_cast<RelocKind>(kind);
         rel.use = static_cast<RelocUse>(use);
     }
-    if (!r.U32(count) || count > r.Remaining() / 33) {
+    if (!r.U32(count) || count > r.Remaining() / 47) {
         return false;
     }
     unit.link_sites.resize(count);
     u32 previous_offset{};
     bool first = true;
     for (auto& site : unit.link_sites) {
+        u8 carry_polarity{};
+        u8 producer{};
         if (!r.U32(site.code_offset) || !r.U64(site.guest_target) ||
             !r.U8(site.kind) || !r.U32(site.flags_bypass_offset) ||
             !r.U32(site.flags_bypass_resume_offset) ||
             !r.U32(site.flags_bypass_instruction) ||
             !r.U32(site.flags_bypass_linked_instruction) ||
-            !r.U32(site.flags_merge_branch_offset)) {
+            !r.U32(site.flags_merge_branch_offset) ||
+            !r.U32(site.edge_flags.valid_nzcv_mask) ||
+            !r.U8(carry_polarity) || !r.U8(producer) ||
+            !r.U64(site.edge_flags.packed_flags_version)) {
             return false;
         }
+        site.edge_flags.carry_polarity =
+                static_cast<EdgeCarryPolarity>(carry_polarity);
+        site.edge_flags.producer = static_cast<EdgeFlagsProducer>(producer);
         if ((site.code_offset & 3u) != 0 ||
             static_cast<size_t>(site.code_offset) + sizeof(u32) > code_size ||
             (!first && site.code_offset <= previous_offset)) {

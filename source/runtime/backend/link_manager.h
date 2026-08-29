@@ -11,6 +11,7 @@
 #include <unordered_set>
 #include <vector>
 #include "runtime/backend/code_cache.h"
+#include "runtime/backend/edge_flags_state.h"
 #include "runtime/common/types.h"
 
 namespace swift::runtime::backend {
@@ -58,10 +59,11 @@ struct LinkSiteRecord {
     u64 guest_target{};
     LinkSourceOwner source_owner{};
     u64 target_generation{};
-    LinkSiteState state{LinkSiteState::Unlinked};
-    LinkSiteKind kind{LinkSiteKind::Unconditional};
+    EdgeFlagsState edge_flags{};
     u32 flags_bypass_offset{UINT32_MAX};
     u32 flags_bypass_instruction{};
+    LinkSiteState state{LinkSiteState::Unlinked};
+    LinkSiteKind kind{LinkSiteKind::Unconditional};
     bool pending_flags_compatible{};
 };
 
@@ -92,6 +94,7 @@ struct LinkTargetRecord {
     void* host_pc{};
     void* direct_host_pc{};
     void* pending_flags_host_pc{};
+    EdgeFlagsTargetContract pending_flags_contract{};
     void* call_host_pc{};
     void* call_pending_flags_host_pc{};
     CodeRegionId region_id{};
@@ -137,7 +140,8 @@ public:
                                     u64 guest_target,
                                     LinkSourceOwner source_owner,
                                     const LinkSignalPatchSite* signal_patch = nullptr,
-                                    LinkSiteKind kind = LinkSiteKind::Unconditional);
+                                    LinkSiteKind kind = LinkSiteKind::Unconditional,
+                                    EdgeFlagsState edge_flags = {});
     [[nodiscard]] std::optional<LinkSiteRecord> QuerySite(LinkSiteKey site) const;
 
     // Publishing a target assigns a process-local, globally monotonic generation.
@@ -149,7 +153,9 @@ public:
                                     void* direct_host_pc = nullptr,
                                     void* pending_flags_host_pc = nullptr,
                                     void* call_host_pc = nullptr,
-                                    void* call_pending_flags_host_pc = nullptr);
+                                    void* call_pending_flags_host_pc = nullptr,
+                                    EdgeFlagsTargetContract
+                                            pending_flags_contract = {});
     [[nodiscard]] std::optional<LinkTargetRecord> QueryTarget(u64 guest_target) const;
     [[nodiscard]] std::optional<u64> QueryTargetGeneration(u64 guest_target) const;
     [[nodiscard]] bool ValidateTargetGeneration(u64 guest_target, u64 generation) const;
@@ -208,6 +214,7 @@ private:
         void* host_pc{};
         void* direct_host_pc{};
         void* pending_flags_host_pc{};
+        EdgeFlagsTargetContract pending_flags_contract{};
         void* call_host_pc{};
         void* call_pending_flags_host_pc{};
         CodeRegionId region_id{};

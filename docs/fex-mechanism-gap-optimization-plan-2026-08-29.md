@@ -550,3 +550,30 @@ view，root 从 164 降到 161，相对 FEX 120 条的残差降到 41 条。短�
 已完整删除。前者需要先定义可序列化的 cold-stub 编译状态 contract，后者会改变 RA/fixed-home
 生命周期；在对应机制建立前不再按局部 peephole 重试。交付中没有保留 probe、环境开关、调试路径
 或兼容兜底。
+
+### 16.7 full-NZCV overwrite-first edge flags ABI
+
+第一批版本化 flags edge ABI 已替换原先只记录“目标是否有 pending entry”的布尔兼容判断。
+backend-neutral `EdgeFlagsState` 记录有效 NZCV mask、carry polarity、producer 和 packed-flags version；
+`EdgeFlagsTargetContract` 记录目标在观察或 fault 前覆盖的位及 `AdvancePC` 提交边界。region 分支证明、
+direct link、静态 forward、LinkManager、SMC unlink 和磁盘缓存现在使用同一兼容判定，缓存格式升至 v15。
+
+首批生产 consumer 只发布当前确实存在来源的 full-NZCV 状态，并允许目标在任何观察前仅以
+`SaveFlags(..., Flags::NZCV)` 覆盖 NZCV；不再错误要求同时覆盖已由 packed flags 保存的 PF/AF。
+partial overwrite 合同可以被分析和序列化，但在 partial source state 与 polarity/version join 完成前不会
+发布无消费者的 pending/call entry，也没有保留旧的宽松兜底。
+
+短门禁结果：
+
+- fresh `a241d60` 同提交 smallpt `4 8 6` 静态集合保持 279 roots、100% host/entry coverage 和
+  top-20 `20/20`，`49,590 -> 49,498`（`-92` / `-0.185521%`），无增长 root；PPM SHA-256 保持
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`。
+- Mac 通过 1,107 条非压力 direct-link、46 条 region flags、31 条 NZCV 和 11 条 indirect fault
+  continuation 断言；Orb 对应通过 831、46、31 和 11 条断言。
+- 生产 direct/static 测试明确使用只写 NZCV 的目标，并覆盖兼容链接、SMC invalidation 后重新发布、
+  不兼容目标恢复 merge，以及 v15 source/target contract 往返。
+- 修正 `flags_merge_test` 逐字节滑窗解码 ARM64 指令的测试错误，改为按 VIXL 指令宽度前进；临时
+  disassembly 捕获已删除。
+
+该阶段没有新增环境开关、诊断日志、运行时探针或调试路径。下一批在这个单一合同上增加连续 partial
+mask source、Direct/Inverted polarity 和 packed-flags version join，不重新引入独立 bypass 协议。

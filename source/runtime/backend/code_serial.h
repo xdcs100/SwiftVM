@@ -45,6 +45,7 @@
 #include <span>
 #include <string>
 #include <vector>
+#include "runtime/backend/edge_flags_state.h"
 #include "runtime/common/types.h"
 #include "runtime/include/config.h"
 
@@ -140,6 +141,7 @@ struct SerialBlock {
     u64 guest_bytes_hash{};
     u32 direct_code_offset{UINT32_MAX};
     u32 pending_flags_code_offset{UINT32_MAX};
+    EdgeFlagsTargetContract pending_flags_contract{};
 };
 
 // One direct-link branch site inside the unit. The code byte at
@@ -156,17 +158,25 @@ struct SerialLinkSite {
     u32 flags_bypass_instruction{};
     u32 flags_bypass_linked_instruction{};
     u32 flags_merge_branch_offset{UINT32_MAX};
+    EdgeFlagsState edge_flags{};
 
     [[nodiscard]] bool HasFlagsBypass() const {
         return flags_bypass_offset != UINT32_MAX;
     }
 
     [[nodiscard]] bool ValidFlagsBypass(std::size_t code_size) const {
+        if (!edge_flags.IsWellFormed()) {
+            return false;
+        }
         if (!HasFlagsBypass()) {
             return flags_bypass_resume_offset == UINT32_MAX &&
                    flags_bypass_instruction == 0 &&
                    flags_bypass_linked_instruction == 0 &&
-                   flags_merge_branch_offset == UINT32_MAX;
+                   flags_merge_branch_offset == UINT32_MAX &&
+                   edge_flags.IsCanonical();
+        }
+        if (!edge_flags.HasPendingPState()) {
+            return false;
         }
         const auto begin = static_cast<std::size_t>(flags_bypass_offset);
         const auto resume = static_cast<std::size_t>(flags_bypass_resume_offset);
@@ -283,7 +293,7 @@ struct ValidityKey {
     bool operator==(const ValidityKey&) const = default;
 };
 
-constexpr u64 kCacheFormatVersion = 14;
+constexpr u64 kCacheFormatVersion = 15;
 
 u64 HashBytes(const void* data, std::size_t size, u64 seed);
 u64 HashU64(u64 value, u64 seed);

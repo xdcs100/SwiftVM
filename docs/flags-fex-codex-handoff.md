@@ -3350,6 +3350,18 @@ peepholes.
   removed; the former requires an explicit serializable cold-stub contract and the latter changes
   RA/fixed-home lifetime. No probe, env switch, debug path, fallback or stress run remains.
 
+- The first versioned edge-flags ABI stage now carries a shared `EdgeFlagsState` and
+  `EdgeFlagsTargetContract` through region proof, direct/static link sites, LinkManager/SMC state and
+  disk-cache v15 records. A target that overwrites only `Flags::NZCV` before `AdvancePC` can accept a
+  full-NZCV pending edge without the old false PF/AF requirement. Sources remain deliberately limited
+  to the implemented full-NZCV state; partial target contracts do not publish dead pending/call entries.
+  Fresh-HEAD smallpt `4 8 6` keeps all 279 roots with 100% coverage and the canonical PPM SHA, moving
+  `49,590 -> 49,498` (`-92`, `-0.185521%`) with no growing root. Mac passes 1,107 non-stress
+  direct-link, 46 region-flags, 31 NZCV and 11 indirect-fault-continuation assertions; Orb passes
+  831, 46, 31 and 11. The Orb-only partial-NZCV false failure was an existing test iterator decoding
+  three unaligned byte windows per ARM64 instruction; it now advances by VIXL instruction width, and
+  the temporary disassembly capture was removed. No env switch, probe, debug path or stress run remains.
+
 ## Orb loop
 
 ```

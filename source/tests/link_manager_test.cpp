@@ -15,9 +15,14 @@ using swift::runtime::FeatureSet;
 using swift::runtime::backend::CodeCache;
 using swift::runtime::backend::CodeRegion;
 using swift::runtime::backend::DecodeBranchTarget;
+using swift::runtime::backend::EdgeCarryPolarity;
+using swift::runtime::backend::EdgeFlagsProducer;
+using swift::runtime::backend::EdgeFlagsState;
+using swift::runtime::backend::EdgeFlagsTargetContract;
 using swift::runtime::backend::EncodeB;
 using swift::runtime::backend::EncodeBL;
 using swift::runtime::backend::Imm26Reachable;
+using swift::runtime::backend::kEdgeNZCVMask;
 using swift::runtime::backend::LinkManager;
 using swift::runtime::backend::LinkFlagsBypassPatch;
 using swift::runtime::backend::LinkSignalPatchSite;
@@ -36,10 +41,19 @@ constexpr std::intptr_t kImm26Boundary = (std::intptr_t{1} << 27) - 4;
 
 static_assert(sizeof(LinkSiteKey) == 16);
 static_assert(sizeof(LinkSourceOwner) == 16);
-static_assert(sizeof(LinkSiteRecord) == 64);
+static_assert(sizeof(LinkSiteRecord) == 80);
 static_assert(sizeof(LinkSignalPatchSite) == 88);
-static_assert(sizeof(LinkTargetRecord) == 80);
+static_assert(sizeof(LinkTargetRecord) == 88);
 static_assert(sizeof(CodeRegion) == 40);
+
+constexpr auto kPendingNZCV = EdgeFlagsState::Pending(
+        kEdgeNZCVMask,
+        EdgeCarryPolarity::Unknown,
+        EdgeFlagsProducer::Restore);
+constexpr EdgeFlagsTargetContract kOverwriteNZCV{
+        .overwrite_before_observe = kEdgeNZCVMask,
+        .commits_before_fault = true,
+};
 
 Config Arm64Config() {
     return Config{
@@ -372,8 +386,18 @@ TEST_CASE("pending flags bypass rejects incompatible linked targets",
             .unlinked_bl = *second_bl,
             .flags_bypass = bypass_patch,
     };
-    REQUIRE(manager.RegisterSite(first_key, kFirstTarget, owner, &first_patch));
-    REQUIRE(manager.RegisterSite(second_key, kSecondTarget, owner, &second_patch));
+    REQUIRE(manager.RegisterSite(first_key,
+                                 kFirstTarget,
+                                 owner,
+                                 &first_patch,
+                                 LinkSiteKind::Unconditional,
+                                 kPendingNZCV));
+    REQUIRE(manager.RegisterSite(second_key,
+                                 kSecondTarget,
+                                 owner,
+                                 &second_patch,
+                                 LinkSiteKind::Unconditional,
+                                 kPendingNZCV));
 
     const auto first_generation = manager.PublishTarget(
             kFirstTarget,
@@ -381,7 +405,10 @@ TEST_CASE("pending flags bypass rejects incompatible linked targets",
             region.id,
             {},
             buffer->exec_data + 160,
-            buffer->exec_data + 160);
+            buffer->exec_data + 160,
+            nullptr,
+            nullptr,
+            kOverwriteNZCV);
     auto second_generation = manager.PublishTarget(
             kSecondTarget,
             buffer->exec_data + 176,
@@ -405,7 +432,10 @@ TEST_CASE("pending flags bypass rejects incompatible linked targets",
             region.id,
             {},
             buffer->exec_data + 176,
-            buffer->exec_data + 176);
+            buffer->exec_data + 176,
+            nullptr,
+            nullptr,
+            kOverwriteNZCV);
     REQUIRE(manager.MarkLinked(second_key, second_generation, [&](const LinkSiteRecord&) {
         return PatchDirectBranch(region, second_rx, second_rw, *second_direct);
     }));

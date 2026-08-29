@@ -60,10 +60,14 @@ extern "C" void* RegionLinkTrampolineSlow(RegionLinkContext* context,
         }
         auto* direct_host_pc = call
                 ? (site->flags_bypass_offset != UINT32_MAX &&
+                                   target->pending_flags_contract.Accepts(
+                                           site->edge_flags) &&
                                    target->call_pending_flags_host_pc
                            ? target->call_pending_flags_host_pc
                            : target->call_host_pc)
                 : (site->flags_bypass_offset != UINT32_MAX &&
+                                   target->pending_flags_contract.Accepts(
+                                           site->edge_flags) &&
                                    target->pending_flags_host_pc
                            ? target->pending_flags_host_pc
                            : (target->direct_host_pc ? target->direct_host_pc

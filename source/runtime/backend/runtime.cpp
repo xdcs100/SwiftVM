@@ -827,7 +827,8 @@ void RecordJitCacheUnit(const std::shared_ptr<backend::Module>& module,
                               site.flags_bypass.resume_offset,
                               site.flags_bypass_instruction,
                               site.flags_bypass.linked_instruction,
-                              site.flags_bypass.merge_branch_offset});
+                              site.flags_bypass.merge_branch_offset,
+                              site.flags_bypass.edge_flags});
     }
     std::vector<SerialFaultSite> fault_sites;
     fault_sites.reserve(translator.GetFaultMetadata().size());
@@ -1109,6 +1110,8 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
                     emitted_context->GetDirectLinkCodeOffset(guest);
             const auto pending_flags_offset =
                     emitted_context->GetPendingFlagsCodeOffset(guest);
+            const auto pending_flags_contract =
+                    emitted_context->GetPendingFlagsTargetContract(guest);
             const auto call_offset = emitted_context->GetCallCodeOffset(guest);
             const auto call_pending_flags_offset =
                     emitted_context->GetCallPendingFlagsCodeOffset(guest);
@@ -1141,7 +1144,8 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
                         direct_host_pc,
                         pending_flags_host_pc,
                         call_host_pc,
-                        call_pending_flags_host_pc);
+                        call_pending_flags_host_pc,
+                        pending_flags_contract);
                 mutable_address_space.PushCodeCache(guest, buffer.exec_data + offset);
                 if (call_host_pc) {
                     mutable_address_space.PushCallCodeCache(guest, call_host_pc);
@@ -1162,6 +1166,7 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
                     .pending_flags_code_offset = pending_flags_host_pc
                             ? static_cast<u32>(pending_flags_offset)
                             : UINT32_MAX,
+                    .pending_flags_contract = pending_flags_contract,
             });
             if (!module->GetModuleConfig().read_only) {
                 PerfScope2 perf_pub_smc{GetPerfStats2().publish_smc};

@@ -359,7 +359,8 @@ u64 Module::PublishLinkTarget(ir::Location guest,
                               void* direct_host_pc,
                               void* pending_flags_host_pc,
                               void* call_host_pc,
-                              void* call_pending_flags_host_pc) {
+                              void* call_pending_flags_host_pc,
+                              EdgeFlagsTargetContract pending_flags_contract) {
     if (!IsDirectLinkConfigured()) {
         return 0;
     }
@@ -382,7 +383,8 @@ u64 Module::PublishLinkTarget(ir::Location guest,
             direct_host_pc,
             pending_flags_host_pc,
             call_host_pc,
-            call_pending_flags_host_pc);
+            call_pending_flags_host_pc,
+            pending_flags_contract);
 }
 
 void Module::DiscardLinkSource(const void* allocation) {

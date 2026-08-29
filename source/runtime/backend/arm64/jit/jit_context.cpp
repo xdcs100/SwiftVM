@@ -1281,7 +1281,12 @@ u8* JitContext::Flush(const CodeBuffer& code_cache) {
                     .flags_bypass = flags_bypass_patch,
             };
             ASSERT(module->GetAddressSpace().GetLinkManager().RegisterSite(
-                    key, pending.guest_target, owner, &signal_patch, pending.kind));
+                    key,
+                    pending.guest_target,
+                    owner,
+                    &signal_patch,
+                    pending.kind,
+                    pending.flags_bypass.edge_flags));
         }
     }
     std::memcpy(code_cache.rw_data, masm.GetBuffer()->GetStartAddress<u8*>(), code_cache.size);
@@ -1316,6 +1321,15 @@ ptrdiff_t JitContext::GetPendingFlagsCodeOffset(
     return -1;
 }
 
+EdgeFlagsTargetContract JitContext::GetPendingFlagsTargetContract(
+        LocationDescriptor location) const {
+    if (const auto it = pending_flags_target_contracts.find(location);
+        it != pending_flags_target_contracts.end()) {
+        return it->second;
+    }
+    return {};
+}
+
 ptrdiff_t JitContext::GetCallCodeOffset(LocationDescriptor location) const {
     if (const auto it = call_entry_offsets.find(location);
         it != call_entry_offsets.end()) {
@@ -1340,11 +1354,15 @@ void JitContext::RecordDirectLinkEntry(LocationDescriptor location) {
             location, static_cast<u32>(entry->GetLocation()));
 }
 
-void JitContext::RecordPendingFlagsEntry(LocationDescriptor location) {
+void JitContext::RecordPendingFlagsEntry(
+        LocationDescriptor location,
+        EdgeFlagsTargetContract contract) {
+    ASSERT(contract.CanPublishPendingEntry());
     auto* entry = GetCountedEntryLabel(location);
     ASSERT(entry->IsBound());
     pending_flags_entry_offsets.insert_or_assign(
             location, static_cast<u32>(entry->GetLocation()));
+    pending_flags_target_contracts.insert_or_assign(location, contract);
 }
 
 void JitContext::EmitPendingFlagsCallEntry(LocationDescriptor location) {

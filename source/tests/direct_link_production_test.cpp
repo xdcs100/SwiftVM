@@ -163,7 +163,7 @@ void* TranslateFlagsKillingTarget(const std::shared_ptr<Module>& module,
     const auto left = function->LoadImm(Imm{u8{7}}).SetType(ValueType::U8);
     const auto right = function->LoadImm(Imm{u8{3}}).SetType(ValueType::U8);
     const auto result = function->Sub(left, Operand{right}).SetType(ValueType::U8);
-    function->SaveFlags(result, Flags::All);
+    function->SaveFlags(result, Flags::NZCV);
     function->AdvancePC(Imm{u64{1}});
     const auto condition = function->LocalCondSet(Cond::EQ).SetType(ValueType::U8);
     auto [then_block, else_block] = builder.If(terminal::If{
@@ -1084,6 +1084,10 @@ TEST_CASE("production direct links bypass a shared full flags merge",
         REQUIRE(else_target);
         REQUIRE(then_target->pending_flags_host_pc != nullptr);
         REQUIRE(else_target->pending_flags_host_pc != nullptr);
+        REQUIRE(then_target->pending_flags_contract.overwrite_before_observe ==
+                kEdgeNZCVMask);
+        REQUIRE(else_target->pending_flags_contract.overwrite_before_observe ==
+                kEdgeNZCVMask);
 
         auto* source_code = static_cast<u8*>(TranslatePendingFlagsSource(
                 module, source_guest, then_guest, else_guest));
@@ -1104,6 +1108,10 @@ TEST_CASE("production direct links bypass a shared full flags merge",
                 });
         REQUIRE(then_site != sites.end());
         REQUIRE(else_site != sites.end());
+        REQUIRE(then_target->pending_flags_contract.Accepts(
+                then_site->record.edge_flags));
+        REQUIRE(else_target->pending_flags_contract.Accepts(
+                else_site->record.edge_flags));
         REQUIRE(then_site->record.flags_bypass_offset != UINT32_MAX);
         REQUIRE(then_site->record.flags_bypass_offset ==
                 else_site->record.flags_bypass_offset);

@@ -108,13 +108,18 @@ bool LinkManager::RegisterSite(LinkSiteKey site,
                                u64 guest_target,
                                LinkSourceOwner source_owner,
                                const LinkSignalPatchSite* signal_patch,
-                               LinkSiteKind kind) {
+                               LinkSiteKind kind,
+                               EdgeFlagsState edge_flags) {
     if (site.region_id == 0 || (site.offset & 3u) != 0 || !source_owner.module ||
         !source_owner.allocation || kind == LinkSiteKind::Count) {
         return false;
     }
     const bool has_flags_bypass = signal_patch &&
             signal_patch->flags_bypass.rx_site;
+    if (!edge_flags.IsWellFormed() ||
+        has_flags_bypass != edge_flags.HasPendingPState()) {
+        return false;
+    }
     if (signal_patch &&
         (signal_patch->region.id != site.region_id ||
          !signal_patch->region.ContainsRx(signal_patch->rx_site) ||
@@ -161,9 +166,10 @@ bool LinkManager::RegisterSite(LinkSiteKey site,
                     .site = site,
                     .guest_target = guest_target,
                     .source_owner = source_owner,
-                    .kind = kind,
+                    .edge_flags = edge_flags,
                     .flags_bypass_offset = flags_bypass_offset,
                     .flags_bypass_instruction = flags_bypass_instruction,
+                    .kind = kind,
             });
     if (!inserted) {
         return false;
@@ -227,7 +233,12 @@ u64 LinkManager::PublishTarget(u64 guest_target,
                                void* direct_host_pc,
                                void* pending_flags_host_pc,
                                void* call_host_pc,
-                               void* call_pending_flags_host_pc) {
+                               void* call_pending_flags_host_pc,
+                               EdgeFlagsTargetContract pending_flags_contract) {
+    ASSERT(pending_flags_contract.IsWellFormed());
+    ASSERT((pending_flags_host_pc != nullptr ||
+            call_pending_flags_host_pc != nullptr) ==
+           pending_flags_contract.CanPublishPendingEntry());
     std::lock_guard guard(mutex_);
     const u64 generation = next_target_generation_++;
     ASSERT(generation != kSignalInvalidatingGeneration);
@@ -255,6 +266,7 @@ u64 LinkManager::PublishTarget(u64 guest_target,
             .host_pc = host_pc,
             .direct_host_pc = direct_host_pc ? direct_host_pc : host_pc,
             .pending_flags_host_pc = pending_flags_host_pc,
+            .pending_flags_contract = pending_flags_contract,
             .call_host_pc = call_host_pc,
             .call_pending_flags_host_pc = call_pending_flags_host_pc,
             .region_id = region_id,
@@ -282,6 +294,7 @@ std::optional<LinkTargetRecord> LinkManager::QueryTarget(u64 guest_target) const
                 .host_pc = it->second.host_pc,
                 .direct_host_pc = it->second.direct_host_pc,
                 .pending_flags_host_pc = it->second.pending_flags_host_pc,
+                .pending_flags_contract = it->second.pending_flags_contract,
                 .call_host_pc = it->second.call_host_pc,
                 .call_pending_flags_host_pc =
                         it->second.call_pending_flags_host_pc,
@@ -351,9 +364,11 @@ bool LinkManager::MarkLinked(LinkSiteKey site, u64 expected_generation, const Li
                        signal_target->active_generation.load(std::memory_order_seq_cst) ==
                                expected_generation;
     const bool call = site_it->second.kind == LinkSiteKind::Call;
-    const bool pending_compatible = call
-            ? target_it->second.call_pending_flags_host_pc != nullptr
-            : target_it->second.pending_flags_host_pc != nullptr;
+    const bool pending_compatible =
+            target_it->second.pending_flags_contract.Accepts(
+                    site_it->second.edge_flags) &&
+            (call ? target_it->second.call_pending_flags_host_pc != nullptr
+                  : target_it->second.pending_flags_host_pc != nullptr);
     bool committed{};
     if (valid) {
         if (site_it->second.flags_bypass_offset != UINT32_MAX &&

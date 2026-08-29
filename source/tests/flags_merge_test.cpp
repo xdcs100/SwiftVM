@@ -71,7 +71,8 @@ std::map<std::string, swift::u32> EmitBlock(
             const vixl::aarch64::Instruction*>();
     auto* last = masm.GetBuffer()->GetEndAddress<
             const vixl::aarch64::Instruction*>();
-    for (auto* instruction = first; instruction < last; ++instruction) {
+    for (auto* instruction = first; instruction < last;
+         instruction = instruction->GetNextInstruction()) {
         decoder.Decode(instruction);
         std::string_view text{disassembler.GetOutput()};
         const auto begin = text.find_first_not_of(" \t");

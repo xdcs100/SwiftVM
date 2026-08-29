@@ -12,6 +12,7 @@
 #include "runtime/backend/address_space.h"
 #include "runtime/backend/arm64/constant.h"
 #include "runtime/backend/code_cache.h"
+#include "runtime/backend/edge_flags_state.h"
 #include "runtime/backend/reg_alloc.h"
 #include "runtime/common/hot_coalesce_prof.h"
 #include "runtime/common/types.h"
@@ -31,9 +32,11 @@ struct DirectLinkFlagsBypass {
     u32 resume_offset{UINT32_MAX};
     u32 linked_instruction{};
     u32 merge_branch_offset{UINT32_MAX};
+    EdgeFlagsState edge_flags{};
 
     [[nodiscard]] bool Valid() const {
-        return code_offset != UINT32_MAX && resume_offset != UINT32_MAX;
+        return code_offset != UINT32_MAX && resume_offset != UINT32_MAX &&
+               edge_flags.HasPendingPState();
     }
 };
 
@@ -233,11 +236,14 @@ public:
             LocationDescriptor location) const;
     [[nodiscard]] ptrdiff_t GetPendingFlagsCodeOffset(
             LocationDescriptor location) const;
+    [[nodiscard]] EdgeFlagsTargetContract GetPendingFlagsTargetContract(
+            LocationDescriptor location) const;
     [[nodiscard]] ptrdiff_t GetCallCodeOffset(LocationDescriptor location) const;
     [[nodiscard]] ptrdiff_t GetCallPendingFlagsCodeOffset(
             LocationDescriptor location) const;
     void RecordDirectLinkEntry(LocationDescriptor location);
-    void RecordPendingFlagsEntry(LocationDescriptor location);
+    void RecordPendingFlagsEntry(LocationDescriptor location,
+                                 EdgeFlagsTargetContract contract);
     void EmitPendingFlagsCallEntry(LocationDescriptor location);
     [[nodiscard]] bool IsUniform(const Register& reg);
     [[nodiscard]] bool IsSpilled(const ir::Value& value) {
@@ -436,6 +442,8 @@ private:
     std::map<LocationDescriptor, Label> labels;
     std::map<LocationDescriptor, u32> direct_link_entry_offsets;
     std::map<LocationDescriptor, u32> pending_flags_entry_offsets;
+    std::map<LocationDescriptor, EdgeFlagsTargetContract>
+            pending_flags_target_contracts;
     std::map<LocationDescriptor, u32> call_entry_offsets;
     std::map<LocationDescriptor, u32> call_pending_flags_entry_offsets;
     std::map<LocationDescriptor, Label> internal_labels;

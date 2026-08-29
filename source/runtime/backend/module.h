@@ -158,7 +158,9 @@ public:
                                         void* direct_host_pc = nullptr,
                                         void* pending_flags_host_pc = nullptr,
                                         void* call_host_pc = nullptr,
-                                        void* call_pending_flags_host_pc = nullptr);
+                                        void* call_pending_flags_host_pc = nullptr,
+                                        EdgeFlagsTargetContract
+                                                pending_flags_contract = {});
     // A flushed allocation that never became module/L2-visible may be
     // discarded without an SMC/QSBR transaction, but its center-table owner
     // must still be removed before the bytes are freed.

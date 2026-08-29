@@ -816,8 +816,13 @@ JitTranslator::PrepareBlockState(ir::Block* block) {
     if (FlagsRegsEnabled() && region_edges_active && !split_flags_entry &&
         !BlockIsFlagsTransparent(block)) {
         context.RecordDirectLinkEntry(block->GetStartLocation().Value());
-        if (TargetKillsIncomingFlags(block->GetStartLocation())) {
-            context.RecordPendingFlagsEntry(block->GetStartLocation().Value());
+        const auto target_contract = AnalyzeEdgeFlagsTarget(
+                block->GetStartLocation());
+        if (target_contract.Accepts(PendingEdgeFlagsState(
+                    HostFlags::NZCV,
+                    EdgeFlagsProducer::Restore))) {
+            context.RecordPendingFlagsEntry(block->GetStartLocation().Value(),
+                                            target_contract);
         }
     }
     flags_audit_block_edge = ClassifyFlagsAuditEdge(block->GetTerminal());

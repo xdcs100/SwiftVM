@@ -722,7 +722,8 @@ bool JitDiskCache::ReviveUnit(const std::shared_ptr<Module>& module, const Seria
                         site.guest_target,
                         owner,
                         &signal_patch,
-                        static_cast<LinkSiteKind>(site.kind))) {
+                        static_cast<LinkSiteKind>(site.kind),
+                        site.edge_flags)) {
                 module->DiscardLinkSource(buffer.exec_data);
                 module->Remove(node);
                 module->RemoveFaultEntries(buffer.exec_data);
@@ -756,7 +757,10 @@ bool JitDiskCache::ReviveUnit(const std::shared_ptr<Module>& module, const Seria
                                         buffer.exec_data + block.code_offset,
                                         buffer.exec_data,
                                         direct_host_pc,
-                                        pending_flags_host_pc);
+                                        pending_flags_host_pc,
+                                        nullptr,
+                                        nullptr,
+                                        block.pending_flags_contract);
         address_space.PushCodeCache(ir::Location{block.guest_start},
                                     buffer.exec_data + block.code_offset);
         if (!module->GetModuleConfig().read_only) {
