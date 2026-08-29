@@ -202,6 +202,8 @@ add_library(swift_runtime STATIC
         backend/arm64/jit/flags.cpp
         backend/arm64/trampolines.cpp
         backend/arm64/trampolines.h
+        backend/arm64/helper_call_contract.cpp
+        backend/arm64/helper_call_contract.h
         backend/arm64/continuation_contract.cpp
         backend/arm64/continuation_contract.h
         backend/arm64/pair_call_trampoline.cpp

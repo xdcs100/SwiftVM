@@ -1,23 +1,12 @@
 #include "translator.h"
 
+#include "runtime/backend/arm64/helper_call_contract.h"
+
 namespace swift::runtime::backend::arm64 {
 
 namespace {
 
 bool IsPinnedGPR(u32 index) { return index <= 9 || (index >= 19 && index <= 23) || index == 29; }
-
-bool IsHelperClobber(ir::OpCode op) {
-    switch (op) {
-        case ir::OpCode::CallLambda:
-        case ir::OpCode::CallLocation:
-        case ir::OpCode::CallDynamic:
-        case ir::OpCode::X87Op:
-        case ir::OpCode::Sse42Str:
-            return true;
-        default:
-            return false;
-    }
-}
 
 bool IsMemoryOperation(ir::OpCode op) {
     return op == ir::OpCode::LoadMemory || op == ir::OpCode::StoreMemory ||
@@ -83,7 +72,8 @@ std::optional<JitTranslator::PinnedGPRValueTransfer> JitTranslator::MatchPinnedG
             continue;
         }
         if ((scan.GetOp() == ir::OpCode::SetHostGPR && scan.GetArg<ir::Imm>(1).Get() == source) ||
-            (source <= 9 && IsHelperClobber(scan.GetOp()))) {
+            (source <= 9 &&
+             HelperCallContract::InstructionClobbersGPR(scan, source, context.GetFeatures()))) {
             return std::nullopt;
         }
     }
@@ -129,7 +119,8 @@ std::optional<JitTranslator::PinnedGPRValueTransfer> JitTranslator::MatchPinnedG
             continue;
         }
         if ((scan.GetOp() == ir::OpCode::SetHostGPR && scan.GetArg<ir::Imm>(1).Get() == target) ||
-            (target <= 9 && IsHelperClobber(scan.GetOp()))) {
+            (target <= 9 &&
+             HelperCallContract::InstructionClobbersGPR(scan, target, context.GetFeatures()))) {
             return std::nullopt;
         }
     }

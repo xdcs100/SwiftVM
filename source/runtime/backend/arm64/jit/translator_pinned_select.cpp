@@ -1,5 +1,6 @@
 #include <algorithm>
 
+#include "runtime/backend/arm64/helper_call_contract.h"
 #include "translator.h"
 
 namespace swift::runtime::backend::arm64 {
@@ -8,19 +9,6 @@ namespace {
 
 bool IsPinnedGPR(u32 index) {
     return index <= 9 || (index >= 19 && index <= 23) || index == 29;
-}
-
-bool IsHelperClobber(ir::OpCode op) {
-    switch (op) {
-        case ir::OpCode::CallLambda:
-        case ir::OpCode::CallLocation:
-        case ir::OpCode::CallDynamic:
-        case ir::OpCode::X87Op:
-        case ir::OpCode::Sse42Str:
-            return true;
-        default:
-            return false;
-    }
 }
 
 u32 CountUses(ir::Inst& consumer, ir::Inst* definition) {
@@ -141,9 +129,9 @@ JitTranslator::MatchPinnedSelectPublication(ir::Inst* publication) const {
         if (scan.Id() <= publication->Id() || scan.Id() >= last_use) {
             continue;
         }
-        if ((scan.GetOp() == ir::OpCode::SetHostGPR &&
-             scan.GetArg<ir::Imm>(1).Get() == target) ||
-            (target <= 9 && IsHelperClobber(scan.GetOp()))) {
+        if ((scan.GetOp() == ir::OpCode::SetHostGPR && scan.GetArg<ir::Imm>(1).Get() == target) ||
+            (target <= 9 &&
+             HelperCallContract::InstructionClobbersGPR(scan, target, context.GetFeatures()))) {
             return std::nullopt;
         }
     }

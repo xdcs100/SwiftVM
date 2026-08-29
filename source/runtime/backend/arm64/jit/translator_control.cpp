@@ -3,11 +3,11 @@
 #include <array>
 #include <limits>
 
-#include "runtime/backend/context.h"
 #include "runtime/backend/arm64/defines.h"
 #include "runtime/backend/arm64/fpcr_mode.h"
+#include "runtime/backend/arm64/helper_call_contract.h"
 #include "runtime/backend/arm64/pair_call_trampoline.h"
-#include "runtime/common/helper_abi.h"
+#include "runtime/backend/context.h"
 #include "runtime/common/svm_config.h"
 #include "runtime/frontend/x86/sse42str_helper.h"
 #include "runtime/frontend/x86/x87.h"
@@ -22,22 +22,6 @@ u64 XrstorHelper(u64 context, u64 guest_address, u64 rfbm);
 namespace swift::runtime::backend::arm64 {
 
 namespace {
-
-bool LeafHelperABIEnabled(const FeatureSet& features) {
-#if SVM_HAS_HELPER_PRESERVE_ALL
-    return features.helper_leaf_abi;
-#else
-    return false;
-#endif
-}
-
-constexpr bool GeneralRegistersOnlyABIEnabled() {
-#if SVM_HAS_HELPER_GENERAL_REGS_ONLY
-    return true;
-#else
-    return false;
-#endif
-}
 
 constexpr u64 kConstAddressPageOffsetMask = 0xfff;
 constexpr u64 kConstAddressPageMask = ~kConstAddressPageOffsetMask;
@@ -281,20 +265,11 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
     // off, leaving the established AAPCS snapshot byte-for-byte unchanged.
     // Unsupported compilers cannot enable the path even if the environment
     // variable is present.
-    const bool preserve_all_leaf =
-            LeafHelperABIEnabled(context.GetFeatures()) && !lambda.IsValue() &&
-            lambda.GetHelperABI() == ir::HelperABI::PreserveAllLeaf;
-    const bool fpcr_transparent =
-            !lambda.IsValue() &&
-            lambda.GetHostFpEffect() == ir::HostFpEffect::FPCRTransparent;
-    const bool general_registers_only =
-            GeneralRegistersOnlyABIEnabled() && !lambda.IsValue() &&
-            lambda.GetHostRegisterEffect() ==
-                    ir::HostRegisterEffect::GeneralOnly;
-    const bool preserves_pinned_state =
-            !lambda.IsValue() &&
-            lambda.GetHostRegisterEffect() ==
-                    ir::HostRegisterEffect::PreservesPinnedState;
+    const auto helper = HelperCallContract::Resolve(lambda, context.GetFeatures());
+    const bool preserve_all_leaf = helper.PreserveAllLeaf();
+    const bool fpcr_transparent = helper.FPCRTransparent();
+    const bool general_registers_only = helper.GeneralRegistersOnly();
+    const bool preserves_pinned_state = helper.PreservesPinnedState();
     ASSERT(!preserves_pinned_state || args.size() <= 3);
     bool register_result =
             preserves_pinned_state && fpcr_transparent && has_result &&
@@ -358,16 +333,7 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
 
     boost::container::small_vector<u32, 18> save_gprs;
     for (u32 code = 0; code <= 17; ++code) {
-        const bool leaf_clobbered = code <= 8 || code >= 16;
-        const bool pinned_state_clobbered =
-                code <= 2 || code == ip.GetCode() || code >= 16;
-        const bool argument_requires_slot =
-                argument_gprs.Get(code) &&
-                (!preserves_pinned_state || pinned_state_clobbered);
-        if (live_gprs.Get(code) &&
-            (!preserve_all_leaf || leaf_clobbered || argument_requires_slot) &&
-            (!preserves_pinned_state || pinned_state_clobbered ||
-             argument_requires_slot)) {
+        if (live_gprs.Get(code) && helper.RequiresGPRSnapshot(code, argument_gprs.Get(code))) {
             save_gprs.push_back(code);
         }
     }
@@ -388,9 +354,7 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
             }
         }
         for (u32 code = 0; code < 32; ++code) {
-            if (live_fprs.Get(code) &&
-                (!preserve_all_leaf || code <= 7) &&
-                (!preserves_pinned_state || code < 16)) {
+            if (live_fprs.Get(code) && helper.RequiresFPRSnapshot(code)) {
                 save_fprs.push_back(code);
             }
         }
@@ -482,10 +446,7 @@ void JitTranslator::EmitHostCall(const ir::Lambda& lambda,
             __ Mov(dst, data.imm.Get());
         } else {
             auto src = value_args[value_index++];
-            const bool source_requires_slot =
-                    src.GetCode() <= 17 &&
-                    (!preserves_pinned_state || src.GetCode() <= 2 ||
-                     src.GetCode() >= 16);
+            const bool source_requires_slot = helper.ArgumentRequiresSlot(src.GetCode());
             if (source_requires_slot) {
                 __ Ldr(dst, MemOperand(sp, saved_offset(src.GetCode())));
             } else {
