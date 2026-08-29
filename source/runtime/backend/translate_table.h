@@ -46,7 +46,11 @@ public:
         return (merged >> hash_bits ^ merged) & (size - 1);
     }
 
-    void SetInvalidValue(size_t value) { invalid_value = value; }
+    void SetInvalidValue(size_t value) {
+        std::unique_lock<TableLock> guard(lock);
+        invalid_value = value;
+        entries[Hash(0)].value = value;
+    }
 
     bool Put(size_t key, size_t value) {
         u32 index = Hash(key);
