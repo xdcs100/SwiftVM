@@ -133,8 +133,9 @@ SQLite 与 FEX 的共同正差 root 中，当前可归因的正向超额合计�
 4. LinkManager 发布入口 generation，并在 SMC invalidation 中一次性撤销该代码对象的全部外部入口。
 5. 通过 `freeSpace` 的 direct-entry 账确认收益后，再扩展到其他 root；不先泛化到重叠指令流或不透明间接目标。
 
-截至 `340247d`，前四步已在现有 function-level decoded roots 上闭合；第五步仍以 external return
-entry 回收 call-miss cold materialization 为下一项收益门禁，不把契约落地本身算作代码密度收益。
+`340247d` 先在现有 function-level decoded roots 上闭合前四步；`34ff5a9` 随后让已有 canonical
+return entry 消费该契约并完成第五步的首轮收益账。未经 live-in 证明的 terminal-only return block
+仍不发布，不能把 synthetic 空 return 的通过外推到普通函数中部入口。
 
 ### 5.6 验收
 
@@ -705,5 +706,38 @@ SMC invalidation 仍由既有 LinkManager/SmcTracker owner transaction 一次性
 - 没有新增运行时 env 开关、诊断日志、probe、临时源路径或旧机制兜底；只运行了 8 秒上限的
   static-only screen，没有压力测试或正式长基准。
 
-P0 当前剩余的是让 external return entry 消费这份 generation-aware contract，随后删除每个 call site
-单独物化 BLR 后继地址的 cold preparation；契约阶段本身保持 JIT emission 零变化。
+P0 当前剩余的是 terminal-only/有非 canonical live-in 的 return entry 规范化；已有非空 decoded return
+entry 的 call-miss consumer 已在下一阶段落地。
+
+### 16.12 fault-backed external return continuation
+
+提交 `34ff5a9` 把 indirect call miss frame 从 `{x14 guest return, x30 site resume}` 改为
+`{x14 guest return, 0 external sentinel}`。call hit 仍由 `BLR` 产生精确 x30，并从 target call entry 发布原
+frame；只有 key miss 或失效 target fault 在共享 cold publisher 写 external sentinel。callee guest return
+沿用原来的 `LDP/CMP/B/BLR` 热序列，sentinel 的 `BLR 0` 由 fault metadata 转到 generation-aware
+indirect L1/L2 external entry，因此正常 return 没有增加 tag test 或分支。
+
+原来每个 indirect call site 的独立 miss/resume label、`ADR x30,resume` 和共享 publisher branch 已完整
+删除。cold plan 按 location register 分为 call miss、guest-key mismatch 和 external continuation fault：
+call miss 发布 external frame，key mismatch 明确清空不可信 RSB，external fault 只消费当前 frame 并保留
+外层 frame。旧 `ContinuationMiss` signal reset 机制随之删除，disk-cache v18 持久化新的
+`ExternalContinuation` recovery kind。
+
+生产验证覆盖：
+
+- static/indirect call 均覆盖 `CodeMiss -> 后编译 target -> guest return`，并增加一层外部 frame；indirect
+  miss frame 的 continuation word 必须为 0，return 后只弹出当前 frame。call-return external entry 的
+  LinkManager generation 非零，source owner 失效会同时清除该 return L2 entry。
+- 失效 indirect-call target 先留下 external frame；随后 source owner 失效，另一个 return driver 消费
+  frame 后得到规范 `CodeMiss` 而不是跳旧 host PC，编译 replacement return entry 后继续成功。
+- Mac `[continuation]`、`[direct-link][production]`、非压力 `[smc]`、`[indirect-l1]` 和 guarded return
+  stack 分别通过 105、825、742、33 和 5 条断言；disk-cache v18 serializer 通过 63 条断言。
+
+短 smallpt `4 8 6` static-only 保持 279 roots 与 canonical PPM SHA-256
+`a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`，host 指令从
+`49,548 -> 49,520`，减少 28 条（`-0.056511%`）。最终 candidate 为 3.572s，只作一致性检查。
+
+曾尝试把所有 terminal-only call-return block 直接发布为 external entry，smallpt 在 8 个 root 后出现
+PageFatal；单变量撤回后完整短跑恢复。该路径没有保留：terminal-only entry 必须先有 RA/live-in
+canonicalization 证明，不能依赖测试中的空 `ReturnToHost` 形态。阶段末没有 probe、调试 env、日志、
+临时源路径、兼容兜底或长基准。

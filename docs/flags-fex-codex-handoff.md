@@ -3420,6 +3420,19 @@ peepholes.
   fallback remains. Next use the generation-aware external return entry to remove per-call-site
   call-miss continuation preparation, then remeasure the 50-instruction cold delta.
 
+- `34ff5a9` replaces indirect call-miss exact site continuations with a fault-backed external
+  continuation frame `{x14 guest return, 0 sentinel}`. Normal call hits still publish the exact BLR
+  x30, and normal returns keep the same `LDP/CMP/B/BLR` hot sequence. Only the sentinel faults into a
+  generation-aware L1/L2 return entry. Per-site miss/resume labels, `ADR x30,resume` and their shared
+  branches are removed; guest-key mismatch still clears an untrusted RSB, while an external
+  continuation fault consumes only the current frame and preserves outer frames. Disk cache v18
+  carries the new recovery kind. Mac passes 105 continuation, 825 production direct-link, 742
+  non-stress SMC, 33 indirect-L1, 5 guarded-stack and 63 serializer assertions. Bounded smallpt
+  `4 8 6` keeps 279 roots and the canonical PPM SHA while moving `49,548 -> 49,520` (`-28`,
+  `-0.056511%`). Broad terminal-only return publication was rejected after a short PageFatal and is
+  absent from the tree; it needs an RA/live-in canonicalization proof. No long benchmark, stress run,
+  probe, env switch, diagnostic log, temporary source path or compatibility fallback remains.
+
 ## Orb loop
 
 ```
