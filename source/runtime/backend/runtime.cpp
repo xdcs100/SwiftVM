@@ -170,8 +170,6 @@ struct Runtime::Impl final {
         // Wire the dispatcher's code-cache tables: L1 is per-runtime, L2 is the
         // address-space wide translate table that PushCodeCache writes to.
         state->l2_code_cache = address_space->GetCodeCacheTable().Data();
-        smc_epoch = address_space->GetSmcTracker().RegisterRuntime(
-                l1_code_cache, &state->exit_request, &state_storage);
         // Guest address virtualization: Config::memory_base carries the
         // guest->host bias (host = guest + bias); the JIT keeps it in the
         // reserved pt register and the interpreter reads it from here.
@@ -193,6 +191,12 @@ struct Runtime::Impl final {
             state->rsb_pointer = return_stack->Empty();
             state->rsb_empty = return_stack->Empty();
         }
+        smc_epoch = address_space->GetSmcTracker().RegisterRuntime(
+                l1_code_cache,
+                &state->exit_request,
+                &state_storage,
+                &state->rsb_pointer,
+                state->rsb_empty);
         jit_entry = address_space->GetTrampolines().GetRuntimeEntry();
         // Claim this thread for host-side SMC fault recovery (see OwnerSlot).
         // A thread that constructs a second Runtime keeps the newest; either
@@ -312,8 +316,12 @@ struct Runtime::Impl final {
             return false;
         }
         const auto fault_addr = reinterpret_cast<std::uintptr_t>(info->si_addr);
-        return self->address_space->GetSmcTracker().HandleWriteFault(
+        const bool handled = self->address_space->GetSmcTracker().HandleWriteFault(
                 *self->address_space, self->l1_code_cache, fault_addr);
+        if (handled && self == tls_active_runtime && self->return_stack) {
+            (void)self->return_stack->Reset(uctx);
+        }
+        return handled;
     }
 
     static bool HandleFault(void* ctx, ucontext_t* uctx, int sig, siginfo_t* info) {

@@ -18,6 +18,7 @@ public:
     [[nodiscard]] RSBFrame* Bottom() const;
     [[nodiscard]] RSBFrame* Empty() const;
     [[nodiscard]] RSBFrame* Top() const;
+    [[nodiscard]] bool Reset(ucontext_t* uctx) const;
     [[nodiscard]] bool Recover(ucontext_t* uctx, std::uintptr_t fault_addr) const;
 
 private:

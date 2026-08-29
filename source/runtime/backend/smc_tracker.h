@@ -40,6 +40,7 @@ class InterruptPollState;
 
 class AddressSpace;
 class Module;
+struct RSBFrame;
 
 class SmcTracker {
 public:
@@ -48,19 +49,28 @@ public:
     struct RuntimeEpoch {
         RuntimeEpoch(TranslateTable* table,
                      u64* request,
-                     InterruptPollState* poll)
-                : l1(table), exit_request(request), interrupt_poll(poll) {}
+                     InterruptPollState* poll,
+                     RSBFrame** continuation,
+                     RSBFrame* continuation_empty)
+                : l1(table)
+                , exit_request(request)
+                , interrupt_poll(poll)
+                , rsb_pointer(continuation)
+                , rsb_empty(continuation_empty) {}
 
         std::atomic<u64> active_epoch{kInactiveEpoch};
         // Last code-patch generation for which this execution context has
         // performed an instruction synchronization barrier.
         std::atomic<u64> synced_patch_epoch{0};
         std::atomic<u64> patch_sync_count{0};
+        std::atomic<u64> synced_continuation_epoch{0};
         TranslateTable* l1{};
         // Points at State::exit_request. The Runtime owns State for at least
         // as long as this token remains registered.
         u64* exit_request{};
         InterruptPollState* interrupt_poll{};
+        RSBFrame** rsb_pointer{};
+        RSBFrame* rsb_empty{};
     };
     using RuntimeToken = std::shared_ptr<RuntimeEpoch>;
 
@@ -86,7 +96,9 @@ public:
     // reclamation locking occurs only while pending_count_ is non-zero.
     [[nodiscard]] RuntimeToken RegisterRuntime(TranslateTable& l1,
                                                u64* exit_request = nullptr,
-                                               InterruptPollState* interrupt_poll = nullptr);
+                                               InterruptPollState* interrupt_poll = nullptr,
+                                               RSBFrame** rsb_pointer = nullptr,
+                                               RSBFrame* rsb_empty = nullptr);
     void UnregisterRuntime(const RuntimeToken& token);
     void BeginJit(const RuntimeToken& token);
     void EndJit(const RuntimeToken& token);
@@ -237,6 +249,7 @@ private:
     void ReclaimRetired();
     void MarkCloseWorkPending();
     void MaybeClearCloseWorkPending();
+    void SynchronizeContinuation(const RuntimeToken& token, u64 epoch) const;
 
     const u64 bias_;
     // Guest window mask; UINT64_MAX when the window is disabled. Every guest

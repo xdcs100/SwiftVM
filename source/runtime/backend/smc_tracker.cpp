@@ -107,13 +107,19 @@ bool SmcTracker::SetPageProtected(VAddr page, bool prot_read_only) {
 
 SmcTracker::RuntimeToken SmcTracker::RegisterRuntime(TranslateTable& l1,
                                                      u64* exit_request,
-                                                     InterruptPollState* interrupt_poll) {
-    auto token = std::make_shared<RuntimeEpoch>(&l1, exit_request, interrupt_poll);
+                                                     InterruptPollState* interrupt_poll,
+                                                     RSBFrame** rsb_pointer,
+                                                     RSBFrame* rsb_empty) {
+    auto token = std::make_shared<RuntimeEpoch>(
+            &l1, exit_request, interrupt_poll, rsb_pointer, rsb_empty);
     // Registration occurs at a host boundary before this Runtime can execute
     // JIT code, so it is born synchronized with the current patch epoch and
     // pays no first-entry ISB in the no-delink steady state.
     token->synced_patch_epoch.store(code_patch_epoch_.load(std::memory_order_seq_cst),
                                     std::memory_order_relaxed);
+    token->synced_continuation_epoch.store(
+            global_epoch_.load(std::memory_order_seq_cst),
+            std::memory_order_relaxed);
     MetadataGuard guard(*this);
     runtimes_.push_back(token);
     return token;
@@ -138,6 +144,9 @@ void SmcTracker::BeginJit(const RuntimeToken& token) {
         return;
     }
     if (!multithreaded_.load(std::memory_order_acquire)) {
+        if (token->rsb_empty) {
+            SynchronizeContinuation(token, global_epoch_.load(std::memory_order_seq_cst));
+        }
         return;
     }
     for (;;) {
@@ -147,6 +156,7 @@ void SmcTracker::BeginJit(const RuntimeToken& token) {
         // global-epoch validation below fails and retries. This ordering keeps
         // the steady-state tax to one patch load+compare.
         const auto epoch = global_epoch_.load(std::memory_order_seq_cst);
+        SynchronizeContinuation(token, epoch);
         const auto patch_epoch = code_patch_epoch_.load(std::memory_order_seq_cst);
         if (token->synced_patch_epoch.load(std::memory_order_relaxed) < patch_epoch) {
 #if defined(__aarch64__)
@@ -180,13 +190,26 @@ u64 SmcTracker::AdvanceCodePatchEpoch() {
 }
 
 void SmcTracker::EndJit(const RuntimeToken& token) {
-    if (!token || !multithreaded_.load(std::memory_order_acquire)) {
+    if (!token) {
+        return;
+    }
+    if (!multithreaded_.load(std::memory_order_acquire)) {
         return;
     }
     token->active_epoch.store(kInactiveEpoch, std::memory_order_seq_cst);
     if (pending_count_.load(std::memory_order_relaxed) != 0) {
         ReclaimRetired();
     }
+}
+
+void SmcTracker::SynchronizeContinuation(const RuntimeToken& token, u64 epoch) const {
+    if (token->synced_continuation_epoch.load(std::memory_order_relaxed) == epoch) {
+        return;
+    }
+    if (token->rsb_pointer && token->rsb_empty) {
+        *token->rsb_pointer = token->rsb_empty;
+    }
+    token->synced_continuation_epoch.store(epoch, std::memory_order_relaxed);
 }
 
 void SmcTracker::EnableMultithreading() {

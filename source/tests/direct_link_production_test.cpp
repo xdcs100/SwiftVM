@@ -1913,7 +1913,11 @@ TEST_CASE("production direct exit repeatedly delinks recompiles and relinks",
         // Hold one execution epoch open so source invalidation proves the
         // two-phase owner lifecycle instead of reclaiming immediately.
         TranslateTable held_l1{8};
-        auto held = space.GetSmcTracker().RegisterRuntime(held_l1);
+        std::array<RSBFrame, 2> held_rsb{};
+        auto* held_empty = &held_rsb[1];
+        auto* held_pointer = &held_rsb[0];
+        auto held = space.GetSmcTracker().RegisterRuntime(
+                held_l1, nullptr, nullptr, &held_pointer, held_empty);
         space.GetSmcTracker().EnableMultithreading();
         space.GetSmcTracker().BeginJit(held);
         space.InvalidateCodeRange(source_guest, source_guest + 1);
@@ -1922,6 +1926,9 @@ TEST_CASE("production direct exit repeatedly delinks recompiles and relinks",
         REQUIRE(retiring->state == LinkSiteState::Retiring);
         space.GetSmcTracker().EndJit(held);
         REQUIRE_FALSE(space.GetLinkManager().QuerySite(key));
+        space.GetSmcTracker().BeginJit(held);
+        REQUIRE(held_pointer == held_empty);
+        space.GetSmcTracker().EndJit(held);
         space.GetSmcTracker().UnregisterRuntime(held);
     }
 

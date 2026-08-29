@@ -50,6 +50,11 @@ RSBFrame* GuardedReturnStack::Top() const {
     return reinterpret_cast<RSBFrame*>(usable_end);
 }
 
+bool GuardedReturnStack::Reset(ucontext_t* uctx) const {
+    return SignalHandler::SetContextGPR(
+            uctx, 25, reinterpret_cast<std::uintptr_t>(Empty()));
+}
+
 bool GuardedReturnStack::Recover(ucontext_t* uctx, std::uintptr_t fault_addr) const {
     const auto mapping_addr = reinterpret_cast<std::uintptr_t>(mapping);
     const auto bottom_addr = reinterpret_cast<std::uintptr_t>(usable_begin);
@@ -70,8 +75,7 @@ bool GuardedReturnStack::Recover(ucontext_t* uctx, std::uintptr_t fault_addr) co
     if (!lower_access && !upper_access) {
         return false;
     }
-    return SignalHandler::SetContextGPR(
-            uctx, 25, reinterpret_cast<std::uintptr_t>(Empty()));
+    return Reset(uctx);
 }
 
 }  // namespace swift::runtime::backend
