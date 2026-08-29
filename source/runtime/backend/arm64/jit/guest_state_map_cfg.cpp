@@ -1,5 +1,6 @@
 #include "guest_state_map.h"
 
+#include <algorithm>
 #include <vector>
 
 #include "runtime/backend/arm64/helper_call_contract.h"
@@ -13,45 +14,115 @@ bool IsPinnedGPR(u32 home) {
     return home <= 9 || (home >= 19 && home <= 23) || home == 29;
 }
 
-std::bitset<30> PinnedGPRMask() {
-    std::bitset<30> mask;
-    for (u32 home = 0; home < mask.size(); ++home) {
-        mask.set(home, IsPinnedGPR(home));
+using ExtensionFacts = GuestStateMap::ExtensionFacts;
+using FunctionWidthFacts = std::array<ExtensionFacts, 30>;
+
+FunctionWidthFacts TopWidthFacts() {
+    FunctionWidthFacts facts{};
+    for (u32 home = 0; home < facts.size(); ++home) {
+        if (IsPinnedGPR(home)) {
+            facts[home] = {
+                    .known_zero_above = 1,
+                    .sign_extended_from = 1,
+                    .sign_extended_to = 64,
+            };
+        }
     }
-    return mask;
+    return facts;
 }
 
-bool DefinitionKnownZeroAbove32(ir::Value value,
-                                const std::bitset<30>& entry_facts) {
+ExtensionFacts Meet(ExtensionFacts left, ExtensionFacts right) {
+    ExtensionFacts result{};
+    if (left.known_zero_above && right.known_zero_above) {
+        result.known_zero_above =
+                std::max(left.known_zero_above, right.known_zero_above);
+    }
+    if (left.sign_extended_from && right.sign_extended_from) {
+        result.sign_extended_from =
+                std::max(left.sign_extended_from, right.sign_extended_from);
+        result.sign_extended_to =
+                std::min(left.sign_extended_to, right.sign_extended_to);
+        if (result.sign_extended_from >= result.sign_extended_to) {
+            result.sign_extended_from = 0;
+            result.sign_extended_to = 0;
+        }
+    }
+    return result;
+}
+
+ExtensionFacts DefinitionExtensionFacts(
+        ir::Value value,
+        const FunctionWidthFacts& entry_facts) {
     if (!value.Def()) {
-        return false;
+        return {};
     }
     const u32 width = ir::GetValueSizeByte(value.Type());
-    if (width <= sizeof(u32)) {
-        return true;
-    }
-    if (width != sizeof(u64)) {
-        return false;
-    }
     auto* definition = value.Def();
     switch (definition->GetOp()) {
-        case ir::OpCode::ZeroExtend32:
-        case ir::OpCode::ZeroExtend32To64:
-            return true;
-        case ir::OpCode::LoadImm:
-            return definition->GetArg<ir::Imm>(0).Get() <= UINT32_MAX;
+        case ir::OpCode::ZeroExtend32: {
+            const u32 source_bits = ir::GetValueSizeByte(
+                    definition->GetArg<ir::Value>(0).Type()) * 8;
+            return {.known_zero_above = static_cast<u8>(source_bits)};
+        }
+        case ir::OpCode::ZeroExtend32To64: {
+            auto facts = DefinitionExtensionFacts(
+                    definition->GetArg<ir::Value>(0), entry_facts);
+            if (!facts.known_zero_above || facts.known_zero_above > 32) {
+                facts.known_zero_above = 32;
+            }
+            return facts;
+        }
+        case ir::OpCode::SignExtend: {
+            const u32 source_bits = ir::GetValueSizeByte(
+                    definition->GetArg<ir::Value>(0).Type()) * 8;
+            return {
+                    .sign_extended_from = static_cast<u8>(source_bits),
+                    .sign_extended_to = static_cast<u8>(width * 8),
+            };
+        }
+        case ir::OpCode::LoadImm: {
+            const u64 immediate = definition->GetArg<ir::Imm>(0).Get();
+            const u8 bits = immediate <= UINT8_MAX
+                    ? 8
+                    : immediate <= UINT16_MAX
+                            ? 16
+                            : immediate <= UINT32_MAX ? 32 : 0;
+            return {.known_zero_above = bits};
+        }
         case ir::OpCode::GetHostGPR: {
             const u32 home = definition->GetArg<ir::Imm>(0).Get();
             return definition->GetArg<ir::Imm>(1).Get() == 0 &&
-                   home < entry_facts.size() && entry_facts.test(home);
+                           home < entry_facts.size()
+                    ? entry_facts[home]
+                    : ExtensionFacts{};
         }
         default:
             if (definition->IsBitCastOperation()) {
-                return DefinitionKnownZeroAbove32(
+                return DefinitionExtensionFacts(
                         definition->GetArg<ir::Value>(0), entry_facts);
             }
-            return false;
+            return {};
     }
+}
+
+ExtensionFacts PublicationExtensionFacts(
+        ir::Value value,
+        const FunctionWidthFacts& entry_facts) {
+    auto facts = DefinitionExtensionFacts(value, entry_facts);
+    const u32 width = ir::GetValueSizeByte(value.Type());
+    if (width == sizeof(u32)) {
+        if (!facts.known_zero_above || facts.known_zero_above > 32) {
+            facts.known_zero_above = 32;
+        }
+        if (facts.sign_extended_to > 32) {
+            facts.sign_extended_to = 32;
+        }
+        if (facts.sign_extended_from >= facts.sign_extended_to) {
+            facts.sign_extended_from = 0;
+            facts.sign_extended_to = 0;
+        }
+    }
+    return facts;
 }
 
 }  // namespace
@@ -62,7 +133,7 @@ void GuestStateMap::AnalyzeFunction(ir::HIRFunction* function,
     features = next_features;
     function_width_facts_ready = false;
     function_entry_width_facts.clear();
-    block_entry_width_facts.reset();
+    block_entry_width_facts = {};
 }
 
 void GuestStateMap::BuildFunctionWidthFacts() {
@@ -71,7 +142,7 @@ void GuestStateMap::BuildFunctionWidthFacts() {
     }
     function_width_facts_ready = true;
 
-    const auto tracked = PinnedGPRMask();
+    const auto top = TopWidthFacts();
     std::unordered_set<const ir::HIRBlock*> roots;
     if (auto* entry = function->GetEntryBlock()) {
         roots.insert(entry);
@@ -89,12 +160,12 @@ void GuestStateMap::BuildFunctionWidthFacts() {
         function_entry_width_facts.emplace(hir_block.GetBlock(),
                                            roots.contains(&hir_block)
                                                    ? WidthFacts{}
-                                                   : tracked);
+                                                   : top);
     }
 
     std::unordered_map<const ir::HIRBlock*, WidthFacts> exit_facts;
     for (auto* hir_block : blocks) {
-        exit_facts.emplace(hir_block, tracked);
+        exit_facts.emplace(hir_block, top);
     }
 
     auto transfer = [&](ir::HIRBlock* hir_block, WidthFacts facts) {
@@ -107,12 +178,19 @@ void GuestStateMap::BuildFunctionWidthFacts() {
                 const u32 offset = inst.GetArg<ir::Imm>(2).Get();
                 const auto value = inst.GetArg<ir::Value>(0);
                 const u32 width = ir::GetValueSizeByte(value.Type());
-                if (offset == 0 && width == sizeof(u32)) {
-                    facts.set(home);
-                } else if (offset == 0 && width == sizeof(u64)) {
-                    facts.set(home, DefinitionKnownZeroAbove32(value, facts));
+                if (offset == 0 &&
+                    (width == sizeof(u32) || width == sizeof(u64))) {
+                    facts[home] = PublicationExtensionFacts(value, facts);
                 } else if (offset + width > sizeof(u32)) {
-                    facts.reset(home);
+                    facts[home] = {};
+                } else {
+                    const u8 end_bits = static_cast<u8>((offset + width) * 8);
+                    if (facts[home].known_zero_above &&
+                        facts[home].known_zero_above < end_bits) {
+                        facts[home].known_zero_above = end_bits;
+                    }
+                    facts[home].sign_extended_from = 0;
+                    facts[home].sign_extended_to = 0;
                 }
                 continue;
             }
@@ -121,13 +199,17 @@ void GuestStateMap::BuildFunctionWidthFacts() {
             if (helper) {
                 for (u32 home = 0; home < facts.size(); ++home) {
                     if (IsPinnedGPR(home) && home <= 9 && helper->ClobbersGPR(home)) {
-                        facts.reset(home);
+                        facts[home] = {};
                     }
                 }
             } else if (inst.GetOp() == ir::OpCode::CallLambda ||
                        inst.GetOp() == ir::OpCode::CallLocation ||
                        inst.GetOp() == ir::OpCode::CallDynamic) {
-                facts &= ~tracked;
+                for (u32 home = 0; home < facts.size(); ++home) {
+                    if (IsPinnedGPR(home)) {
+                        facts[home] = {};
+                    }
+                }
             }
         }
         return facts;
@@ -137,17 +219,19 @@ void GuestStateMap::BuildFunctionWidthFacts() {
     do {
         changed = false;
         for (auto* hir_block : blocks) {
-            WidthFacts incoming = tracked;
+            WidthFacts incoming = top;
             if (roots.contains(hir_block)) {
-                incoming.reset();
+                incoming = {};
             } else {
                 for (auto* predecessor : hir_block->GetPredecessors()) {
                     const auto found = exit_facts.find(predecessor);
                     if (found == exit_facts.end()) {
-                        incoming.reset();
+                        incoming = {};
                         break;
                     }
-                    incoming &= found->second;
+                    for (u32 home = 0; home < incoming.size(); ++home) {
+                        incoming[home] = Meet(incoming[home], found->second[home]);
+                    }
                 }
             }
 
@@ -198,15 +282,17 @@ void GuestStateMap::PrepareCurrentEntryWidthFacts(bool fault_snapshot_needed) {
     }
 }
 
-bool GuestStateMap::EntryKnownZeroAbove32(const ir::Block* query_block,
-                                          u32 home) {
+GuestStateMap::ExtensionFacts GuestStateMap::EntryExtensionFacts(
+        const ir::Block* query_block,
+        u32 home) {
     if (!query_block || home >= block_entry_width_facts.size()) {
-        return false;
+        return {};
     }
     BuildFunctionWidthFacts();
     const auto found = function_entry_width_facts.find(query_block);
-    return found != function_entry_width_facts.end() &&
-           found->second.test(home);
+    return found != function_entry_width_facts.end()
+            ? found->second[home]
+            : ExtensionFacts{};
 }
 
 }  // namespace swift::runtime::backend::arm64

@@ -524,12 +524,28 @@ void JitTranslator::EmitSignExtend(ir::Inst* inst) {
     }
     auto value = inst->GetArg<ir::Value>(0);
     auto result = context.R(ir::Value{inst});
+    const auto residence = guest_state_map.FixedHomeForUse(value, inst);
     auto fused = value.Def() ? fused_pin_gpr_reads.find(value.Def())
                              : fused_pin_gpr_reads.end();
-    auto src = fused != fused_pin_gpr_reads.end()
+    auto src = residence
+            ? WRegister(residence->home)
+            : fused != fused_pin_gpr_reads.end()
             ? WRegister(fused->second)
             : context.W(value);
-    switch (ir::GetValueSizeByte(value.Type())) {
+    const u32 source_width = ir::GetValueSizeByte(value.Type());
+    const u32 source_bits = source_width * 8;
+    const u32 result_bits = result.Is64Bits() ? 64 : 32;
+    if (residence &&
+        residence->extension.KnownSignExtended(source_bits, result_bits)) {
+        const auto resident = result.Is64Bits()
+                ? Register{XRegister(residence->home)}
+                : Register{WRegister(residence->home)};
+        if (result != resident) {
+            __ Mov(result, resident);
+        }
+        return;
+    }
+    switch (source_width) {
         case 1:
             __ Sxtb(result, src);
             break;
@@ -622,11 +638,21 @@ void JitTranslator::EmitZeroExtend32(ir::Inst* inst) {
     }
     auto value = inst->GetArg<ir::Value>(0);
     auto result = context.W(ir::Value{inst});
+    const auto residence = guest_state_map.FixedHomeForUse(value, inst);
     auto fused = value.Def() ? fused_pin_gpr_reads.find(value.Def())
                              : fused_pin_gpr_reads.end();
-    auto src = fused != fused_pin_gpr_reads.end()
+    auto src = residence
+            ? WRegister(residence->home)
+            : fused != fused_pin_gpr_reads.end()
             ? WRegister(fused->second)
             : context.W(value);
+    const u32 source_bits = ir::GetValueSizeByte(value.Type()) * 8;
+    if (residence && residence->extension.KnownZeroAbove(source_bits)) {
+        if (result != src) {
+            __ Mov(result, src);
+        }
+        return;
+    }
     if (shift_imm_fast && value.Def() &&
         value.Def()->GetOp() == ir::OpCode::LoadUniform &&
         ir::GetValueSizeByte(value.Type()) <= 2 &&

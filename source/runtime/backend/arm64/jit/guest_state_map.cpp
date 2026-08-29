@@ -8,7 +8,7 @@ void GuestStateMap::Analyze(ir::Block* next_block,
                             const FeatureSet& next_features) {
     block = next_block;
     features = next_features;
-    block_entry_width_facts.reset();
+    block_entry_width_facts = {};
     if (const auto found = function_entry_width_facts.find(block);
         found != function_entry_width_facts.end()) {
         block_entry_width_facts = found->second;
@@ -30,9 +30,11 @@ bool GuestStateMap::ClobbersFixedHome(const ir::Inst& inst,
                                                                    features);
 }
 
-bool GuestStateMap::CurrentEntryKnownZeroAbove32(u32 home) const {
-    return home < block_entry_width_facts.size() &&
-           block_entry_width_facts.test(home);
+GuestStateMap::ExtensionFacts GuestStateMap::CurrentEntryExtensionFacts(
+        u32 home) const {
+    return home < block_entry_width_facts.size()
+            ? block_entry_width_facts[home]
+            : ExtensionFacts{};
 }
 
 bool GuestStateMap::FixedHomeSurvives(u32 home,

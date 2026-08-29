@@ -1406,7 +1406,7 @@ void JitTranslator::EmitSetHostGPR(ir::Inst* inst) {
     if (bit_offset == 0 && bit_width == 32 && pin_ext_reg) {
         const bool normalize_resident_home = residence &&
                 value_reg.W() == host_reg.W() &&
-                !residence->known_zero_above_32;
+                !residence->extension.KnownZeroAbove(32);
         if (value_reg.W() != host_reg.W() || normalize_resident_home) {
             __ Mov(host_reg.W(), value_reg.W());
         }

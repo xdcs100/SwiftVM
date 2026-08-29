@@ -385,9 +385,10 @@ std::optional<WRegister> JitTranslator::ResolvePinnedGPRWUse(ir::Value value,
     if (!value.Def() || !consumer) {
         return std::nullopt;
     }
+    const u32 width = ir::GetValueSizeByte(value.Type());
     const auto residence = guest_state_map.RegisteredFixedHomeForUse(
             value, consumer);
-    if (residence && residence->width == sizeof(u32)) {
+    if (residence && width <= sizeof(u32) && residence->width == width) {
         return WRegister(residence->home);
     }
     const auto pinned = fused_pin_gpr_reads.find(value.Def());
@@ -395,7 +396,7 @@ std::optional<WRegister> JitTranslator::ResolvePinnedGPRWUse(ir::Value value,
         return WRegister(pinned->second);
     }
     const auto inferred = guest_state_map.FixedHomeForUse(value, consumer);
-    return inferred && inferred->width == sizeof(u32)
+    return inferred && width <= sizeof(u32) && inferred->width == width
             ? std::optional<WRegister>{WRegister(inferred->home)}
             : std::nullopt;
 }
@@ -456,7 +457,7 @@ void JitTranslator::PreparePinnedGPRCopies(ir::Block* block) {
                     GuestStateMap::FixedHomeValue{
                             .home = plan->target,
                             .width = sizeof(u32),
-                            .known_zero_above_32 = true,
+                            .extension = {.known_zero_above = 32},
                     });
         }
         pinned_gpr_copies.emplace(&inst, *plan);

@@ -21,6 +21,8 @@ enum class PinnedWidthShape {
     NarrowSelect,
     PublishedLow32,
     PublishedLow32MultiUse,
+    PublishedZero8,
+    PublishedSign8,
     SelectPublication,
     SelectPublicationFault,
 };
@@ -67,6 +69,31 @@ std::vector<std::string> EmitWidthFact(PinnedWidthShape shape, bool overwrite_ta
             auto sum = block->Add(low, Operand{Imm{3u}}).SetType(ValueType::U32);
             block->StoreUniform(Uniform{72, ValueType::U32}, sum);
         }
+    } else if (shape == PinnedWidthShape::PublishedZero8) {
+        auto address = block->LoadImm(Imm{swift::u64{0x1000}}).SetType(ValueType::U64);
+        auto narrow = block->LoadMemory(Operand{address}).SetType(ValueType::U8);
+        auto widened = block->ZeroExtend32(narrow).SetType(ValueType::U32);
+        auto published = block->ZeroExtend32To64(widened).SetType(ValueType::U64);
+        block->SetHostGPR(published, HostRegIndex(22), Imm{0u});
+        if (overwrite_target) {
+            auto replacement = block->LoadImm(Imm{swift::u64{0x2000}})
+                                       .SetType(ValueType::U64);
+            block->SetHostGPR(replacement, HostRegIndex(22), Imm{0u});
+        }
+        auto reused = block->ZeroExtend32(narrow).SetType(ValueType::U32);
+        block->StoreUniform(Uniform{80, ValueType::U32}, reused);
+    } else if (shape == PinnedWidthShape::PublishedSign8) {
+        auto address = block->LoadImm(Imm{swift::u64{0x1000}}).SetType(ValueType::U64);
+        auto narrow = block->LoadMemory(Operand{address}).SetType(ValueType::S8);
+        auto published = block->SignExtend(narrow).SetType(ValueType::U64);
+        block->SetHostGPR(published, HostRegIndex(22), Imm{0u});
+        if (overwrite_target) {
+            auto replacement = block->LoadImm(Imm{swift::u64{0x2000}})
+                                       .SetType(ValueType::U64);
+            block->SetHostGPR(replacement, HostRegIndex(22), Imm{0u});
+        }
+        auto reused = block->SignExtend(narrow).SetType(ValueType::U64);
+        block->StoreUniform(Uniform{88, ValueType::U64}, reused);
     } else {
         auto test = block->LoadImm(Imm{swift::u64{3}}).SetType(ValueType::U64);
         auto zero = block->LoadImm(Imm{swift::u64{0}}).SetType(ValueType::U64);
@@ -156,6 +183,27 @@ TEST_CASE("a published low view serves multiple consumers from one value version
     REQUIRE(Count(lines, "lsr w", "#0") == 0);
     REQUIRE(Count(lines, "subs w", "w22, #0x8") == 1);
     REQUIRE(Count(lines, "add w", "w22, #0x3") == 1);
+}
+
+TEST_CASE("a published U8 zero extension serves a later extension from its pinned home") {
+    const auto lines = EmitWidthFact(PinnedWidthShape::PublishedZero8, false);
+    REQUIRE(Count(lines, "uxtb") == 1);
+    REQUIRE(Count(lines, "mov w", ", w22") == 1);
+}
+
+TEST_CASE("a published S8 sign extension serves a later extension from its pinned home") {
+    const auto lines = EmitWidthFact(PinnedWidthShape::PublishedSign8, false);
+    REQUIRE(Count(lines, "sxtb") == 1);
+    REQUIRE(Count(lines, "mov x", ", x22") == 1);
+}
+
+TEST_CASE("overwriting narrow extension facts rejects the pinned home") {
+    const auto zero = EmitWidthFact(PinnedWidthShape::PublishedZero8, true);
+    const auto sign = EmitWidthFact(PinnedWidthShape::PublishedSign8, true);
+    REQUIRE(Count(zero, "uxtb") == 2);
+    REQUIRE(Count(zero, "mov w", ", w22") == 0);
+    REQUIRE(Count(sign, "sxtb") == 2);
+    REQUIRE(Count(sign, "mov x", ", x22") == 0);
 }
 
 TEST_CASE("a zero-extended SelectZero result publishes directly to its pinned home") {

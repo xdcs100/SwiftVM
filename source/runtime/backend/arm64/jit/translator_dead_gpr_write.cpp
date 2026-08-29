@@ -116,11 +116,16 @@ void JitTranslator::PrepareDeadPinnedGPRWrites(ir::Block* block) {
         }
         auto published = inst.GetArg<ir::Value>(0);
         if (!has_reused_publication && published.Def()) {
-            published_versions.push_back(published.Def());
-            if (published.Def()->GetOp() == ir::OpCode::ZeroExtend32To64) {
-                auto narrow = published.Def()->GetArg<ir::Value>(0);
-                if (narrow.Def()) {
-                    published_versions.push_back(narrow.Def());
+            auto* version = published.Def();
+            published_versions.push_back(version);
+            while (version &&
+                   (version->GetOp() == ir::OpCode::ZeroExtend32 ||
+                    version->GetOp() == ir::OpCode::ZeroExtend32To64 ||
+                    version->GetOp() == ir::OpCode::SignExtend)) {
+                auto alias = version->GetArg<ir::Value>(0);
+                version = alias.Def();
+                if (version) {
+                    published_versions.push_back(version);
                 }
             }
         }

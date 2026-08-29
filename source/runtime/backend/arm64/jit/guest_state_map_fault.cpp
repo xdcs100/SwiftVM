@@ -54,8 +54,8 @@ bool GuestStateMap::FaultSnapshotContains(
     const bool width_matches = !require_zero_above_32 ||
             std::ranges::any_of(fault_width_snapshots, [&](const auto& snapshot) {
                 return snapshot.boundary == &boundary &&
-                       home < snapshot.known_zero_above_32.size() &&
-                       snapshot.known_zero_above_32.test(home);
+                       home < snapshot.extension_facts.size() &&
+                       snapshot.extension_facts[home].KnownZeroAbove(32);
             });
     return width_matches &&
            std::ranges::any_of(fault_snapshot_values, [&](const auto& snapshot) {

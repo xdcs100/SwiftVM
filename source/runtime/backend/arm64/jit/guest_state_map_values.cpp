@@ -15,6 +15,10 @@ bool ReadsFixedHomeValue(const ir::Inst& consumer, u32 width) {
         case ir::OpCode::SetHostGPR:
         case ir::OpCode::Add:
         case ir::OpCode::Select:
+            return width >= sizeof(u32);
+        case ir::OpCode::ZeroExtend32:
+        case ir::OpCode::ZeroExtend32To64:
+        case ir::OpCode::SignExtend:
             return true;
         case ir::OpCode::Sub:
         case ir::OpCode::And:
@@ -24,6 +28,12 @@ bool ReadsFixedHomeValue(const ir::Inst& consumer, u32 width) {
         default:
             return false;
     }
+}
+
+bool SupportsResidentDefinitionElision(const ir::Inst& consumer) {
+    return consumer.GetOp() != ir::OpCode::ZeroExtend32 &&
+           consumer.GetOp() != ir::OpCode::ZeroExtend32To64 &&
+           consumer.GetOp() != ir::OpCode::SignExtend;
 }
 
 bool MayClobberFixedHomes(ir::OpCode op) {
@@ -61,7 +71,7 @@ struct EarlyClobber {
 void GuestStateMap::PublishValue(ir::Value value,
                                  u32 home,
                                  u32 publication,
-                                 bool known_zero_above_32,
+                                 ExtensionFacts extension,
                                  ActiveState& active) {
     auto* version = value.Def();
     const u32 width = ir::GetValueSizeByte(value.Type());
@@ -73,65 +83,117 @@ void GuestStateMap::PublishValue(ir::Value value,
             .location = {
                     .home = static_cast<u16>(home),
                     .width = static_cast<u8>(width),
-                    .known_zero_above_32 = known_zero_above_32,
+                    .extension = extension,
             },
             .publication = publication,
     };
     active.versions[version].push_back(published);
     active.homes[home].push_back(version);
-    if (width != sizeof(u64) || version->GetOp() != ir::OpCode::ZeroExtend32To64) {
-        return;
+    auto* alias_root = version;
+    while (alias_root) {
+        const auto op = alias_root->GetOp();
+        if (op != ir::OpCode::ZeroExtend32 &&
+            op != ir::OpCode::ZeroExtend32To64 &&
+            op != ir::OpCode::SignExtend) {
+            break;
+        }
+        const auto alias = alias_root->GetArg<ir::Value>(0);
+        const u32 alias_width = ir::GetValueSizeByte(alias.Type());
+        if (!alias.Def() || alias_width == 0 || alias_width > sizeof(u32)) {
+            break;
+        }
+        ActiveValue alias_published{
+                .version = alias.Def(),
+                .location = {
+                        .home = static_cast<u16>(home),
+                        .width = static_cast<u8>(alias_width),
+                        .extension = extension,
+                },
+                .publication = publication,
+        };
+        active.versions[alias.Def()].push_back(alias_published);
+        active.homes[home].push_back(alias.Def());
+        alias_root = alias.Def();
     }
-    const auto narrow = version->GetArg<ir::Value>(0);
-    if (!narrow.Def() || ir::GetValueSizeByte(narrow.Type()) != sizeof(u32)) {
-        return;
-    }
-    ActiveValue narrow_published{
-            .version = narrow.Def(),
-            .location = {
-                    .home = static_cast<u16>(home),
-                    .width = sizeof(u32),
-                    .known_zero_above_32 = true,
-            },
-            .publication = publication,
-    };
-    active.versions[narrow.Def()].push_back(narrow_published);
-    active.homes[home].push_back(narrow.Def());
 }
 
-bool GuestStateMap::ValueKnownZeroAbove32(
+GuestStateMap::ExtensionFacts GuestStateMap::ValueExtensionFacts(
         ir::Value value,
         const ActiveState& active) const {
     if (!value.Def()) {
-        return false;
+        return {};
     }
     const u32 width = ir::GetValueSizeByte(value.Type());
-    if (width <= sizeof(u32)) {
-        return true;
-    }
-    if (width != sizeof(u64)) {
-        return false;
-    }
+    ExtensionFacts facts{};
     if (const auto found = active.versions.find(value.Def());
-        found != active.versions.end() &&
-        std::ranges::any_of(found->second, [](const auto& candidate) {
-            return candidate.location.known_zero_above_32;
-        })) {
-        return true;
+        found != active.versions.end()) {
+        for (const auto& candidate : found->second) {
+            const auto& candidate_facts = candidate.location.extension;
+            if (candidate_facts.known_zero_above &&
+                (!facts.known_zero_above ||
+                 candidate_facts.known_zero_above < facts.known_zero_above)) {
+                facts.known_zero_above = candidate_facts.known_zero_above;
+            }
+            if (candidate_facts.sign_extended_from &&
+                (!facts.sign_extended_from ||
+                 candidate_facts.sign_extended_from < facts.sign_extended_from)) {
+                facts.sign_extended_from = candidate_facts.sign_extended_from;
+                facts.sign_extended_to = candidate_facts.sign_extended_to;
+            }
+        }
     }
     switch (value.Def()->GetOp()) {
-        case ir::OpCode::ZeroExtend32:
-        case ir::OpCode::ZeroExtend32To64:
-            return true;
-        case ir::OpCode::LoadImm:
-            return value.Def()->GetArg<ir::Imm>(0).Get() <= UINT32_MAX;
+        case ir::OpCode::ZeroExtend32: {
+            const u8 source_bits = static_cast<u8>(ir::GetValueSizeByte(
+                    value.Def()->GetArg<ir::Value>(0).Type()) * 8);
+            facts.known_zero_above = source_bits;
+            break;
+        }
+        case ir::OpCode::ZeroExtend32To64: {
+            auto source_facts = ValueExtensionFacts(
+                    value.Def()->GetArg<ir::Value>(0), active);
+            if (!source_facts.known_zero_above ||
+                source_facts.known_zero_above > 32) {
+                source_facts.known_zero_above = 32;
+            }
+            facts = source_facts;
+            break;
+        }
+        case ir::OpCode::SignExtend: {
+            facts.sign_extended_from = static_cast<u8>(ir::GetValueSizeByte(
+                    value.Def()->GetArg<ir::Value>(0).Type()) * 8);
+            facts.sign_extended_to = static_cast<u8>(width * 8);
+            break;
+        }
+        case ir::OpCode::LoadImm: {
+            const u64 immediate = value.Def()->GetArg<ir::Imm>(0).Get();
+            facts.known_zero_above = immediate <= UINT8_MAX
+                    ? 8
+                    : immediate <= UINT16_MAX
+                            ? 16
+                            : immediate <= UINT32_MAX ? 32 : 0;
+            break;
+        }
         default:
             if (value.Def()->IsBitCastOperation()) {
-                return ValueKnownZeroAbove32(
+                facts = ValueExtensionFacts(
                         value.Def()->GetArg<ir::Value>(0), active);
             }
-            return false;
+            break;
     }
+    if (width == sizeof(u32)) {
+        if (!facts.known_zero_above || facts.known_zero_above > 32) {
+            facts.known_zero_above = 32;
+        }
+        if (facts.sign_extended_to > 32) {
+            facts.sign_extended_to = 32;
+        }
+        if (facts.sign_extended_from >= facts.sign_extended_to) {
+            facts.sign_extended_from = 0;
+            facts.sign_extended_to = 0;
+        }
+    }
+    return facts;
 }
 
 void GuestStateMap::InvalidateHome(u32 home, ActiveState& active) const {
@@ -196,7 +258,8 @@ void GuestStateMap::BuildValueVersions(
                 continue;
             }
             const u32 width = ir::GetValueSizeByte(value.Type());
-            if (width != sizeof(u32) && width != sizeof(u64)) {
+            if (width != sizeof(u8) && width != sizeof(u16) &&
+                width != sizeof(u32) && width != sizeof(u64)) {
                 continue;
             }
             if (!ReadsFixedHomeValue(inst, width)) {
@@ -215,7 +278,9 @@ void GuestStateMap::BuildValueVersions(
             if (newest) {
                 fixed_home_uses.insert_or_assign(
                         std::make_pair(value.Def(), &inst), newest->location);
-                ++fixed_home_use_counts[value.Def()];
+                if (SupportsResidentDefinitionElision(inst)) {
+                    ++fixed_home_use_counts[value.Def()];
+                }
             }
         }
 
@@ -226,8 +291,9 @@ void GuestStateMap::BuildValueVersions(
         const auto published_value = publication
                 ? inst.GetArg<ir::Value>(0)
                 : ir::Value{};
-        const bool publication_zero_above_32 = publication &&
-                ValueKnownZeroAbove32(published_value, active);
+        const ExtensionFacts publication_extension = publication
+                ? ValueExtensionFacts(published_value, active)
+                : ExtensionFacts{};
         if (capture_fault_snapshots && MayFaultOrObserve(inst)) {
             CaptureFaultSnapshot(inst, active, width_facts);
         }
@@ -244,12 +310,19 @@ void GuestStateMap::BuildValueVersions(
                         inst.GetArg<ir::Value>(0).Type());
                 InvalidateHome(home, active);
                 if (home < width_facts.size()) {
-                    if (offset == 0 && width == sizeof(u32)) {
-                        width_facts.set(home);
-                    } else if (offset == 0 && width == sizeof(u64)) {
-                        width_facts.set(home, publication_zero_above_32);
+                    if (offset == 0 &&
+                        (width == sizeof(u32) || width == sizeof(u64))) {
+                        width_facts[home] = publication_extension;
                     } else if (offset + width > sizeof(u32)) {
-                        width_facts.reset(home);
+                        width_facts[home] = {};
+                    } else {
+                        const u8 end_bits = static_cast<u8>((offset + width) * 8);
+                        if (width_facts[home].known_zero_above &&
+                            width_facts[home].known_zero_above < end_bits) {
+                            width_facts[home].known_zero_above = end_bits;
+                        }
+                        width_facts[home].sign_extended_from = 0;
+                        width_facts[home].sign_extended_to = 0;
                     }
                 }
             } else if (MayClobberFixedHomes(inst.GetOp())) {
@@ -261,7 +334,7 @@ void GuestStateMap::BuildValueVersions(
                 }
                 for (u32 home = 0; home < width_facts.size(); ++home) {
                     if (ClobbersFixedHome(inst, home)) {
-                        width_facts.reset(home);
+                        width_facts[home] = {};
                     }
                 }
             }
@@ -273,7 +346,7 @@ void GuestStateMap::BuildValueVersions(
                 const u32 home = inst.GetArg<ir::Imm>(0).Get();
                 if (IsPinnedGPR(home)) {
                     PublishValue(ir::Value{&inst}, home, inst.Id(),
-                                 CurrentEntryKnownZeroAbove32(home), active);
+                                 CurrentEntryExtensionFacts(home), active);
                 }
             }
             continue;
@@ -281,7 +354,7 @@ void GuestStateMap::BuildValueVersions(
         const u32 home = inst.GetArg<ir::Imm>(1).Get();
         if (IsPinnedGPR(home)) {
             PublishValue(published_value, home, inst.Id(),
-                         publication_zero_above_32, active);
+                         publication_extension, active);
         }
     }
 }

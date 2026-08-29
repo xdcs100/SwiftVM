@@ -174,7 +174,9 @@ std::vector<std::string> EmitCrossBlockWidth(bool external_entry) {
     return Disassemble(context);
 }
 
-bool DiamondEntryKnownZero(bool clobber_predecessor) {
+arm64::GuestStateMap::ExtensionFacts DiamondEntryFacts(
+        bool signed_value,
+        bool clobber_predecessor) {
     constexpr Location entry{0x9800};
     constexpr Location left_location{0x9810};
     constexpr Location right_location{0x9820};
@@ -182,7 +184,14 @@ bool DiamondEntryKnownZero(bool clobber_predecessor) {
     FeatureSet features{};
     HIRBuilder builder{1, true, features};
     auto* function = builder.AppendFunction(entry, Location{0x9840});
-    auto value = function->LoadImm(Imm{swift::u32{1}}).SetType(ValueType::U32);
+    Value value;
+    if (signed_value) {
+        auto narrow = function->LoadImm(Imm{swift::u8{0x80}})
+                              .SetType(ValueType::S8);
+        value = function->SignExtend(narrow).SetType(ValueType::U64);
+    } else {
+        value = function->LoadImm(Imm{swift::u32{1}}).SetType(ValueType::U32);
+    }
     function->SetHostGPR(value, HostRegIndex(23), Imm{0u});
     auto condition = function->LoadImm(Imm{swift::u8{1}}).SetType(ValueType::U8);
     auto [left, right] = builder.If(terminal::If{
@@ -208,7 +217,7 @@ bool DiamondEntryKnownZero(bool clobber_predecessor) {
 
     arm64::GuestStateMap state_map;
     state_map.AnalyzeFunction(function, features);
-    return state_map.EntryKnownZeroAbove32(join->GetBlock(), 23);
+    return state_map.EntryExtensionFacts(join->GetBlock(), 23);
 }
 
 bool LoopEntryKnownZero(bool clobber_backedge) {
@@ -233,7 +242,8 @@ bool LoopEntryKnownZero(bool clobber_backedge) {
 
     arm64::GuestStateMap state_map;
     state_map.AnalyzeFunction(function, features);
-    return state_map.EntryKnownZeroAbove32(loop->GetBlock(), 23);
+    return state_map.EntryExtensionFacts(loop->GetBlock(), 23)
+            .KnownZeroAbove(32);
 }
 
 std::size_t Count(const std::vector<std::string>& lines,
@@ -282,8 +292,10 @@ TEST_CASE("pinned CFG width facts stop at external entry roots") {
 }
 
 TEST_CASE("pinned CFG width facts meet at diamonds and backedges") {
-    REQUIRE(DiamondEntryKnownZero(false));
-    REQUIRE_FALSE(DiamondEntryKnownZero(true));
+    REQUIRE(DiamondEntryFacts(false, false).KnownZeroAbove(32));
+    REQUIRE_FALSE(DiamondEntryFacts(false, true).KnownZeroAbove(32));
+    REQUIRE(DiamondEntryFacts(true, false).KnownSignExtended(8, 64));
+    REQUIRE_FALSE(DiamondEntryFacts(true, true).KnownSignExtended(8, 64));
     REQUIRE(LoopEntryKnownZero(false));
     REQUIRE_FALSE(LoopEntryKnownZero(true));
 }
