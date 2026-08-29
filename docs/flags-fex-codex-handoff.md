@@ -3272,6 +3272,22 @@ peepholes.
   boundary, late-split replay, region ownership, CallLambda, 72-block CFG and SMC dependency tests.
   No probe, debug path, environment switch or stress run remains.
 
+- Immediate 32/64-bit SHLD/SHRD now bypass the dynamic count mask/select/guard graph. The frontend
+  retains complementary immediate shifts for allocation, and a dedicated post-RA ARM64 planner
+  fuses an adjacent single-use pair plus Or into one EXTR that writes the final allocated result.
+  This placement is required: a first-class pre-RA funnel node changed fixed-home publication
+  timing and caused deterministic SQLite heap corruption, so that design was removed. Parity token
+  retention is restricted to the identity logical flags value proven to consume a fused result;
+  the broad logical-token alternative grew SQLite by 592 instructions and was fully reverted. The
+  exact SQLite common set keeps all 2,241 roots with 100% coverage and no growth, moves
+  `264,582 -> 264,565`, and shrinks `powerOfTen@0x408ee0` `194 -> 177` versus FEX at 153. Normalized
+  output and the single-thread heap check pass. Smallpt remains 267 roots / 37,132 instructions with
+  PPM SHA-256 `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`;
+  CoreMark 20k remains 299 roots / 37,160 instructions with `crcfinal=0x382f`. A six-form native x86
+  differential confirms result plus defined CF/PF/ZF/SF byte-for-byte; its temporary probe was
+  deleted. Mac/Orb focused frontend, fusion, parity-token and logical-flags tests pass. No new env
+  switch, diagnostic path or stress run remains.
+
 ## Orb loop
 
 ```

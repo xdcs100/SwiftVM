@@ -398,3 +398,35 @@ HIRFunction 时才转为 `LinkBlock`。该目标由已有条件边、fallthrough
 
 该候选改变了 root 划分，不使用要求同 PC/version 的 retained-weight 估算；本阶段比较完整
 static-only root 总量和正确性 oracle。下一阶段从版本化 flags edge ABI 的重复表示审计开始。
+
+### 16.2 立即数双精度移位的分配后 funnel fusion
+
+`powerOfTen` 的主要局部残差不是 pin 缺失，而是立即数 `SHLD/SHRD` 仍沿用动态计数路径：
+计数 mask、补数、两条变量移位、零计数选择和 flags guard 均在计数编译期已知时保留。前端现在对
+32/64 位有效非零立即数直接生成互补的 `LsrImm/LslImm/Or` 图，零计数直接保持目的值和旧 flags，
+寄存器计数及 16 位未定义区间继续使用规范动态路径。
+
+ARM64 后端在寄存器分配完成后识别相邻、单 use、等宽且移位量互补的图，把它发成一条
+`EXTR`，并直接写最终 `Or` 的分配结果。这里没有增加首类 funnel IR：早期折叠会改变 fixed-home
+publication 的 live range，曾在 SQLite 单线程短跑中触发确定性 heap corruption；分配后 fusion
+保留原图的寄存器所有权，同时删除三条中间指令。matcher 与 emitter 均复证完整形态，并拒绝
+共享 shift、局部 condition 和现有 narrow-extract fusion。
+
+双精度移位随后通过 identity `Or` 保存 PF。flags-register ABI 下只为已确认的 funnel 结果保留
+parity token，并把原始融合结果作为 token producer；不全局改变普通 `Or/Xor`。全局补齐 logical
+token 虽能修正 PF，却使 SQLite 增长 592 条，已完整撤销。最终窄化方案的门禁结果：
+
+- SQLite 精确公共集合 2,241 roots / 100% host 与 entry coverage，`264,582 -> 264,565`，仅
+  `powerOfTen@0x408ee0` 变化，`194 -> 177`，无公共热点增长；相对 FEX 153 条的残差由 41 条降到
+  24 条。
+- SQLite `--threads 1` 返回 0，时间归一化输出逐字节一致。
+- smallpt 保持 267 roots / 37,132 条，PPM SHA-256 保持
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`。
+- CoreMark 20k 保持 299 roots / 37,160 条，`crcfinal=0x382f`。
+- 32/64 位 SHLD/SHRD 六组立即数的 result、CF、PF、ZF、SF 与原生 x86 的 96 字节结果逐字节一致；
+  临时差分 probe 已删除。Mac/Orb 的前端路径、fusion 拒绝边界、parity token 和 logical flags
+  定向测试通过。
+
+该阶段没有新增环境开关、诊断路径或运行时兜底。下一批继续按加权 root 残差选择
+GuestStateMap/width facts 或 continuation hot/cold contract 的首个生产消费者，不做零收益的通用
+flags ABI 扩张。
