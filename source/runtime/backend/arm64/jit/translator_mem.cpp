@@ -1542,6 +1542,7 @@ void JitTranslator::EmitStoreUniform(ir::Inst* inst) {
     auto uni = inst->GetArg<ir::Uniform>(0);
     s32 offset = offsetof(State, uniform_buffer_begin) + uni.GetOffset();
     const auto value = inst->GetArg<ir::Value>(1);
+    ObserveEdgeCarryPolarity(uni, value);
     auto value_type = value.Type();
     const bool zero_gpr = CanUseZeroStoreRegister(value);
     CPUReg reg = zero_gpr

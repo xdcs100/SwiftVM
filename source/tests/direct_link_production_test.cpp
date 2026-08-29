@@ -242,7 +242,9 @@ void* TranslatePendingFlagsSource(const std::shared_ptr<Module>& module,
 void* TranslatePendingFlagsStaticSource(const std::shared_ptr<Module>& module,
                                         VAddr guest,
                                         VAddr target,
-                                        Flags saved_flags = Flags::All) {
+                                        Flags saved_flags = Flags::All,
+                                        EdgeCarryPolarity carry_polarity =
+                                                EdgeCarryPolarity::Unknown) {
     HIRBuilder builder{1, true};
     auto* function = builder.AppendFunction(Location{guest}, Location{guest + 2});
     auto* body = builder.LinkBlock(terminal::LinkBlock{Location{guest + 1}});
@@ -252,6 +254,19 @@ void* TranslatePendingFlagsStaticSource(const std::shared_ptr<Module>& module,
     const auto one = function->LoadImm(Imm{u8{1}}).SetType(ValueType::U8);
     const auto result = function->Sub(value, Operand{one}).SetType(ValueType::U8);
     function->SaveFlags(result, saved_flags);
+    if (True(saved_flags & Flags::Carry)) {
+        if (carry_polarity == EdgeCarryPolarity::Direct) {
+            function->InvertCarry();
+        } else if (carry_polarity == EdgeCarryPolarity::Inverted) {
+            const auto inverted = function->LoadImm(Imm{u8{1}})
+                                          .SetType(ValueType::U8);
+            function->StoreUniform(
+                    Uniform{offsetof(swift::x86::ThreadContext64,
+                                     carry_inverted),
+                            ValueType::U8},
+                    inverted);
+        }
+    }
     function->AdvancePC(Imm{u64{1}});
     function->SetLocation(Lambda{Imm{target}});
     function->EndBlock(terminal::ReturnToDispatch{});
@@ -1269,6 +1284,10 @@ TEST_CASE("static forwards register their flags bypass",
                               0);
     REQUIRE(guest_memory != MAP_FAILED);
     {
+        const u32 flags_case = GENERATE(0u, 1u, 2u, 3u);
+        CAPTURE(flags_case);
+        ScopedEnvironment flags_cfinv{
+                "SVM_FLAGS_CFINV", flags_case == 3 ? "0" : "1"};
         const VAddr source_guest = page_size + 0x100;
         const VAddr target_guest = 5 * page_size + 0x100;
         Config config{
@@ -1278,6 +1297,9 @@ TEST_CASE("static forwards register their flags bypass",
                 .enable_asm_interp = false,
                 .has_local_operation = false,
                 .backend_isa = kArm64,
+                .arm64_features = flags_case == 3
+                        ? Arm64Features::None
+                        : Arm64Features::FlagM,
                 .uniform_buffer_size = 64,
                 .global_opts = Optimizations::BlockLink |
                                Optimizations::ReturnStackBuffer,
@@ -1287,9 +1309,6 @@ TEST_CASE("static forwards register their flags bypass",
         };
         AddressSpace space{config};
         auto module = space.GetDefaultModule();
-
-        const u32 flags_case = GENERATE(0u, 1u, 2u);
-        CAPTURE(flags_case);
         auto target_flags = Flags::NZCV;
         auto source_flags = Flags::All;
         u32 expected_mask = kEdgeNZCVMask;
@@ -1297,11 +1316,15 @@ TEST_CASE("static forwards register their flags bypass",
             target_flags = Flags::NZ;
             source_flags = Flags::NZ;
             expected_mask = 0xC000'0000u;
-        } else if (flags_case == 2) {
+        } else if (flags_case >= 2) {
             target_flags = Flags::Negate | Flags::Carry;
             source_flags = target_flags;
             expected_mask = 0xA000'0000u;
         }
+        const auto expected_polarity = (expected_mask & kEdgeCarryMask) == 0
+                ? EdgeCarryPolarity::Unknown
+                : (flags_case == 3 ? EdgeCarryPolarity::Inverted
+                                   : EdgeCarryPolarity::Direct);
 
         auto* target_code = TranslateFlagsKillingTarget(
                 module, target_guest, target_flags);
@@ -1316,7 +1339,8 @@ TEST_CASE("static forwards register their flags bypass",
                 expected_mask);
 
         auto* source_code = static_cast<u8*>(TranslatePendingFlagsStaticSource(
-                module, source_guest, target_guest, source_flags));
+                module, source_guest, target_guest, source_flags,
+                expected_polarity));
         REQUIRE(source_code != nullptr);
         space.PushCodeCache(Location{source_guest}, source_code);
         const auto region = module->GetCodeRegion(source_code);
@@ -1327,6 +1351,7 @@ TEST_CASE("static forwards register their flags bypass",
         REQUIRE(site.record.guest_target == target_guest);
         REQUIRE(site.record.flags_bypass_offset != UINT32_MAX);
         REQUIRE(site.record.edge_flags.valid_nzcv_mask == expected_mask);
+        REQUIRE(site.record.edge_flags.carry_polarity == expected_polarity);
         REQUIRE(target->pending_flags_contract.Accepts(site.record.edge_flags));
         auto* bypass = region->rx_base + site.record.flags_bypass_offset;
         if (flags_case == 0) {
@@ -1345,7 +1370,7 @@ TEST_CASE("static forwards register their flags bypass",
         if (flags_case == 1) {
             REQUIRE(DecodeBranchTarget(bypass, LoadInsn(bypass)) ==
                     reinterpret_cast<uintptr_t>(bypass + 3 * sizeof(u32)));
-        } else if (flags_case == 2) {
+        } else if (flags_case >= 2) {
             const auto bypass_target = DecodeBranchTarget(
                     bypass, LoadInsn(bypass));
             REQUIRE(bypass_target);

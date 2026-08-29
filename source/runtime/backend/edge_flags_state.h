@@ -22,6 +22,34 @@ enum class EdgeFlagsProducer : u8 {
     Count,
 };
 
+class EdgeCarrySourceState final {
+public:
+    constexpr void Reset() {
+        polarity = EdgeCarryPolarity::Unknown;
+    }
+
+    constexpr void PublishRuntimePolarity(bool inverted) {
+        polarity = inverted ? EdgeCarryPolarity::Inverted
+                            : EdgeCarryPolarity::Direct;
+    }
+
+    constexpr void InvalidateRuntimePolarity() {
+        polarity = EdgeCarryPolarity::Unknown;
+    }
+
+    [[nodiscard]] constexpr EdgeCarryPolarity Resolve(
+            u32 valid_nzcv_mask,
+            bool canonical) const {
+        if ((valid_nzcv_mask & kEdgeCarryMask) == 0) {
+            return EdgeCarryPolarity::Unknown;
+        }
+        return canonical ? EdgeCarryPolarity::Direct : polarity;
+    }
+
+private:
+    EdgeCarryPolarity polarity{EdgeCarryPolarity::Unknown};
+};
+
 struct EdgeFlagsState {
     u32 valid_nzcv_mask{};
     EdgeCarryPolarity carry_polarity{EdgeCarryPolarity::Unknown};

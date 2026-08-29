@@ -1231,6 +1231,7 @@ void JitTranslator::Translate(ir::Block* block) {
     flags_token_keep = false;
     nzcv_dirty = false;
     nzcv_requested = {};
+    edge_carry_source.Reset();
     // Keep entry padding outside the block density/hot accounting window.  It
     // is reached only on the first fallthrough; every self edge targets the
     // label bound after it.

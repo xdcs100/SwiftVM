@@ -16,12 +16,14 @@ using swift::runtime::backend::CodeCache;
 using swift::runtime::backend::CodeRegion;
 using swift::runtime::backend::DecodeBranchTarget;
 using swift::runtime::backend::EdgeCarryPolarity;
+using swift::runtime::backend::EdgeCarrySourceState;
 using swift::runtime::backend::EdgeFlagsProducer;
 using swift::runtime::backend::EdgeFlagsState;
 using swift::runtime::backend::EdgeFlagsTargetContract;
 using swift::runtime::backend::EncodeB;
 using swift::runtime::backend::EncodeBL;
 using swift::runtime::backend::Imm26Reachable;
+using swift::runtime::backend::kEdgeCarryMask;
 using swift::runtime::backend::kEdgeNZCVMask;
 using swift::runtime::backend::LinkManager;
 using swift::runtime::backend::LinkFlagsBypassPatch;
@@ -101,6 +103,23 @@ TEST_CASE("edge flags contracts accept only overwritten version-compatible state
     STATIC_REQUIRE_FALSE(overwrite_nz.Accepts(versioned_nz));
     STATIC_REQUIRE(direct_c.IsWellFormed());
     STATIC_REQUIRE_FALSE(invalid_direct_nz.IsWellFormed());
+}
+
+TEST_CASE("edge carry source resolves canonical and runtime polarity",
+          "[direct-link][flags]") {
+    EdgeCarrySourceState source;
+    REQUIRE(source.Resolve(kEdgeCarryMask, false) ==
+            EdgeCarryPolarity::Unknown);
+    source.PublishRuntimePolarity(true);
+    REQUIRE(source.Resolve(kEdgeCarryMask, false) ==
+            EdgeCarryPolarity::Inverted);
+    REQUIRE(source.Resolve(kEdgeCarryMask, true) ==
+            EdgeCarryPolarity::Direct);
+    REQUIRE(source.Resolve(0xC000'0000u, false) ==
+            EdgeCarryPolarity::Unknown);
+    source.InvalidateRuntimePolarity();
+    REQUIRE(source.Resolve(kEdgeCarryMask, false) ==
+            EdgeCarryPolarity::Unknown);
 }
 
 Config Arm64Config() {

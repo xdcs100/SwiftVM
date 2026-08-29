@@ -479,6 +479,7 @@ private:
     [[nodiscard]] EdgeFlagsState PendingEdgeFlagsState(
             HostFlags valid,
             EdgeFlagsProducer producer) const;
+    void ObserveEdgeCarryPolarity(ir::Uniform uniform, ir::Value value);
     [[nodiscard]] EdgeFlagsTargetContract AnalyzeEdgeFlagsTarget(
             ir::Location target) const;
     [[nodiscard]] bool TargetAcceptsEdgeFlags(
@@ -1007,6 +1008,7 @@ private:
     // existing value in the flags register (so a ClearFlags(CF) between
     // two flag-setting instructions is not overwritten by the merge).
     HostFlags nzcv_requested{};
+    EdgeCarrySourceState edge_carry_source{};
     // True when Config::memory_base / page_table is set: every guest memory
     // access goes through the pt bias register (guest addr + pt = host addr).
     bool use_memory_base{false};

@@ -3,6 +3,7 @@
 #include "runtime/backend/arm64/defines.h"
 #include "runtime/backend/context.h"
 #include "runtime/common/svm_config.h"
+#include "translator/x86/cpu.h"
 
 namespace swift::runtime::backend::arm64 {
 
@@ -30,13 +31,32 @@ EdgeFlagsState JitTranslator::PendingEdgeFlagsState(
         HostFlags valid,
         EdgeFlagsProducer producer) const {
     const auto mask = static_cast<u32>(valid);
-    const auto carry_polarity =
-            (mask & kEdgeCarryMask) != 0 && CanonicalCarryEnabled()
-                    ? EdgeCarryPolarity::Direct
-                    : EdgeCarryPolarity::Unknown;
+    const auto carry_polarity = edge_carry_source.Resolve(
+            mask, CanonicalCarryEnabled());
     return EdgeFlagsState::Pending(mask,
                                    carry_polarity,
                                    producer);
+}
+
+void JitTranslator::ObserveEdgeCarryPolarity(ir::Uniform uniform,
+                                              ir::Value value) {
+    if (uniform.GetOffset() != offsetof(swift::x86::ThreadContext64,
+                                        carry_inverted) ||
+        uniform.GetType() != ir::ValueType::U8 ||
+        value.Type() != ir::ValueType::U8) {
+        return;
+    }
+    auto* definition = value.Def();
+    if (!definition || definition->GetOp() != ir::OpCode::LoadImm) {
+        edge_carry_source.InvalidateRuntimePolarity();
+        return;
+    }
+    const u64 raw = definition->GetArg<ir::Imm>(0).Get();
+    if (raw > 1) {
+        edge_carry_source.InvalidateRuntimePolarity();
+        return;
+    }
+    edge_carry_source.PublishRuntimePolarity(raw != 0);
 }
 
 EdgeFlagsTargetContract JitTranslator::AnalyzeEdgeFlagsTarget(
