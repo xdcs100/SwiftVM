@@ -3232,6 +3232,18 @@ peepholes.
   same PPM SHA; CoreMark moves `37,908 -> 37,904` and retains `crcfinal=0x382f`. Mac and Orb pass the
   fixed-seed 256-iteration DIV/IDIV differential. No dedicated probe or debug switch was added.
 
+- A block-final `CondSet` whose only consumer is the terminal branch now retains its condition in
+  live host NZCV instead of materializing a boolean for a following `CBZ` or `CBNZ`. The gate requires
+  both `save_in_nzcv` and dirty NZCV, and the existing `RecordLocalCondition` proof rechecks the sole
+  terminal use before the region terminal emits `B.cond`. The same-input SQLite diff retains all
+  2,164 roots with 100% host and entry coverage, moves `269,006 -> 268,174` (`-832`, `-0.309287%`),
+  and shrinks 439 roots with no growth. `sqlite3GetVarint` moves `231 -> 225` versus FEX at 181;
+  `__strrchr_sse2` moves `535 -> 528` versus FEX at 527. Two final SQLite shapes are byte-identical
+  and their timing-normalized output matches the baseline. Bounded smallpt moves `37,917 -> 37,785`
+  with the same PPM SHA; CoreMark moves `37,904 -> 37,759` and retains `crcfinal=0x382f`. Mac and Orb
+  pass 206 focused CondSet, region-flags and dead-edge assertions. The one-shot IR dump used to
+  identify the terminal shape was deleted; no diagnostic path or environment switch remains.
+
 ## Orb loop
 
 ```

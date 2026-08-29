@@ -1047,6 +1047,11 @@ void JitTranslator::EmitCondSet(ir::Inst* inst) {
     // back end (RegAlloc keys off the opcode's meta return type) and silent
     // data loss in the interpreter, so refuse it in both.
     ASSERT(inst->ReturnType() != ir::ValueType::VOID);
+    auto following = cur_block->GetInstList().iterator_to(*inst);
+    if (++following == cur_block->GetInstList().end() && save_in_nzcv &&
+        nzcv_dirty && RecordLocalCondition(inst, cond)) {
+        return;
+    }
     auto result = context.R(ir::Value{inst});
     if (!(save_in_nzcv && nzcv_dirty)) {
         if (TryEmitCondSetFromFlags(inst, cond)) {
