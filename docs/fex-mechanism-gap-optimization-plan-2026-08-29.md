@@ -374,3 +374,27 @@ backend 根据 contract 只发布真正被 helper 观察或破坏的状态。未
 5. 用短 SQLite/smallpt/CoreMark 裁定；只有 `freeSpace` 确认缩小后才扩大覆盖。
 
 该顺序能直接验证当前最大 root 的机制判断，同时为后续 flags 和 guest-state 版本化提供共同入口载体。
+
+## 16. 落地进度
+
+### 16.1 函数内已知无条件边
+
+代码对象和发布路径复核后确认，当前 runtime 已经为每个已解码块发布
+external/direct/pending-flags/call entry，并把全部块范围和入口纳入同一个 SMC ownership
+事务。因此阶段 A/B 不再新增重复的 `FunctionEntryContract` 容器或第二层 veneer。
+
+第一批生产消费者采用更窄的所有权证明：无条件常量跳转只有在目标已经存在于当前
+HIRFunction 时才转为 `LinkBlock`。该目标由已有条件边、fallthrough 或入口创建，指令边界和
+代码对象归属均已确定；未知目标、间接目标和需要新 split 的目标继续走规范 dispatcher 路径。
+
+提交 `6e7c3d7` 的短门禁结果：
+
+- SQLite main 公共根 `259,747 -> 255,517`，新增 72 个边界根共 286 条，完整总量
+  `259,747 -> 255,803`；`freeSpace` `416 -> 409`，输出归一化后一致。
+- smallpt `37,745 -> 37,132`，PPM SHA-256 保持
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`。
+- CoreMark 20k `37,717 -> 37,160`，`crcfinal=0x382f`。
+- Mac/Orb 的入口边界、late split、region ownership、CallLambda、大 CFG 和 SMC 定向测试通过。
+
+该候选改变了 root 划分，不使用要求同 PC/version 的 retained-weight 估算；本阶段比较完整
+static-only root 总量和正确性 oracle。下一阶段从版本化 flags edge ABI 的重复表示审计开始。

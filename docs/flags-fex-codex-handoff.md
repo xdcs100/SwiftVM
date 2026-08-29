@@ -3255,6 +3255,23 @@ peepholes.
   moves `37,759 -> 37,717` and retains `crcfinal=0x382f`. Mac and Orb pass 273 focused shift,
   narrow-extract and width-chain assertions. No new test, probe or debug switch remains.
 
+- Function-level decoding now internalizes an unconditional constant jump only when its target is
+  already a block in the current HIR function. The existing block proves that another decoded edge
+  already established the target boundary and code-object ownership; unknown targets, indirect
+  targets and newly discovered split targets retain the canonical dispatcher exit. The runtime
+  audit confirmed that every decoded block already has separate external/direct/pending-flags/call
+  entries and participates in the code object's SMC ownership transaction, so no duplicate entry
+  contract or veneer layer was added. On the short SQLite main screen, all 2,075 baseline roots are
+  retained and move `259,747 -> 255,517`; 72 new jump-source boundary roots add 286 instructions,
+  leaving the complete candidate at 2,147 roots / 255,803 instructions (`-3,944`, `-1.518368%`).
+  The top 20 roots are all covered with no growth, repeated candidate shapes are identical,
+  timing-normalized output is byte-identical and `freeSpace` moves `416 -> 409`. Bounded smallpt
+  moves `37,745 -> 37,132`, retains PPM SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`, and CoreMark 20k moves
+  `37,717 -> 37,160` with `crcfinal=0x382f`. Mac and Orb pass the directed internal/external jump
+  boundary, late-split replay, region ownership, CallLambda, 72-block CFG and SMC dependency tests.
+  No probe, debug path, environment switch or stress run remains.
+
 ## Orb loop
 
 ```
