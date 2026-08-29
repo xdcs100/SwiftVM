@@ -3445,6 +3445,21 @@ peepholes.
   used as a gate. Fault, callback/reentry and host-NZCV effects stay conservative. No long benchmark,
   stress run, probe, env switch, diagnostic log, temporary source path or fallback remains.
 
+- `4b9e67e` adds canonical external CFG roots for shared direct targets inside an already decoded
+  function block. The frontend records exact direct-jump sources without changing ordinary
+  `SetLocation + ReturnToDispatch` IR. Targets with at least three sources still must have one exact
+  owner, no call-return ownership and a successful boundary replay; accepted targets decode from a
+  fresh frontend state and enter the function RPO as independent roots rather than inheriting HIR/RA
+  live-ins. The split prefix uses `ExternalLinkBlock`; ARM64 commits dispatcher-visible state and
+  branches to the target's published entry in the same allocation, retaining the fault-backed poll on
+  backward edges and registering no direct-link site. Mac passes 66 function-entry, 860 production
+  direct-link, 767 non-stress SMC and 105 continuation assertions. The exact Debug smallpt pair stays
+  at 279 roots / 49,520 instructions with the canonical PPM SHA. SQLite's `freeSpace` binary has seven
+  direct sources for `0x449b0c`, while `0x4498c9` and `0x449a5b` have one each, so only the shared exit
+  meets the current profitability gate. The bounded Debug SQLite screen did not reach `freeSpace`;
+  do not claim or broaden the optimization until the same commit receives a Release/Orb short shape.
+  No stress run, probe, env switch, diagnostic log, temporary source path or fallback remains.
+
 ## Orb loop
 
 ```

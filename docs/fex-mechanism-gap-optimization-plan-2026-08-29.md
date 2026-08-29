@@ -772,3 +772,37 @@ x3-x15、q16-q31 和 x30，因此该权限不是基于 helper 地址白名单猜
 
 本阶段不宣称宏观代码密度收益。fault、reentry/callback 和 host-NZCV effect 没有足够静态来源，继续
 fail-closed；没有新增 env 开关、日志、probe、临时路径或运行时兜底。
+
+### 16.14 canonical external CFG root
+
+提交 `4b9e67e` 补齐函数中部入口缺失的 frontend 状态边界。x86 frontend 对尚未成为当前 CFG block 的
+无条件直接目标记录 `ExternalDirectLink` side table，但继续生成原有 `SetLocation + ReturnToDispatch`，
+未晋级的普通直接跳转不改变 IR 和 host code。`FunctionDecodeFrontier` 只选择至少三个显式直接来源共享、
+位于唯一已解码 owner 内部、没有 call-return ownership 的目标；收益门槛与边界正确性判定彼此独立。
+
+晋级目标会让原 owner 在精确边界重新解码，并以 `ExternalLinkBlock` 结束 prefix；目标则由新的 decoder
+从 canonical frontend 状态独立解码。`HIRFunction` 的 RPO 现在依次遍历主 CFG 和 canonical external
+roots，两个 root 不建立 HIR edge，因此 RA、flags local value 和 width/live-in 事实不会跨 root 继承。
+accepted provenance 明确记录 `external_root`，被 reset 的 source 同时删除旧 direct-link side-table 记录，
+避免重解码后残留过时来源。
+
+ARM64 backend 对同一代码对象中的 `ExternalLinkBlock` 先完成 dispatcher 级状态提交，再直接进入目标的
+published entry；不注册可失效 direct-link site，也不经过 L1/L2 dispatcher。向后 external edge 仍保留
+fault-backed interrupt poll，fault recovery 使用目标 guest location。解释器对同一 terminal 更新
+`current_loc`，因此 JIT 与非 JIT 使用相同的多 root 语义。
+
+短门禁结果：
+
+- `[function-entry]` 通过 66 条断言 / 6 个 case，其中生产执行验证两个 root 共享同一 code owner 和
+  region、目标 entry 可执行，并且 allocation 内没有 direct-link site；`[direct-link][production]` 通过
+  860 条断言 / 14 个 case。
+- 非压力 `[smc]` 通过 767 条断言 / 11 个 case，`[continuation]` 通过 105 条断言 / 4 个 case。
+- 与 `9455952` 的同配置 Debug 基线配对，smallpt `4 8 6` 两侧均为 279 roots、49,520 条 host 指令，
+  PPM SHA-256 均为 `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`。
+- SQLite guest 的静态反汇编确认 `freeSpace` 内 `0x449b0c` 有七个无条件直接来源，`0x4498c9` 与
+  `0x449a5b` 各一个；当前三来源门槛只晋级前者。Debug static-only 两侧均在 8 秒停止，candidate 未到达
+  `freeSpace`，因此本阶段不宣称该 root 已缩小，后续只补同提交的 Release/Orb 短账，不扩大覆盖面。
+
+本阶段没有保留探针、诊断日志、env 开关、临时源路径或旧协议兜底，也没有运行压力测试或长基准。
+P0 剩余项收窄为 `freeSpace` 的 Release 代码量验收，以及 terminal-only/call-return root 的显式
+live-in canonicalization；后者仍不从普通 split root 的通过结果外推。
