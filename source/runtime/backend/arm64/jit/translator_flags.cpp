@@ -364,6 +364,7 @@ bool JitTranslator::TryEmitReturnFlagsBypass(
         const DirectLinkFlagsBypass& flags_bypass) {
     if (!FlagsRegsEnabled() || !context.ContinuationActive() ||
         !context.CanUseRegionTrampoline() || !flags_bypass.Valid() ||
+        flags_bypass.edge_flags.valid_nzcv_mask != kEdgeNZCVMask ||
         flags_bypass.resume_offset != context.CurrentBufferSize() ||
         flags_bypass.linked_instruction != 0) {
         return false;
@@ -450,10 +451,15 @@ DirectLinkFlagsBypass JitTranslator::MergeNZCV(
             }
         }
         const u32 merge_end = context.CurrentBufferSize();
-        if (!deferred_merge && FlagsRegsEnabled() && region_edges_active &&
-            req == static_cast<u64>(HostFlags::NZCV) &&
-            merge_end - begin == 3 * sizeof(u32)) {
-            flags_bypass = {begin, merge_end};
+        if (!deferred_merge && FlagsRegsEnabled() && region_edges_active) {
+            const auto edge_flags = PendingEdgeFlagsState(
+                    static_cast<HostFlags>(req),
+                    save_in_nzcv && nzcv_dirty
+                            ? EdgeFlagsProducer::Arithmetic
+                            : EdgeFlagsProducer::Restore);
+            if (edge_flags.HasContiguousPendingPState()) {
+                flags_bypass = {begin, merge_end};
+            }
         }
         if (flags_bypass.code_offset != UINT32_MAX) {
             flags_bypass.edge_flags = PendingEdgeFlagsState(

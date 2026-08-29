@@ -157,13 +157,14 @@ IntrusivePtr<Block> BuildConditionalSource(VAddr guest,
 }
 
 void* TranslateFlagsKillingTarget(const std::shared_ptr<Module>& module,
-                                  VAddr guest) {
+                                  VAddr guest,
+                                  Flags saved_flags = Flags::NZCV) {
     HIRBuilder builder{1, true};
     auto* function = builder.AppendFunction(Location{guest}, Location{guest + 3});
     const auto left = function->LoadImm(Imm{u8{7}}).SetType(ValueType::U8);
     const auto right = function->LoadImm(Imm{u8{3}}).SetType(ValueType::U8);
     const auto result = function->Sub(left, Operand{right}).SetType(ValueType::U8);
-    function->SaveFlags(result, Flags::NZCV);
+    function->SaveFlags(result, saved_flags);
     function->AdvancePC(Imm{u64{1}});
     const auto condition = function->LocalCondSet(Cond::EQ).SetType(ValueType::U8);
     auto [then_block, else_block] = builder.If(terminal::If{
@@ -206,7 +207,8 @@ void* TranslatePendingFlagsSource(const std::shared_ptr<Module>& module,
 
 void* TranslatePendingFlagsStaticSource(const std::shared_ptr<Module>& module,
                                         VAddr guest,
-                                        VAddr target) {
+                                        VAddr target,
+                                        Flags saved_flags = Flags::All) {
     HIRBuilder builder{1, true};
     auto* function = builder.AppendFunction(Location{guest}, Location{guest + 2});
     auto* body = builder.LinkBlock(terminal::LinkBlock{Location{guest + 1}});
@@ -215,7 +217,7 @@ void* TranslatePendingFlagsStaticSource(const std::shared_ptr<Module>& module,
             Uniform{8, ValueType::U8}).SetType(ValueType::U8);
     const auto one = function->LoadImm(Imm{u8{1}}).SetType(ValueType::U8);
     const auto result = function->Sub(value, Operand{one}).SetType(ValueType::U8);
-    function->SaveFlags(result, Flags::All);
+    function->SaveFlags(result, saved_flags);
     function->AdvancePC(Imm{u64{1}});
     function->SetLocation(Lambda{Imm{target}});
     function->EndBlock(terminal::ReturnToDispatch{});
@@ -1227,15 +1229,25 @@ TEST_CASE("static forwards register their flags bypass",
         AddressSpace space{config};
         auto module = space.GetDefaultModule();
 
-        auto* target_code = TranslateFlagsKillingTarget(module, target_guest);
+        const bool partial = GENERATE(false, true);
+        CAPTURE(partial);
+        const auto target_flags = partial ? Flags::NZ : Flags::NZCV;
+        const auto source_flags = partial ? Flags::NZ : Flags::All;
+        const u32 expected_mask = partial ? 0xC000'0000u : kEdgeNZCVMask;
+
+        auto* target_code = TranslateFlagsKillingTarget(
+                module, target_guest, target_flags);
         REQUIRE(target_code != nullptr);
         space.PushCodeCache(Location{target_guest}, target_code);
         const auto target = space.GetLinkManager().QueryTarget(target_guest);
         REQUIRE(target);
         REQUIRE(target->pending_flags_host_pc != nullptr);
+        REQUIRE((target->call_pending_flags_host_pc != nullptr) == !partial);
+        REQUIRE(target->pending_flags_contract.overwrite_before_observe ==
+                expected_mask);
 
         auto* source_code = static_cast<u8*>(TranslatePendingFlagsStaticSource(
-                module, source_guest, target_guest));
+                module, source_guest, target_guest, source_flags));
         REQUIRE(source_code != nullptr);
         space.PushCodeCache(Location{source_guest}, source_code);
         const auto region = module->GetCodeRegion(source_code);
@@ -1245,10 +1257,14 @@ TEST_CASE("static forwards register their flags bypass",
         const auto& site = sites.front();
         REQUIRE(site.record.guest_target == target_guest);
         REQUIRE(site.record.flags_bypass_offset != UINT32_MAX);
+        REQUIRE(site.record.edge_flags.valid_nzcv_mask == expected_mask);
+        REQUIRE(target->pending_flags_contract.Accepts(site.record.edge_flags));
         auto* bypass = region->rx_base + site.record.flags_bypass_offset;
-        REQUIRE((site.record.flags_bypass_instruction & 0xFC00'0000u) ==
-                0x9400'0000u);
-        REQUIRE((LoadInsn(bypass) & ~0x3E0u) == 0xB340'1C1Au);
+        if (!partial) {
+            REQUIRE((site.record.flags_bypass_instruction & 0xFC00'0000u) ==
+                    0x9400'0000u);
+            REQUIRE((LoadInsn(bypass) & ~0x3E0u) == 0xB340'1C1Au);
+        }
 
         Runtime runtime{&space};
         runtime.SetLocation(source_guest);
@@ -1257,6 +1273,10 @@ TEST_CASE("static forwards register their flags bypass",
                 LinkSiteState::Linked);
         REQUIRE(DecodeBranchTarget(site.rx, LoadInsn(site.rx)) ==
                 reinterpret_cast<uintptr_t>(target->pending_flags_host_pc));
+        if (partial) {
+            REQUIRE(DecodeBranchTarget(bypass, LoadInsn(bypass)) ==
+                    reinterpret_cast<uintptr_t>(bypass + 3 * sizeof(u32)));
+        }
 
         space.InvalidateCodeRange(target_guest, target_guest + 1);
         auto target_block = BuildTarget(target_guest, 0x1234);

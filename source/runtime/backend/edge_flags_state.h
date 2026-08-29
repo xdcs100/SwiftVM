@@ -62,6 +62,17 @@ struct EdgeFlagsState {
         return valid_nzcv_mask != 0 && IsWellFormed();
     }
 
+    [[nodiscard]] constexpr bool HasContiguousPendingPState() const {
+        if (!HasPendingPState()) {
+            return false;
+        }
+        u32 normalized = valid_nzcv_mask;
+        while ((normalized & 1u) == 0) {
+            normalized >>= 1;
+        }
+        return (normalized & (normalized + 1u)) == 0;
+    }
+
     bool operator==(const EdgeFlagsState&) const = default;
 };
 
@@ -69,6 +80,7 @@ struct EdgeFlagsTargetContract {
     u32 overwrite_before_observe{};
     bool commits_before_fault{};
     bool observes_before_commit{};
+    u64 packed_flags_version{};
 
     [[nodiscard]] constexpr bool IsWellFormed() const {
         return (overwrite_before_observe & ~kEdgeNZCVMask) == 0;
@@ -81,6 +93,7 @@ struct EdgeFlagsTargetContract {
 
     [[nodiscard]] constexpr bool Accepts(const EdgeFlagsState& incoming) const {
         return CanPublishPendingEntry() && incoming.HasPendingPState() &&
+               incoming.packed_flags_version == packed_flags_version &&
                (incoming.valid_nzcv_mask & ~overwrite_before_observe) == 0;
     }
 

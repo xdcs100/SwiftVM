@@ -36,7 +36,7 @@ using namespace swift::runtime::ir;
 constexpr const char* kPhaseEnv = "DIRECT_LINK_CACHE_PHASE";
 constexpr const char* kDirEnv = "DIRECT_LINK_CACHE_DIR";
 constexpr const char* kRoundTripTest =
-        "disk cache v15 round trips direct-link sites across processes";
+        "disk cache v16 round trips direct-link sites across processes";
 
 IntrusivePtr<Block> BuildTarget(VAddr guest, u64 fingerprint) {
     IntrusivePtr<Block> block{new Block(0, Location{guest})};
@@ -424,7 +424,7 @@ TEST_CASE("disk cache scanner keeps move-wide constants and rejects PC-relative 
     }
 }
 
-TEST_CASE("disk cache v15 serializes link and fault-site records",
+TEST_CASE("disk cache v16 serializes link and fault-site records",
           "[direct-link][jit-cache][serializer]") {
     SerialUnit input{};
     input.guest_start = 0x1000;
@@ -437,6 +437,7 @@ TEST_CASE("disk cache v15 serializes link and fault-site records",
     constexpr EdgeFlagsTargetContract overwrite_nzcv{
             .overwrite_before_observe = kEdgeNZCVMask,
             .commits_before_fault = true,
+            .packed_flags_version = 7,
     };
     input.blocks.push_back(
             {0x1000, 0x1004, 0, 0x1234, 16, 20, overwrite_nzcv});

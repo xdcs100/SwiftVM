@@ -1366,8 +1366,15 @@ void JitContext::RecordPendingFlagsEntry(
 }
 
 void JitContext::EmitPendingFlagsCallEntry(LocationDescriptor location) {
+    const auto contract = pending_flags_target_contracts.find(location);
+    const auto full_nzcv = EdgeFlagsState::Pending(
+            kEdgeNZCVMask,
+            EdgeCarryPolarity::Unknown,
+            EdgeFlagsProducer::Restore);
     if (!ContinuationActive() ||
-        !pending_flags_entry_offsets.contains(location)) {
+        !pending_flags_entry_offsets.contains(location) ||
+        contract == pending_flags_target_contracts.end() ||
+        !contract->second.Accepts(full_nzcv)) {
         return;
     }
     call_pending_flags_entry_offsets.emplace(location, CurrentBufferSize());

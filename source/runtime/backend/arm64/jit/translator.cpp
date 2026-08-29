@@ -818,9 +818,7 @@ JitTranslator::PrepareBlockState(ir::Block* block) {
         context.RecordDirectLinkEntry(block->GetStartLocation().Value());
         const auto target_contract = AnalyzeEdgeFlagsTarget(
                 block->GetStartLocation());
-        if (target_contract.Accepts(PendingEdgeFlagsState(
-                    HostFlags::NZCV,
-                    EdgeFlagsProducer::Restore))) {
+        if (target_contract.CanPublishPendingEntry()) {
             context.RecordPendingFlagsEntry(block->GetStartLocation().Value(),
                                             target_contract);
         }

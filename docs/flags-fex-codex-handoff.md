@@ -3362,6 +3362,18 @@ peepholes.
   three unaligned byte windows per ARM64 instruction; it now advances by VIXL instruction width, and
   the temporary disassembly capture was removed. No env switch, probe, debug path or stress run remains.
 
+- Contiguous partial-NZCV direct/static edges now reuse the same versioned contract and reversible
+  merge patch as full NZCV. A target publishes a partial pending entry only when it overwrites every
+  incoming valid bit before observation/fault and commits at `AdvancePC`; full sources cannot enter it,
+  and pending-call L1 publication remains full-NZCV only. Target packed-flags versions now join exactly,
+  moving the disk cache to v16. FlagM-canonical C sources declare Direct polarity; otherwise polarity
+  stays Unknown. Mac passes 1,166 non-stress direct-link, 46 region-flags, 31 NZCV and 11 indirect-fault
+  assertions; Orb passes 867, 46, 31 and 11. Same-commit smallpt static-only remains 279 roots and 49,498
+  instructions at 100% coverage with the canonical PPM SHA. That is the expected static result because
+  incompatible-target/SMC fallback bytes remain emitted; the linked partial path skips three executed
+  merge instructions. SQLite and counter-based screens were stopped at the 8-second bound and are not
+  cited as benefit evidence. No probe, debug path, env switch or stress run remains.
+
 ## Orb loop
 
 ```

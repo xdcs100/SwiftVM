@@ -573,6 +573,7 @@ void WriteUnit(BlobWriter& w, const SerialUnit& unit) {
         w.U32(b.pending_flags_contract.overwrite_before_observe);
         w.U8(b.pending_flags_contract.commits_before_fault);
         w.U8(b.pending_flags_contract.observes_before_commit);
+        w.U64(b.pending_flags_contract.packed_flags_version);
     }
     w.U32(static_cast<u32>(unit.relocs.size()));
     for (const auto& r : unit.relocs) {
@@ -634,7 +635,8 @@ bool ReadUnit(BlobReader& r, SerialUnit& unit) {
             !r.U64(b.guest_bytes_hash) || !r.U32(b.direct_code_offset) ||
             !r.U32(b.pending_flags_code_offset) ||
             !r.U32(b.pending_flags_contract.overwrite_before_observe) ||
-            !r.U8(commits_before_fault) || !r.U8(observes_before_commit)) {
+            !r.U8(commits_before_fault) || !r.U8(observes_before_commit) ||
+            !r.U64(b.pending_flags_contract.packed_flags_version)) {
             return false;
         }
         b.pending_flags_contract.commits_before_fault = commits_before_fault;

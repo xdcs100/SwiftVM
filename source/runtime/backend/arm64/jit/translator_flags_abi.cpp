@@ -29,8 +29,13 @@ void JitTranslator::UnparkFlagsHot() {
 EdgeFlagsState JitTranslator::PendingEdgeFlagsState(
         HostFlags valid,
         EdgeFlagsProducer producer) const {
-    return EdgeFlagsState::Pending(static_cast<u32>(valid),
-                                   EdgeCarryPolarity::Unknown,
+    const auto mask = static_cast<u32>(valid);
+    const auto carry_polarity =
+            (mask & kEdgeCarryMask) != 0 && CanonicalCarryEnabled()
+                    ? EdgeCarryPolarity::Direct
+                    : EdgeCarryPolarity::Unknown;
+    return EdgeFlagsState::Pending(mask,
+                                   carry_polarity,
                                    producer);
 }
 

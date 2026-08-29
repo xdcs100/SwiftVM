@@ -43,7 +43,7 @@ static_assert(sizeof(LinkSiteKey) == 16);
 static_assert(sizeof(LinkSourceOwner) == 16);
 static_assert(sizeof(LinkSiteRecord) == 80);
 static_assert(sizeof(LinkSignalPatchSite) == 88);
-static_assert(sizeof(LinkTargetRecord) == 88);
+static_assert(sizeof(LinkTargetRecord) == 96);
 static_assert(sizeof(CodeRegion) == 40);
 
 constexpr auto kPendingNZCV = EdgeFlagsState::Pending(
@@ -54,6 +54,44 @@ constexpr EdgeFlagsTargetContract kOverwriteNZCV{
         .overwrite_before_observe = kEdgeNZCVMask,
         .commits_before_fault = true,
 };
+
+TEST_CASE("edge flags contracts accept only overwritten contiguous state",
+          "[direct-link][flags]") {
+    constexpr u32 nz_mask = 0xC000'0000u;
+    constexpr auto pending_nz = EdgeFlagsState::Pending(
+            nz_mask,
+            EdgeCarryPolarity::Unknown,
+            EdgeFlagsProducer::Logical);
+    constexpr auto pending_nc = EdgeFlagsState::Pending(
+            0xA000'0000u,
+            EdgeCarryPolarity::Unknown,
+            EdgeFlagsProducer::Arithmetic);
+    constexpr EdgeFlagsTargetContract overwrite_nz{
+            .overwrite_before_observe = nz_mask,
+            .commits_before_fault = true,
+    };
+    constexpr auto versioned_nz = EdgeFlagsState::Pending(
+            nz_mask,
+            EdgeCarryPolarity::Unknown,
+            EdgeFlagsProducer::Logical,
+            1);
+    constexpr auto direct_c = EdgeFlagsState::Pending(
+            0x2000'0000u,
+            EdgeCarryPolarity::Direct,
+            EdgeFlagsProducer::Arithmetic);
+    constexpr auto invalid_direct_nz = EdgeFlagsState::Pending(
+            nz_mask,
+            EdgeCarryPolarity::Direct,
+            EdgeFlagsProducer::Logical);
+
+    STATIC_REQUIRE(pending_nz.HasContiguousPendingPState());
+    STATIC_REQUIRE_FALSE(pending_nc.HasContiguousPendingPState());
+    STATIC_REQUIRE(overwrite_nz.Accepts(pending_nz));
+    STATIC_REQUIRE_FALSE(overwrite_nz.Accepts(kPendingNZCV));
+    STATIC_REQUIRE_FALSE(overwrite_nz.Accepts(versioned_nz));
+    STATIC_REQUIRE(direct_c.IsWellFormed());
+    STATIC_REQUIRE_FALSE(invalid_direct_nz.IsWellFormed());
+}
 
 Config Arm64Config() {
     return Config{

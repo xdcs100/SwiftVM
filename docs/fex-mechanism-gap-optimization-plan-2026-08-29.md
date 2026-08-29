@@ -577,3 +577,31 @@ partial overwrite 合同可以被分析和序列化，但在 partial source stat
 
 该阶段没有新增环境开关、诊断日志、运行时探针或调试路径。下一批在这个单一合同上增加连续 partial
 mask source、Direct/Inverted polarity 和 packed-flags version join，不重新引入独立 bypass 协议。
+
+### 16.8 连续 partial-NZCV edge contract
+
+direct link 和静态 forward 现在能把连续 partial-NZCV merge 注册为可撤销 bypass。目标只要在任何
+观察或 fault 前覆盖全部 incoming 有效位并在 `AdvancePC` 提交，就发布同一个 pending entry；full
+source 不会进入只覆盖 partial mask 的目标。动态 indirect-call continuation 仍只发布 full-NZCV
+兼容入口，避免无目标合同的 pending-call L1 把 full source 送入 partial target。
+
+`EdgeFlagsTargetContract` 同时记录目标要求的 packed-flags version，source/target 版本必须相等；磁盘
+缓存格式升至 v16。带 C 的生产 source 仅在 FlagM canonical carry 开启时声明 `Direct`，其他情况保持
+`Unknown`，不会把未知或 inverted carry 当成 direct。首个生产消费者覆盖连续 `NZ`，非连续 mask
+继续走规范 merge。
+
+短门禁结果：
+
+- AArch64 生产测试覆盖 full/partial 静态 forward、partial pending entry、链接后跳过三条 merge、
+  SMC invalidation 恢复原指令，以及 partial target 不发布 pending-call entry。
+- Mac 通过 1,166 条非压力 direct-link、46 条 region flags、31 条 NZCV 和 11 条 indirect fault
+  断言；Orb 对应通过 867、46、31 和 11 条断言。
+- fresh `51951e3` 同提交 smallpt `4 8 6` static-only 保持 279 roots、100% coverage、top-20 `20/20`
+  和 `49,498` 条，PPM SHA-256 保持
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`。fallback merge 字节必须
+  留给不兼容目标，因此该指标验证无静态增长，不计作动态 bypass 收益。
+- SQLite 和 counter-based smallpt 在 8 秒门限内未正常结束，已停止且不作为收益证据；没有延长或
+  启动压力测试。
+
+该阶段没有新增环境开关、诊断日志、运行时探针或兼容兜底。下一步为 inverted carry 建立可证明的
+source provenance，或转入 continuation contract 与 hot/cold emission；不让 `Unknown` 极性宽松匹配。
