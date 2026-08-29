@@ -63,6 +63,7 @@ bool IsPinnedCoalesceProducer(OpCode op) {
         case OpCode::SelectZero:
         case OpCode::CondSelect:
         case OpCode::MulHigh:
+        case OpCode::VecMovMask:
             return true;
         default:
             return false;

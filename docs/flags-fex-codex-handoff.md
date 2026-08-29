@@ -3134,6 +3134,22 @@ peepholes.
   timing-normalized output is byte-identical. No stress run, probe, diagnostic path or environment
   switch remains.
 
+- U32 `VecMovMask` results are now eligible for the existing fixed-GPR publication transaction.
+  The allocator reuses the architectural home only after its normal last-use, target-conflict,
+  observer and live-range checks succeed, allowing PMOVMSKB/MOVMSK results to omit the separate
+  `ZeroExtend32To64` publication move. Extending width-component ownership produced no additional
+  change and was removed. Exact SQLite keeps all 2,167 roots and moves `272,312 -> 272,251`
+  (`-61`, `-0.022401%`) with 18 shrinking roots and no growth. `__strrchr_sse2` moves
+  `595 -> 584`, narrowing its FEX gap from 68 to 57; `__memcmp_sse2` moves `626 -> 620`, narrowing
+  its gap from 79 to 73. `__strchr_sse2`, `__strchrnul_sse2`, `__strlen_sse2` and
+  `__strnlen_sse2` lose eight, eight, eight and seven instructions. The bounded smallpt screen
+  moves `38,371 -> 38,336` with four shrinking roots and retains PPM SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`. The shortened CoreMark
+  screen moves `38,319 -> 38,292` with three shrinking roots and retains `crcfinal=0x382f`.
+  Mac and Orb pass 129 SSE edge assertions, the AVX movemask reference and 30 assertions across ten
+  pinned-GPR cases. SQLite's timing-normalized output is byte-identical. No stress run, probe,
+  diagnostic path or environment switch remains.
+
 ## Orb loop
 
 ```
