@@ -55,7 +55,7 @@ constexpr EdgeFlagsTargetContract kOverwriteNZCV{
         .commits_before_fault = true,
 };
 
-TEST_CASE("edge flags contracts accept only overwritten contiguous state",
+TEST_CASE("edge flags contracts accept only overwritten version-compatible state",
           "[direct-link][flags]") {
     constexpr u32 nz_mask = 0xC000'0000u;
     constexpr auto pending_nz = EdgeFlagsState::Pending(
@@ -68,6 +68,10 @@ TEST_CASE("edge flags contracts accept only overwritten contiguous state",
             EdgeFlagsProducer::Arithmetic);
     constexpr EdgeFlagsTargetContract overwrite_nz{
             .overwrite_before_observe = nz_mask,
+            .commits_before_fault = true,
+    };
+    constexpr EdgeFlagsTargetContract overwrite_nc{
+            .overwrite_before_observe = 0xA000'0000u,
             .commits_before_fault = true,
     };
     constexpr auto versioned_nz = EdgeFlagsState::Pending(
@@ -84,9 +88,8 @@ TEST_CASE("edge flags contracts accept only overwritten contiguous state",
             EdgeCarryPolarity::Direct,
             EdgeFlagsProducer::Logical);
 
-    STATIC_REQUIRE(pending_nz.HasContiguousPendingPState());
-    STATIC_REQUIRE_FALSE(pending_nc.HasContiguousPendingPState());
     STATIC_REQUIRE(overwrite_nz.Accepts(pending_nz));
+    STATIC_REQUIRE(overwrite_nc.Accepts(pending_nc));
     STATIC_REQUIRE_FALSE(overwrite_nz.Accepts(kPendingNZCV));
     STATIC_REQUIRE_FALSE(overwrite_nz.Accepts(versioned_nz));
     STATIC_REQUIRE(direct_c.IsWellFormed());

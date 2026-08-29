@@ -62,17 +62,6 @@ struct EdgeFlagsState {
         return valid_nzcv_mask != 0 && IsWellFormed();
     }
 
-    [[nodiscard]] constexpr bool HasContiguousPendingPState() const {
-        if (!HasPendingPState()) {
-            return false;
-        }
-        u32 normalized = valid_nzcv_mask;
-        while ((normalized & 1u) == 0) {
-            normalized >>= 1;
-        }
-        return (normalized & (normalized + 1u)) == 0;
-    }
-
     bool operator==(const EdgeFlagsState&) const = default;
 };
 

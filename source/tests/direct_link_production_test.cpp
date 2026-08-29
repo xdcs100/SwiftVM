@@ -1263,11 +1263,20 @@ TEST_CASE("static forwards register their flags bypass",
         AddressSpace space{config};
         auto module = space.GetDefaultModule();
 
-        const bool partial = GENERATE(false, true);
-        CAPTURE(partial);
-        const auto target_flags = partial ? Flags::NZ : Flags::NZCV;
-        const auto source_flags = partial ? Flags::NZ : Flags::All;
-        const u32 expected_mask = partial ? 0xC000'0000u : kEdgeNZCVMask;
+        const u32 flags_case = GENERATE(0u, 1u, 2u);
+        CAPTURE(flags_case);
+        auto target_flags = Flags::NZCV;
+        auto source_flags = Flags::All;
+        u32 expected_mask = kEdgeNZCVMask;
+        if (flags_case == 1) {
+            target_flags = Flags::NZ;
+            source_flags = Flags::NZ;
+            expected_mask = 0xC000'0000u;
+        } else if (flags_case == 2) {
+            target_flags = Flags::Negate | Flags::Carry;
+            source_flags = target_flags;
+            expected_mask = 0xA000'0000u;
+        }
 
         auto* target_code = TranslateFlagsKillingTarget(
                 module, target_guest, target_flags);
@@ -1276,7 +1285,8 @@ TEST_CASE("static forwards register their flags bypass",
         const auto target = space.GetLinkManager().QueryTarget(target_guest);
         REQUIRE(target);
         REQUIRE(target->pending_flags_host_pc != nullptr);
-        REQUIRE((target->call_pending_flags_host_pc != nullptr) == !partial);
+        REQUIRE((target->call_pending_flags_host_pc != nullptr) ==
+                (flags_case == 0));
         REQUIRE(target->pending_flags_contract.overwrite_before_observe ==
                 expected_mask);
 
@@ -1294,7 +1304,7 @@ TEST_CASE("static forwards register their flags bypass",
         REQUIRE(site.record.edge_flags.valid_nzcv_mask == expected_mask);
         REQUIRE(target->pending_flags_contract.Accepts(site.record.edge_flags));
         auto* bypass = region->rx_base + site.record.flags_bypass_offset;
-        if (!partial) {
+        if (flags_case == 0) {
             REQUIRE((site.record.flags_bypass_instruction & 0xFC00'0000u) ==
                     0x9400'0000u);
             REQUIRE((LoadInsn(bypass) & ~0x3E0u) == 0xB340'1C1Au);
@@ -1307,9 +1317,16 @@ TEST_CASE("static forwards register their flags bypass",
                 LinkSiteState::Linked);
         REQUIRE(DecodeBranchTarget(site.rx, LoadInsn(site.rx)) ==
                 reinterpret_cast<uintptr_t>(target->pending_flags_host_pc));
-        if (partial) {
+        if (flags_case == 1) {
             REQUIRE(DecodeBranchTarget(bypass, LoadInsn(bypass)) ==
                     reinterpret_cast<uintptr_t>(bypass + 3 * sizeof(u32)));
+        } else if (flags_case == 2) {
+            const auto bypass_target = DecodeBranchTarget(
+                    bypass, LoadInsn(bypass));
+            REQUIRE(bypass_target);
+            REQUIRE(*bypass_target >= reinterpret_cast<uintptr_t>(
+                    bypass + 4 * sizeof(u32)));
+            REQUIRE(*bypass_target <= reinterpret_cast<uintptr_t>(site.rx));
         }
 
         space.InvalidateCodeRange(target_guest, target_guest + 1);

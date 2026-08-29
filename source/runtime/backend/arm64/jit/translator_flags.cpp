@@ -457,7 +457,7 @@ DirectLinkFlagsBypass JitTranslator::MergeNZCV(
                     save_in_nzcv && nzcv_dirty
                             ? EdgeFlagsProducer::Arithmetic
                             : EdgeFlagsProducer::Restore);
-            if (edge_flags.HasContiguousPendingPState()) {
+            if (edge_flags.HasPendingPState()) {
                 flags_bypass = {begin, merge_end};
             }
         }
