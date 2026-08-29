@@ -430,3 +430,32 @@ token 虽能修正 PF，却使 SQLite 增长 592 条，已完整撤销。最终�
 该阶段没有新增环境开关、诊断路径或运行时兜底。下一批继续按加权 root 残差选择
 GuestStateMap/width facts 或 continuation hot/cold contract 的首个生产消费者，不做零收益的通用
 flags ABI 扩张。
+
+### 16.3 pinned GPR full-width value version 转移
+
+`sqlite3DefaultRowEst` 的入口先执行 guest `RDI -> RCX`，随后覆盖 RDI，但多次内存访问仍从为旧
+RDI 保留的普通 host 临时寄存器取地址。RCX 的 fixed home 此时已经保存同一个 full-width value
+version，因此旧值不需要第二个物理驻留位置。
+
+新的独立 ARM64 planner 追踪这一版本发布关系。它只接受零偏移、完整 64 位、不同 pinned home
+之间的发布，枚举透明 full-width alias 的全部 use，并确认目标 home 在最后一个转移 use 前没有被
+覆盖。caller-saved home 遇到 helper clobber 时拒绝。faulting memory use 不会结束该版本：发布后
+source 和 target 的架构槽均有正确值，source 后续覆盖产生新版本，旧版本仍由 target home 保存，
+现有 fault snapshot 可直接恢复两者。matcher 与 emitter 都复证同一计划。
+
+首个 consumer 只让完整 value version 供后续 memory address 使用，不同时扩张到普通 ALU、窄值和
+FPR。`sqlite3DefaultRowEst` 的入口由 `mov x9, x1; mov x23, x9` 收敛为 `mov x23, x1`，后续三次
+load 直接读取 x23。短门禁结果：
+
+- SQLite 精确公共集合 2,242 roots / 100% host 与 entry coverage，`264,573 -> 264,568`；5 个
+  root 各减少 1 条，无增长。`sqlite3DefaultRowEst@0x40d240` `168 -> 167`，相对 FEX 120 条的残差
+  降到 47 条。
+- SQLite `--threads 1` 返回 0，时间归一化输出逐字节一致。
+- smallpt 的短 oracle 保持 PPM SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`；共同 root 发码不变。
+- CoreMark 20k 保持 299 roots / 37,160 条，`crcfinal=0x382f`。
+- Mac/Orb 的跨多个 faulting load 版本复用、目标 home 覆盖失效和既有 pinned snapshot 边界测试通过。
+
+该阶段没有新增环境开关、诊断路径或运行时兜底。下一步继续在同一 root 中加入
+`KnownZeroAbove(16/32)`，让 compare/select consumer 消费宽度事实；不把 full-width transfer
+直接扩大成无法说明观察关系的通用 alias 规则。

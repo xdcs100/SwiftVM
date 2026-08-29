@@ -3288,6 +3288,22 @@ peepholes.
   deleted. Mac/Orb focused frontend, fusion, parity-token and logical-flags tests pass. No new env
   switch, diagnostic path or stress run remains.
 
+- Full-width guest GPR copies can now transfer an old value version to the published target fixed
+  home. The dedicated ARM64 planner proves the complete transparent-alias use set, target-home
+  residency through the last use, and caller-saved helper preservation; it deliberately allows
+  faulting memory uses because both architectural slots have coherent versions at every fault
+  point. The first consumer covers only later memory addresses. In `sqlite3DefaultRowEst`,
+  `mov x9, x1; mov x23, x9` becomes `mov x23, x1`, and the later loads use x23 after x1 is
+  overwritten. The exact SQLite set keeps all 2,242 roots with 100% coverage and no growth, moving
+  `264,573 -> 264,568`; five roots shrink by one instruction, including
+  `sqlite3DefaultRowEst@0x40d240` `168 -> 167` versus FEX at 120. Timing-normalized SQLite output is
+  byte-identical. The bounded smallpt oracle keeps PPM SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`; CoreMark stays at 299
+  roots / 37,160 instructions with `crcfinal=0x382f`. Mac/Orb tests cover reuse across two faulting
+  loads and invalidation by a target-home overwrite. No env switch, diagnostic path, fallback or
+  stress run was added. The next consumer is pinned-GPR `KnownZeroAbove(16/32)` for the remaining
+  compare/select width bridges in the same root.
+
 ## Orb loop
 
 ```

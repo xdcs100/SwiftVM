@@ -1317,6 +1317,16 @@ void JitTranslator::EmitSetHostGPR(ir::Inst* inst) {
                    "dead pinned GPR write proof diverged at IR {}", inst->Id());
         return;
     }
+    if (auto transfer = pinned_gpr_value_transfers.find(inst);
+        transfer != pinned_gpr_value_transfers.end()) {
+        const auto reproved = MatchPinnedGPRValueTransfer(inst);
+        ASSERT_MSG(reproved && *reproved == transfer->second,
+                   "pinned GPR value transfer proof diverged at IR {}",
+                   inst->Id());
+        __ Mov(XRegister(transfer->second.target),
+               XRegister(transfer->second.source));
+        return;
+    }
     if (auto copy = pinned_gpr_copies.find(inst);
         copy != pinned_gpr_copies.end()) {
         const auto reproved = MatchPinnedGPRCopy(inst);

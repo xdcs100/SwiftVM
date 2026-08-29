@@ -210,6 +210,19 @@ private:
     void PrepareDeadPinnedGPRWrites(ir::Block* block);
     [[nodiscard]] bool IsDeadPinnedGPRWrite(ir::Inst* inst) const;
     void PreparePinnedGPRCopies(ir::Block* block);
+    struct PinnedGPRValueTransfer {
+        ir::Inst* read{};
+        ir::Inst* publication{};
+        std::vector<ir::Inst*> aliases{};
+        u16 source{};
+        u16 target{};
+        u32 last_use{};
+
+        bool operator==(const PinnedGPRValueTransfer&) const = default;
+    };
+    [[nodiscard]] std::optional<PinnedGPRValueTransfer>
+    MatchPinnedGPRValueTransfer(ir::Inst* publication) const;
+    void PreparePinnedGPRValueTransfers(ir::Block* block);
     struct NarrowExtractExtension {
         ir::Inst* extract{};
         ir::Value source{};
@@ -817,6 +830,7 @@ private:
     std::map<ir::Inst*, u16> pinned_gpr_values{};
     std::map<std::pair<ir::Inst*, const ir::Inst*>, u16> pinned_gpr_use_homes{};
     std::map<ir::Inst*, PinnedGPRCopy> pinned_gpr_copies{};
+    std::map<ir::Inst*, PinnedGPRValueTransfer> pinned_gpr_value_transfers{};
     std::map<ir::Inst*, PinnedLoadUpdate> pinned_load_updates{};
     std::map<ir::Inst*, PinnedLoadUpdate> pinned_load_update_instructions{};
     std::map<ir::Inst*, NarrowExtractExtension> narrow_extract_extensions{};
