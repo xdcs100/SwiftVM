@@ -3320,6 +3320,20 @@ peepholes.
   consumption and invalidation by a target-home overwrite. No environment switch, diagnostic
   path, fallback, probe or stress run remains.
 
+- Full-width values published to pinned GPR homes now expose an exact low-width view to later
+  consumers. A dedicated ARM64 planner proves the complete producer use set, accepts only
+  post-publication single-use zero-offset U8/U16/U32 extracts consumed by same-width Add, Sub or
+  Select, and rejects target overwrites or caller-saved helper crossings. The publication itself
+  remains on the existing SetHostGPR path. In `sqlite3DefaultRowEst@0x40d240`, three zero-shift
+  extracts disappear and later Sub/Add/Sub operations read the published W view directly, moving
+  the root `164 -> 161` versus FEX at 120. The exact SQLite set retains all 2,242 roots with 100%
+  coverage and no growth, moving `264,255 -> 264,174`; 70 roots shrink and timing-normalized output
+  remains byte-identical. Bounded smallpt keeps all 267 roots, moves `37,128 -> 37,126`, and retains
+  PPM SHA-256 `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`.
+  CoreMark 20k keeps all 300 roots, moves `37,157 -> 37,156`, and retains `crcfinal=0x382f`.
+  Mac/Orb focused tests cover the positive view and target-home overwrite rejection. No new env
+  switch, diagnostic path, fallback, probe or stress run remains.
+
 ## Orb loop
 
 ```

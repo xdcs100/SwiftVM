@@ -223,6 +223,18 @@ private:
     [[nodiscard]] std::optional<PinnedGPRValueTransfer>
     MatchPinnedGPRValueTransfer(ir::Inst* publication) const;
     void PreparePinnedGPRValueTransfers(ir::Block* block);
+    struct PinnedGPRPublicationView {
+        ir::Inst* value{};
+        ir::Inst* publication{};
+        std::vector<ir::Inst*> aliases{};
+        u16 target{};
+        u32 last_use{};
+
+        bool operator==(const PinnedGPRPublicationView&) const = default;
+    };
+    [[nodiscard]] std::optional<PinnedGPRPublicationView>
+    MatchPinnedGPRPublicationView(ir::Inst* publication) const;
+    void PreparePinnedGPRPublicationViews(ir::Block* block);
     struct NarrowExtractExtension {
         ir::Inst* extract{};
         ir::Value source{};
@@ -831,6 +843,7 @@ private:
     std::map<std::pair<ir::Inst*, const ir::Inst*>, u16> pinned_gpr_use_homes{};
     std::map<ir::Inst*, PinnedGPRCopy> pinned_gpr_copies{};
     std::map<ir::Inst*, PinnedGPRValueTransfer> pinned_gpr_value_transfers{};
+    std::map<ir::Inst*, PinnedGPRPublicationView> pinned_gpr_publication_views{};
     std::map<ir::Inst*, PinnedLoadUpdate> pinned_load_updates{};
     std::map<ir::Inst*, PinnedLoadUpdate> pinned_load_update_instructions{};
     std::map<ir::Inst*, NarrowExtractExtension> narrow_extract_extensions{};

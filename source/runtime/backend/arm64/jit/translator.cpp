@@ -762,6 +762,7 @@ JitTranslator::PrepareBlockState(ir::Block* block) {
     PrepareDeadPinnedGPRWrites(block);
     PreparePinnedGPRCopies(block);
     PreparePinnedGPRValueTransfers(block);
+    PreparePinnedGPRPublicationViews(block);
     PreparePinnedLoadUpdates(block);
     PreparePinnedMemoryValues(block);
     PrepareDeadEdgeIntegerBranch(block);

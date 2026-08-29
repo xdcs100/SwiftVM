@@ -490,3 +490,28 @@ view，其余路径继续使用寄存器分配结果。
 该阶段没有新增环境开关、诊断日志、临时 probe 或运行时兜底。下一批继续从剩余加权 root 中选择
 能共享同一状态事实的 compare/flags consumer，或转向 continuation hot/cold contract；不把
 consumer allowlist 扩成通用寄存器别名系统。
+
+### 16.5 full-width publication 的低位宽度视图
+
+full-width SSA value 写入 pinned GPR 后，fixed home 已经承载同一 value version。原后端仍为后续
+零偏移低位 `BitExtract` 分配普通临时寄存器，因此在 compare 和地址计算前生成 `lsr W, W, #0`。
+
+本阶段新增独立的 ARM64 publication-view planner。它只接受 publication 之后、单 use、零偏移的
+U8/U16/U32 `BitExtract`，且 consumer 必须是精确同宽的 `Add`、`Sub` 或 `Select`。planner 枚举
+producer 的完整 ordinary use set；目标 fixed home 在最后一个 consumer 前被覆盖，caller-saved
+目标跨 helper，或出现未审核 consumer 时整条计划拒绝。`SetHostGPR` 仍按原路径发布值，低位 alias
+只在该证明成立时读取目标 W view，没有引入新的 IR、运行时协议或兜底路径。
+
+`sqlite3DefaultRowEst@0x40d240` 中三个零位 `lsr` 被删除，后续 `Sub/Add/Sub` 直接读取已发布的 W
+view，root 从 164 降到 161，相对 FEX 120 条的残差降到 41 条。短门禁结果：
+
+- SQLite 精确集合保持 2,242 roots / 100% host 与 entry coverage，`264,255 -> 264,174`
+  （`-81` / `-0.030652%`）；70 个 root 缩短，0 个增长。时间归一化输出逐字节一致，SHA-256 保持
+  `610f791a79bff6436ec37a0b7863aa9a18d26785233630ed942a2d94ab938a93`。
+- smallpt `4 8 6` 保持 267 roots，`37,128 -> 37,126`，无增长；PPM SHA-256 保持
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`。
+- CoreMark 显式 20k 保持 300 roots，`37,157 -> 37,156`，无增长；`crcfinal=0x382f`。
+- Mac/Orb 的 pinned 与 full-width publication 定向测试通过，覆盖正向复用和目标 home 覆盖失效。
+
+该阶段没有新增环境开关、诊断日志、临时 probe 或运行时兜底。后续宽度事实仍按 value version 和
+观察边界扩展，不把 fixed-home view 变成全局寄存器别名。

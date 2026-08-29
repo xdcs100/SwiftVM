@@ -17,7 +17,12 @@ using namespace swift::runtime;
 using namespace swift::runtime::backend;
 using namespace swift::runtime::ir;
 
-std::vector<std::string> EmitWidthSelect(bool overwrite_target) {
+enum class PinnedWidthShape {
+    NarrowSelect,
+    PublishedLow32,
+};
+
+std::vector<std::string> EmitWidthFact(PinnedWidthShape shape, bool overwrite_target) {
     Config config{
             .loc_start = 0,
             .loc_end = 1ull << 48,
@@ -29,19 +34,32 @@ std::vector<std::string> EmitWidthSelect(bool overwrite_target) {
     auto module = address_space.GetDefaultModule();
     IntrusivePtr<Block> block{new Block(0, Location{0x9750})};
 
-    auto address = block->LoadImm(Imm{swift::u64{0x1000}}).SetType(ValueType::U64);
-    auto loaded = block->LoadMemory(Operand{address}).SetType(ValueType::U16);
-    auto widened = block->ZeroExtend32(loaded).SetType(ValueType::U32);
-    auto published = block->ZeroExtend32To64(widened).SetType(ValueType::U64);
-    block->SetHostGPR(published, HostRegIndex(22), Imm{0u});
-    if (overwrite_target) {
-        auto replacement = block->LoadImm(Imm{swift::u64{0x2000}}).SetType(ValueType::U64);
-        block->SetHostGPR(replacement, HostRegIndex(22), Imm{0u});
+    if (shape == PinnedWidthShape::NarrowSelect) {
+        auto address = block->LoadImm(Imm{swift::u64{0x1000}}).SetType(ValueType::U64);
+        auto loaded = block->LoadMemory(Operand{address}).SetType(ValueType::U16);
+        auto widened = block->ZeroExtend32(loaded).SetType(ValueType::U32);
+        auto published = block->ZeroExtend32To64(widened).SetType(ValueType::U64);
+        block->SetHostGPR(published, HostRegIndex(22), Imm{0u});
+        if (overwrite_target) {
+            auto replacement = block->LoadImm(Imm{swift::u64{0x2000}}).SetType(ValueType::U64);
+            block->SetHostGPR(replacement, HostRegIndex(22), Imm{0u});
+        }
+        auto condition = block->LoadImm(Imm{swift::u32{1}}).SetType(ValueType::U32);
+        auto alternate = block->LoadImm(Imm{swift::u32{7}}).SetType(ValueType::U32);
+        auto selected = block->Select(condition, alternate, widened).SetType(ValueType::U32);
+        block->StoreUniform(Uniform{64, ValueType::U32}, selected);
+    } else {
+        auto base = block->GetHostGPR(HostRegIndex(1), Imm{0u}).SetType(ValueType::U64);
+        auto value = block->Add(base, Operand{Imm{1u}}).SetType(ValueType::U64);
+        block->SetHostGPR(value, HostRegIndex(22), Imm{0u});
+        if (overwrite_target) {
+            auto replacement = block->LoadImm(Imm{swift::u64{0x2000}}).SetType(ValueType::U64);
+            block->SetHostGPR(replacement, HostRegIndex(22), Imm{0u});
+        }
+        auto low = block->BitExtract(value, Imm{0u}, Imm{32u}).SetType(ValueType::U32);
+        auto compare = block->Sub(low, Operand{Imm{8u}}).SetType(ValueType::U32);
+        block->SaveFlags(compare, Flags::All);
     }
-    auto condition = block->LoadImm(Imm{swift::u32{1}}).SetType(ValueType::U32);
-    auto alternate = block->LoadImm(Imm{swift::u32{7}}).SetType(ValueType::U32);
-    auto selected = block->Select(condition, alternate, widened).SetType(ValueType::U32);
-    block->StoreUniform(Uniform{64, ValueType::U32}, selected);
     block->SetTerminal(terminal::ReturnToDispatch{});
     block->ReIdInstr();
 
@@ -82,13 +100,25 @@ std::size_t Count(const std::vector<std::string>& lines,
 }  // namespace
 
 TEST_CASE("a published narrow load feeds Select from its pinned W view") {
-    const auto lines = EmitWidthSelect(false);
+    const auto lines = EmitWidthFact(PinnedWidthShape::NarrowSelect, false);
     REQUIRE(Count(lines, "ldrh w22") == 1);
     REQUIRE(Count(lines, "csel w", ", w22, ne") == 1);
 }
 
 TEST_CASE("overwriting a published narrow value rejects its pinned W view") {
-    const auto lines = EmitWidthSelect(true);
+    const auto lines = EmitWidthFact(PinnedWidthShape::NarrowSelect, true);
     REQUIRE(Count(lines, "ldrh w22") == 0);
     REQUIRE(Count(lines, "csel w", ", w22, ne") == 0);
+}
+
+TEST_CASE("a published full-width value exposes its pinned low W view") {
+    const auto lines = EmitWidthFact(PinnedWidthShape::PublishedLow32, false);
+    REQUIRE(Count(lines, "lsr w", "#0") == 0);
+    REQUIRE(Count(lines, "subs w", "w22, #0x8") == 1);
+}
+
+TEST_CASE("overwriting a full-width publication preserves its low snapshot") {
+    const auto lines = EmitWidthFact(PinnedWidthShape::PublishedLow32, true);
+    REQUIRE(Count(lines, "lsr w", "#0") == 1);
+    REQUIRE(Count(lines, "subs w", "w22, #0x8") == 0);
 }

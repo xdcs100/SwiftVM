@@ -178,6 +178,7 @@ add_library(swift_runtime STATIC
         backend/arm64/jit/translator_dead_gpr_write.cpp
         backend/arm64/jit/translator_pinned_gpr_copy.cpp
         backend/arm64/jit/translator_pinned_gpr_transfer.cpp
+        backend/arm64/jit/translator_pinned_gpr_publication.cpp
         backend/arm64/jit/translator_pinned_load_update.cpp
         backend/arm64/jit/translator_pinned_memory.cpp
         backend/arm64/jit/translator_narrow_extract.cpp
