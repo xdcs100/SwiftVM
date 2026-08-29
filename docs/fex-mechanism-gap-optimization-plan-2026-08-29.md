@@ -806,3 +806,25 @@ fault-backed interrupt poll，fault recovery 使用目标 guest location。解�
 本阶段没有保留探针、诊断日志、env 开关、临时源路径或旧协议兜底，也没有运行压力测试或长基准。
 P0 剩余项收窄为 `freeSpace` 的 Release 代码量验收，以及 terminal-only/call-return root 的显式
 live-in canonicalization；后者仍不从普通 split root 的通过结果外推。
+
+### 16.15 call-owned canonical external root
+
+提交 `a83b654` 将 canonical external root 扩展到唯一 owner 内、split 点位于 call 之前的
+call-owned block。`FunctionDecodeFrontier` 仍在 provenance 中保留 call-return ownership，但不再把它
+作为拒绝原因。`ResetDecodedBlock` 只在 return block 没有其他 owner 时解除旧关系；目标 root
+从 canonical frontend 状态重解码到同一 call 后，`RegisterCallReturn` 重建 owner 和 return-target
+标记。这不是保留两套 ownership 协议，ambiguous owner 和 missing owner 仍 fail-closed。
+
+Release 短账确认 `freeSpace` 的 `0x449b0c` 已真正晋级：7 个原始 direct source 与 1 个
+owner-prefix 边共生成 8 个 `ExternalLinkBlock`，decoded block 数从 37 增至 38。同配置
+SQLite `main/size1` 保持 2,285 roots，host 指令总数 `370,399 -> 367,040`（`-3,359`），
+`freeSpace` `482 -> 471`（`-11`），程序正常完成。smallpt `4 8 6` 保持 279 roots 和
+canonical PPM SHA-256，host 指令 `49,520 -> 49,265`（`-255`）。
+
+Mac 通过 `[function-entry]` 70 条断言 / 6 个 case、`[direct-link][production]` 867 / 14、
+非压力 `[smc]` 773 / 11、`[continuation]` 105 / 4，以及 glibc 72-block 定向用例 38 / 1。
+Orb 本阶段未验证，不宣称远程门禁通过。没有运行长基准或压力测试，临时诊断、
+probe、env 开关和迟绑定原型均未保留。
+
+P0 的 `freeSpace` Release 收益门禁已闭合。terminal-only 且含非 canonical RA/live-in 的 return
+entry 仍未开放；它与本阶段“从函数内部精确边界重放完整 call”的条件不同。

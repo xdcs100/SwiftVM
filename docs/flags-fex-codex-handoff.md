@@ -3460,6 +3460,17 @@ peepholes.
   do not claim or broaden the optimization until the same commit receives a Release/Orb short shape.
   No stress run, probe, env switch, diagnostic log, temporary source path or fallback remains.
 
+- `a83b654` removes call-return ownership as a blanket external-root rejection when the split is
+  before the call and the return block has one owner. Reset detaches that unique relation; canonical
+  target replay reaches the call and registers the same return block again. Ambiguous and missing
+  owners remain fail-closed. Release SQLite `main/size1` keeps 2,285 roots and moves total host
+  instructions `370,399 -> 367,040`; `freeSpace` moves `482 -> 471`, with seven original direct
+  sources plus one owner-prefix edge entering `0x449b0c`. Release smallpt keeps 279 roots and the
+  canonical PPM SHA while moving `49,520 -> 49,265`. Mac passes 70 function-entry, 867 production
+  direct-link, 773 non-stress SMC, 105 continuation and 38 extracted glibc assertions. Orb remains
+  unverified. No stress run, long benchmark, probe, env switch, diagnostic path or late-resolution
+  fallback remains.
+
 ## Orb loop
 
 ```
