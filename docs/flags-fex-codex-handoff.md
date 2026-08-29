@@ -3571,6 +3571,22 @@ peepholes.
   path, temporary source/build path or compatibility fallback remains. Next extend GuestStateMap
   from block-local fixed homes to guest-slot versions, width facts, fault snapshots and safe CFG joins.
 
+- `2d2556e` adds block-local pinned guest value versions to `GuestStateMap`. Each resident value now
+  carries its fixed home, W/X width and physical high-32 normalization fact. Entry reads, zero-offset
+  publications and `ZeroExtend32To64` low views share one active-state model; helper clobbers,
+  later publications and the earlier physical write point of RA-coalesced stores invalidate the
+  correct version. Consumer-specific transferred uses moved out of the translator's former
+  `pinned_gpr_use_homes` table and into the same map. Proven `SetHostGPR`, `Add`, `Select` and U32
+  `Sub/And/Or/Xor` users read the resident home directly, and a fully resident `GetHostGPR` emits no
+  move. Mac Debug passes 104 pinned, 86 helper and 60 region-flags assertions. Exact Release A/B
+  keeps 275 smallpt roots with canonical PPM and moves `49,249 -> 49,107` (`-142`); SQLite matches
+  all 2,114 roots/top-20 and moves `355,961 -> 354,915` (`-1,046`) with no growth and rc=0. A single
+  local profile shows about 34 ms additional codegen time across 2,114 functions, so it is recorded
+  as an analysis cost rather than hidden by noisy TOTAL timing. No stress run, long benchmark, env
+  switch, probe, diagnostic path, temporary source/build path or fallback remains. The next mechanism
+  boundary is fault-visible snapshots and safe diamond/backedge joins; this commit does not claim
+  cross-CFG facts.
+
 ## Orb loop
 
 ```

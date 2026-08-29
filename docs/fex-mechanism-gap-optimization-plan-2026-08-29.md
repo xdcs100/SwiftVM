@@ -1013,3 +1013,30 @@ SQLite `--size 1 --testset main :memory:` 两侧均命中 2,114 roots，100% roo
 本阶段没有运行压力测试或长基准，也没有新增 env 开关、probe、日志、临时源路径或兼容兜底；同源
 Release 构建和 capture 目录已删除。其他 helper 只有在函数实现、wrapper 和调用点能同时提供静态证明
 时才可升级；第 7 节完整 guest slot/value version、fault snapshot 与跨 CFG join 仍是下一项机制工作。
+
+### 16.23 block-local guest value version 与 W/X 宽度事实
+
+提交 `2d2556e` 将 `GuestStateMap` 从 fixed-home 生存期查询扩展为同一 block 内的值版本模型。
+`FixedHomeValue` 同时记录 home、32/64 位视图和物理高 32 位是否已归零；分析只在确实存在 publication
+后复用的 block 中启用。入口 `GetHostGPR`、零偏移 `SetHostGPR` 和 `ZeroExtend32To64` 的低位版本进入
+同一 active state，后续 `SetHostGPR`、精确 helper clobber 和分配后 coalesced write 的实际物理写入点
+都会撤销对应 home，避免按较晚的 IR publication 错估旧版本仍存活。
+
+consumer-specific fixed-home 解析已归入 `GuestStateMap`，旧的 translator 私有
+`pinned_gpr_use_homes` 被删除。已证明的 `SetHostGPR`、`Add`、`Select` 以及 32 位
+`Sub/And/Or/Xor` 可直接读取 resident home；当 `GetHostGPR` 的全部普通 use 都有同一版本依据时，
+入口 move 不再生成。32 位值若仍驻留在未规范化高位的 X home，发布到同一架构 home 时显式执行 W
+self-move，不能把逻辑低位等价误当成物理 64 位状态已经可观察。
+
+Mac Debug 的 pinned 分组通过 104 条断言 / 28 个 case，helper 分组通过 86 条断言 / 9 个 case，
+region flags 通过 60 条断言；新增生产 codegen 用例验证已发布版本直接供普通 ALU consumer 使用。
+Release 同源 static-only A/B 中，smallpt `4 8 6` 两侧均为 275 roots，100% root/top-20 覆盖，
+`49,249 -> 49,107`（`-142`，`-0.288331%`），PPM SHA-256 保持 canonical。SQLite
+`--size 1 --testset main :memory:` 两侧均为 2,114 roots，100% root/top-20 覆盖，
+`355,961 -> 354,915`（`-1,046`，`-0.293852%`），无增长 root 且程序正常完成。
+
+单次同机 profile 中 2,114 个函数的 codegen 阶段约从 289 ms 增至 323 ms；TOTAL 受运行顺序和系统
+负载影响较大，本阶段不把一次样本当作稳定 wall-time 结论。实现没有增加无条件全函数预扫描，
+early-clobber 使用小向量而非逐项树节点分配。没有运行压力测试或长基准，也没有保留 env 开关、
+probe、日志、临时源路径或兼容兜底。当前状态格仍是 block-local；fault snapshot、diamond/backedge
+join、`KnownZeroAbove(8/16)`、sign-extended facts 和 memory/XMM consumer 仍属于第 7 节后续工作。
