@@ -1223,6 +1223,7 @@ void JitTranslator::Translate(ir::Block* block) {
     vixl::svm_vixl_prof::JitScope vixl_prof{context.GetFeatures().vixl_fast};
     ASSERT(vec_nan_cold_sites.empty());
     if (!translating_function) {
+        guest_state_map.AnalyzeFunction(nullptr, context.GetFeatures());
         placement_unit_pc = block->GetStartLocation().Value();
         std::array<ir::Block*, 1> blocks{block};
         PrepareUnalignedAtomicFallbacks(blocks);
@@ -1325,6 +1326,7 @@ void JitTranslator::Translate(ir::HIRFunction* function) {
     placement_unit_pc = function->GetFunction()->GetStartLocation().Value();
     context.SetCurrent(function->GetFunction());
     disable_instructions.resize(function->MaxInstrCount());
+    guest_state_map.AnalyzeFunction(function, context.GetFeatures());
     canonical_terminal_entries =
             FunctionEntryContract::AnalyzeCanonicalTerminalEntries(*function);
     PrepareRegionEdges(function);

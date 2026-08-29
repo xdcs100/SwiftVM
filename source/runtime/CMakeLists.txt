@@ -153,6 +153,8 @@ add_library(swift_runtime STATIC
         backend/arm64/jit/div128_narrowing_analysis.cpp
         backend/arm64/jit/div128_narrowing_analysis.h
         backend/arm64/jit/guest_state_map.cpp
+        backend/arm64/jit/guest_state_map_cfg.cpp
+        backend/arm64/jit/guest_state_map_fault.cpp
         backend/arm64/jit/guest_state_map_values.cpp
         backend/arm64/jit/guest_state_map.h
         backend/arm64/jit/raw_carry_branch_analysis.cpp

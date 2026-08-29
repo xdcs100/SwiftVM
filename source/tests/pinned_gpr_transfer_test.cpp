@@ -7,8 +7,10 @@
 
 #include "aarch64/disasm-aarch64.h"
 #include "runtime/backend/address_space.h"
+#include "runtime/backend/arm64/jit/guest_state_map.h"
 #include "runtime/backend/arm64/jit/jit_context.h"
 #include "runtime/backend/arm64/jit/translator.h"
+#include "runtime/ir/hir_builder.h"
 #include "runtime/ir/opts/register_alloc_pass.h"
 
 namespace {
@@ -123,6 +125,117 @@ std::vector<std::string> EmitHelperTransfer(HostRegisterEffect effect, swift::u3
     return Disassemble(context);
 }
 
+std::vector<std::string> EmitCrossBlockWidth(bool external_entry) {
+    constexpr swift::VAddr first_guest = 0x9780;
+    constexpr swift::VAddr second_guest = 0x9790;
+    Config config{
+            .loc_start = 0,
+            .loc_end = 1ull << 48,
+            .enable_jit = true,
+            .has_local_operation = false,
+            .backend_isa = kArm64,
+    };
+    AddressSpace address_space{config};
+    auto module = address_space.GetDefaultModule();
+    FeatureSet features{};
+    HIRBuilder builder{1, true, features};
+    auto* function = builder.AppendFunction(
+            Location{first_guest}, Location{second_guest + 1});
+
+    auto value = function->LoadImm(Imm{swift::u32{7}}).SetType(ValueType::U32);
+    function->SetHostGPR(value, HostRegIndex(23), Imm{0u});
+    auto* second = builder.LinkBlock(
+            terminal::LinkBlock{Location{second_guest}});
+    if (external_entry) {
+        function->RegisterExternalEntryRoot(second);
+    }
+    builder.SetCurBlock(second);
+    auto resident = function
+                            ->GetHostGPR(HostRegIndex(23), Imm{0u})
+                            .SetType(ValueType::U32);
+    function->SetHostGPR(resident, HostRegIndex(23), Imm{0u});
+    auto result = function->Add(resident, Operand{Imm{swift::u32{1}}})
+                          .SetType(ValueType::U32);
+    function->StoreUniform(Uniform{64, ValueType::U32}, result);
+    function->EndBlock(terminal::ReturnToHost{});
+    function->EndFunction();
+    function->ComputeRPO();
+    function->IdByRPO();
+
+    RegAlloc alloc{function->MaxInstrCount(),
+                   address_space.GetTrampolines().GetGPRRegs(),
+                   address_space.GetTrampolines().GetFPRRegs(),
+                   features};
+    RegisterAllocPass::Run(function, &alloc, features);
+    arm64::JitContext context{module, alloc};
+    arm64::JitTranslator translator{context};
+    translator.Translate(function);
+    context.Finish();
+    return Disassemble(context);
+}
+
+bool DiamondEntryKnownZero(bool clobber_predecessor) {
+    constexpr Location entry{0x9800};
+    constexpr Location left_location{0x9810};
+    constexpr Location right_location{0x9820};
+    constexpr Location join_location{0x9830};
+    FeatureSet features{};
+    HIRBuilder builder{1, true, features};
+    auto* function = builder.AppendFunction(entry, Location{0x9840});
+    auto value = function->LoadImm(Imm{swift::u32{1}}).SetType(ValueType::U32);
+    function->SetHostGPR(value, HostRegIndex(23), Imm{0u});
+    auto condition = function->LoadImm(Imm{swift::u8{1}}).SetType(ValueType::U8);
+    auto [left, right] = builder.If(terminal::If{
+            condition,
+            terminal::LinkBlock{left_location},
+            terminal::LinkBlock{right_location},
+    });
+
+    builder.SetCurBlock(left);
+    auto* join = builder.LinkBlock(terminal::LinkBlock{join_location});
+    builder.SetCurBlock(right);
+    if (clobber_predecessor) {
+        auto wide = function
+                            ->LoadImm(Imm{UINT64_C(0x10000000000)})
+                            .SetType(ValueType::U64);
+        function->SetHostGPR(wide, HostRegIndex(23), Imm{0u});
+    }
+    builder.LinkBlock(terminal::LinkBlock{join_location});
+    builder.SetCurBlock(join);
+    function->EndBlock(terminal::ReturnToHost{});
+    function->EndFunction();
+    function->ComputeRPO();
+
+    arm64::GuestStateMap state_map;
+    state_map.AnalyzeFunction(function, features);
+    return state_map.EntryKnownZeroAbove32(join->GetBlock(), 23);
+}
+
+bool LoopEntryKnownZero(bool clobber_backedge) {
+    constexpr Location entry{0x9850};
+    constexpr Location loop_location{0x9860};
+    FeatureSet features{};
+    HIRBuilder builder{1, true, features};
+    auto* function = builder.AppendFunction(entry, Location{0x9870});
+    auto value = function->LoadImm(Imm{swift::u32{1}}).SetType(ValueType::U32);
+    function->SetHostGPR(value, HostRegIndex(23), Imm{0u});
+    auto* loop = builder.LinkBlock(terminal::LinkBlock{loop_location});
+    builder.SetCurBlock(loop);
+    if (clobber_backedge) {
+        auto wide = function
+                            ->LoadImm(Imm{UINT64_C(0x10000000000)})
+                            .SetType(ValueType::U64);
+        function->SetHostGPR(wide, HostRegIndex(23), Imm{0u});
+    }
+    builder.LinkBlock(terminal::LinkBlock{loop_location});
+    function->EndFunction();
+    function->ComputeRPO();
+
+    arm64::GuestStateMap state_map;
+    state_map.AnalyzeFunction(function, features);
+    return state_map.EntryKnownZeroAbove32(loop->GetBlock(), 23);
+}
+
 std::size_t Count(const std::vector<std::string>& lines,
                   std::string_view first,
                   std::string_view second) {
@@ -159,4 +272,18 @@ TEST_CASE("resident helper contracts preserve pinned value versions") {
     REQUIRE(Count(conservative, "ldr x", "[x7, #8]") == 0);
     REQUIRE(Count(resident, "ldr x", "[x7, #8]") == 1);
     REQUIRE(Count(clobbered, "ldr x", "[x2, #8]") == 0);
+}
+
+TEST_CASE("pinned CFG width facts stop at external entry roots") {
+    const auto internal = EmitCrossBlockWidth(false);
+    const auto external = EmitCrossBlockWidth(true);
+    REQUIRE(Count(internal, "mov w23, w23", "") == 0);
+    REQUIRE(Count(external, "mov w23, w23", "") == 1);
+}
+
+TEST_CASE("pinned CFG width facts meet at diamonds and backedges") {
+    REQUIRE(DiamondEntryKnownZero(false));
+    REQUIRE_FALSE(DiamondEntryKnownZero(true));
+    REQUIRE(LoopEntryKnownZero(false));
+    REQUIRE_FALSE(LoopEntryKnownZero(true));
 }

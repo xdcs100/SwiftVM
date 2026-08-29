@@ -73,7 +73,8 @@ JitTranslator::MatchPinnedSelectPublication(ir::Inst* publication) const {
     }
 
     if (!guest_state_map.PublicationWindowSafe(
-                target, producer->Id(), publication->Id(), extend)) {
+                target, ir::Value{producer}, producer->Id(), publication->Id(),
+                extend)) {
         return std::nullopt;
     }
 

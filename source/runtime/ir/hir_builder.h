@@ -365,6 +365,9 @@ public:
         return external_direct_links;
     }
     void RegisterExternalEntryRoot(HIRBlock* block);
+    [[nodiscard]] const std::vector<HIRBlock*>& GetExternalEntryRoots() const {
+        return external_entry_roots;
+    }
     void SetFunctionEntryProvenance(std::vector<FunctionEntryProvenance> provenance) {
         function_entry_provenance = std::move(provenance);
     }

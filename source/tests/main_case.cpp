@@ -6765,6 +6765,48 @@ TEST_CASE("fault snapshot publishes the latest XMM arithmetic result") {
     munmap(code, page);
 }
 
+TEST_CASE("fault snapshot preserves committed W GPR high-zero state") {
+    using namespace swift::translator;
+    using namespace swift::translator::x86;
+
+    const long page_long = sysconf(_SC_PAGESIZE);
+    REQUIRE(page_long > 0);
+    const auto page = static_cast<size_t>(page_long);
+    auto* fault = static_cast<swift::u8*>(
+            mmap(nullptr, page, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0));
+    auto* code = static_cast<swift::u8*>(
+            mmap(nullptr, page, PROT_READ | PROT_WRITE,
+                 MAP_PRIVATE | MAP_ANON, -1, 0));
+    REQUIRE(fault != MAP_FAILED);
+    REQUIRE(code != MAP_FAILED);
+
+    const std::array<swift::u8, 9> guest{
+            0xb8, 0xef, 0xcd, 0xab, 0x89,
+            0x48, 0x8b, 0x1a,
+            0xf4,
+    };
+    std::memcpy(code, guest.data(), guest.size());
+
+    backend::SmcTracker::SetEnabled(false);
+    auto* instance = X86Instance::Make();
+    auto* core = X86Core::Make(instance);
+    auto& state = core->GetContext();
+    state.rip.qword = reinterpret_cast<swift::u64>(code);
+    state.rax.qword = UINT64_C(0xfedcba9876543210);
+    state.rbx.qword = UINT64_C(0x123456789abcdef0);
+    state.rdx.qword = reinterpret_cast<swift::u64>(fault);
+
+    REQUIRE(core->Run() == ExitReason::PageFatal);
+    REQUIRE(state.rax.qword == UINT64_C(0x0000000089abcdef));
+    REQUIRE(state.rbx.qword == UINT64_C(0x123456789abcdef0));
+
+    X86Core::Destroy(core);
+    X86Instance::Destroy(instance);
+    backend::SmcTracker::SetEnabled(true);
+    munmap(fault, page);
+    munmap(code, page);
+}
+
 TEST_CASE("integer width chains keep X high halves zero for W and X consumers") {
     using namespace swift::x86;
 
