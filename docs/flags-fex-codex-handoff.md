@@ -3539,6 +3539,22 @@ peepholes.
   shrinkage is claimed. Partial-mask tails still require an exact-mask merge trampoline; no stress
   run, long benchmark, env switch, probe, diagnostic path, temporary source path or fallback remains.
 
+- `79bce76` closes the stateless terminal-only return-entry gap without publishing arbitrary empty
+  blocks. `FunctionEntryContract::AnalyzeCanonicalTerminalEntries` seeds function roots, accepted
+  external roots and uniquely owned call-return targets, accepts only empty constant LinkBlock/
+  LinkBlockFast terminals, and propagates through a chain only when every predecessor is already
+  canonical. These connectors are L2-only (`linkable=false`), use a normalized one-byte guest range
+  for disk-cache/SMC ownership, and branch to the next block's published label rather than inheriting
+  its region-internal RA/live-in state. A discarded generic-external-edge version removed the old
+  PageFatal but grew Debug smallpt by 186 instructions; none of it remains. Mac passes 87
+  function-entry, 117 continuation, 829 production direct-link, 684 non-stress SMC and 309 JIT-cache
+  assertions. Exact Release smallpt moves 279 roots / 49,265 instructions to 275 / 49,249: four
+  four-instruction connector roots disappear and all 275 common roots are unchanged, with canonical
+  PPM. SQLite main/size1 moves 2,188 / 356,545 to 2,115 / 356,245: 73 absorbed connectors account for
+  290 instructions and the 2,115 common roots lose another 10 with no growth. SSA/PSTATE-bearing
+  terminals remain rejected and require independent canonical replay. No stress run, long benchmark,
+  env switch, probe, diagnostic path, temporary source path or compatibility fallback remains.
+
 ## Orb loop
 
 ```

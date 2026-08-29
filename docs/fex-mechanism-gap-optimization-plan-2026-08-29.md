@@ -956,3 +956,33 @@ SQLite `--size 1 --testset main :memory:` 保持 2,188 roots / 356,545 条且正
 没有命中新 tail，因此本阶段只声明机制覆盖和零回退，不声明宏观收益。没有运行长基准或压力测试，
 也没有新增 env 开关、probe、日志、临时源路径或兼容兜底。EdgeFlags 后续只剩需要 exact-mask merge
 trampoline 的 partial-mask shared tail，以及非零 packed-flags version 的真实 producer。
+
+### 16.21 terminal-only canonical return entry
+
+提交 `79bce76` 为无普通 IR 指令的 return connector 增加显式 live-in canonicalization。
+`FunctionEntryContract::AnalyzeCanonicalTerminalEntries` 从 function root、accepted external root 和
+唯一 call-return owner 开始，只接受常量 `LinkBlock/LinkBlockFast`，并在所有 predecessor 已经是
+canonical connector 时沿空 block 链继续传播。带 SSA 的 `If/Switch`、依赖 PSTATE 的 `Condition`、
+未知 terminal 和多 owner return 仍不晋级。
+
+这些 entry 只发布到 AddressSpace L2，`linkable=false`，不注册 LinkManager direct/pending/call target。
+空 guest range 规范为 `[pc,pc+1)`，disk-cache hash 和 SMC 注册消费与 entry contract 相同的范围。
+ARM64 connector 不再沿 region internal label 继承 predecessor RA/live-in，而是在同一 allocation 内用
+一条分支进入目标的 published label。SMC 仍按整个 allocation owner 撤销 L2 entry；这条一次性
+continuation resume 不引入通用 backward-edge site 或额外 poll。
+
+smallpt `4 8 6` 的只读 IR census 有 383 个 terminal-only block，其中 55 个是 call-return target，
+实际形态全部为常量 `LinkBlock`。曾评估把它们作为通用 external edge 发布：PageFatal 消失，但
+Debug 总量增长 186 条；该版本已删除。最终 L2-only 方案的生产用例验证两级空 connector 从 L2
+进入目标、两级都不是 LinkManager target，并在 source guest byte 失效后一起从 L2 清除。
+
+Mac 通过 87 条 function-entry、117 条 continuation、829 条 production direct-link、684 条非压力
+SMC 和 309 条 jit-cache 断言；新增 dataflow contract 与生产执行分别为 5 和 12 条。Release 同源
+A/B 中，smallpt 从 279 roots / 49,265 条变为 275 / 49,249，消除 4 个各 4 条的独立 connector root，
+公共 275 roots 逐条不变，PPM SHA-256 保持 canonical。SQLite 从 2,188 / 356,545 变为
+2,115 / 356,245：73 个不再独立编译的 connector 合计 290 条，2,115 个公共 root 再减少 10 条，
+无增长 root，程序正常完成。
+
+本阶段没有保留 census probe、env 开关、日志、临时源路径或旧的通用 external-edge 方案，也没有
+运行压力测试或长基准。P0 的 stateless terminal-only return connector 已闭合；含 SSA/PSTATE live-in
+的 terminal 仍必须重解码为独立 canonical root，不能复用本合同。
