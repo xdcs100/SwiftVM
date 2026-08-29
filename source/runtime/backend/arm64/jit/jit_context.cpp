@@ -174,6 +174,34 @@ void JitContext::RecordFlagsRegsAudit(FlagsRegsAuditMergeCause cause,
     it->cost[static_cast<size_t>(cost)] += amount;
 }
 
+std::optional<JitContext::DeferredFlagsRegsAudit>
+JitContext::DeferFlagsRegsAudit() {
+    if (!flags_regs_audit_enabled ||
+        flags_regs_audit_finished_slot == kHotCoalesceInvalidSlot) {
+        return std::nullopt;
+    }
+    DeferredFlagsRegsAudit audit{
+            flags_regs_audit_finished_slot,
+            std::move(hot_shape),
+    };
+    flags_regs_audit_finished_slot = kHotCoalesceInvalidSlot;
+    hot_shape = {};
+    return audit;
+}
+
+void JitContext::ResumeFlagsRegsAudit(DeferredFlagsRegsAudit audit) {
+    ASSERT(flags_regs_audit_enabled);
+    ASSERT(flags_regs_audit_finished_slot == kHotCoalesceInvalidSlot);
+    flags_regs_audit_finished_slot = audit.slot;
+    hot_shape = std::move(audit.shape);
+}
+
+void JitContext::FinishDeferredFlagsRegsAudit() {
+    CommitFlagsRegsAudit();
+    flags_regs_audit_finished_slot = kHotCoalesceInvalidSlot;
+    hot_shape = {};
+}
+
 void JitContext::CommitFlagsRegsAudit() {
     if (!flags_regs_audit_enabled ||
         flags_regs_audit_finished_slot == kHotCoalesceInvalidSlot) {

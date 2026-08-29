@@ -337,6 +337,14 @@ public:
     [[nodiscard]] bool FlagsRegsAuditEnabled() const {
         return flags_regs_audit_enabled;
     }
+    struct DeferredFlagsRegsAudit {
+        u32 slot{};
+        HotCoalesceUnitStatic shape{};
+    };
+    [[nodiscard]] std::optional<DeferredFlagsRegsAudit>
+    DeferFlagsRegsAudit();
+    void ResumeFlagsRegsAudit(DeferredFlagsRegsAudit audit);
+    void FinishDeferredFlagsRegsAudit();
     void RecordFlagsRegsAudit(FlagsRegsAuditMergeCause cause,
                               FlagsRegsAuditEdgeKind edge,
                               FlagsRegsAuditCost cost,

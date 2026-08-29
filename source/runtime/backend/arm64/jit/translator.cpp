@@ -237,16 +237,6 @@ AluSplitAudit ClassifyAluSplit(ir::Block* block,
     return out;
 }
 
-enum class DensityCategory : size_t {
-    Flags,
-    Uniform,
-    MoveWidth,
-    NaN,
-    Boundary,
-    Work,
-    Count,
-};
-
 // Audit-only, mutually exclusive IR taxonomy. SVM_DENSITY_PROF is default OFF;
 // the emitter-window accounting below does not add instructions to guest code.
 DensityCategory DensityClass(ir::OpCode op) {
@@ -1117,7 +1107,7 @@ void JitTranslator::TranslateBlockInstructions(
     terminal_body_inst = nullptr;
 }
 
-void JitTranslator::EmitBlockTerminalAndColdPaths(
+void JitTranslator::EmitBlockTerminal(
         ir::Block* block,
         bool density,
         std::span<u32> density_bytes) {
@@ -1152,52 +1142,7 @@ void JitTranslator::EmitBlockTerminalAndColdPaths(
     if (backedge_flags_plan) {
         backedge_host_end = context.CurrentBufferSize();
     }
-    // Close the W71 accounting window before out-of-line NaN repair stubs.
-    // The hot guard remains in the block; cold handlers are not executed on
-    // the normal path and therefore do not belong in static x entry counts.
     context.FinishHotCoalesceBlock();
-    context.BeginColdScratch();
-    const u32 boundary_cold_before = density ? context.CurrentBufferSize() : 0;
-    const u32 flags_audit_cold_begin = context.FlagsRegsAuditEnabled()
-            ? context.CurrentBufferSize()
-            : 0;
-    flags_audit_cold = context.FlagsRegsAuditEnabled();
-    EmitBackedgeExitStub();
-    flags_token_keep = false;
-    InvalidateFlagsToken();
-    EmitBackedgeColdPaths();
-    if (backedge_exit_label) {
-        ResolveExitPollFaults(backedge_exit_label.get(),
-                              block->GetStartLocation());
-    }
-    backedge_exit_label.reset();
-    backedge_exit_referenced = false;
-    EmitDirectCycleExitStubs();
-    if (density) {
-        RecordBoundaryRange(BoundarySubsequence::ColdTail, boundary_cold_before,
-                            context.CurrentBufferSize());
-        density_bytes[static_cast<size_t>(DensityCategory::Boundary)] +=
-                context.CurrentBufferSize() - boundary_cold_before;
-    }
-    const u32 nan_cold_before = density ? context.CurrentBufferSize() : 0;
-    EmitVecNaNColdPaths();
-    if (density) {
-        density_bytes[static_cast<size_t>(DensityCategory::NaN)] +=
-                context.CurrentBufferSize() - nan_cold_before;
-    }
-    context.EndColdScratch();
-    flags_audit_cold = false;
-    if (context.FlagsRegsAuditEnabled()) {
-        const u32 cold_bytes =
-                context.CurrentBufferSize() - flags_audit_cold_begin;
-        context.RecordFlagsRegsAudit(
-                FlagsRegsAuditMergeCause::FaultVeneer,
-                FlagsRegsAuditEdgeKind::Host,
-                FlagsRegsAuditCost::RecoveryColdBytes,
-                cold_bytes,
-                cold_bytes != 0);
-        context.CommitFlagsRegsAudit();
-    }
 }
 
 void JitTranslator::PrintBlockDensity(
@@ -1350,15 +1295,19 @@ void JitTranslator::Translate(ir::Block* block) {
     perf_body.Stop();
 
     PerfScope2 perf_terminal{GetPerfStats2().codegen_terminal};
-    EmitBlockTerminalAndColdPaths(block, density, density_bytes);
-    ASSERT(pending_exit_poll_faults.empty());
-    PrintBlockDensity(block,
-                      density,
-                      density_ops,
-                      density_bytes,
-                      density_scalar_fp_ops,
-                      loop_hoist,
-                      loop_hoist_prefix_ops);
+    EmitBlockTerminal(block, density, density_bytes);
+    auto cold_plan = CaptureBlockColdPathPlan(block,
+                                              density,
+                                              density_ops,
+                                              density_bytes,
+                                              density_scalar_fp_ops,
+                                              loop_hoist,
+                                              loop_hoist_prefix_ops);
+    if (translating_function) {
+        block_cold_path_plans.push_back(std::move(cold_plan));
+    } else {
+        EmitBlockColdPathPlan(std::move(cold_plan));
+    }
     if (!translating_function) {
         EmitUnalignedAtomicFallbacks();
         EmitDeferredNZCVMergeStubs();
@@ -1369,6 +1318,7 @@ void JitTranslator::Translate(ir::Block* block) {
 void JitTranslator::Translate(ir::HIRFunction* function) {
     vixl::svm_vixl_prof::JitScope vixl_prof{context.GetFeatures().vixl_fast};
     ASSERT(function);
+    ASSERT(block_cold_path_plans.empty());
     placement_unit_pc = function->GetFunction()->GetStartLocation().Value();
     context.SetCurrent(function->GetFunction());
     disable_instructions.resize(function->MaxInstrCount());
@@ -1414,6 +1364,10 @@ void JitTranslator::Translate(ir::HIRFunction* function) {
     }
     context.EmitPendingFlagsCallEntry(
             function->GetFunction()->GetStartLocation().Value());
+    for (auto& plan : block_cold_path_plans) {
+        EmitBlockColdPathPlan(std::move(plan));
+    }
+    block_cold_path_plans.clear();
     context.BeginColdScratch();
     if (cycle_exit_reason) {
         EmitCycleExitReasonTail(cycle_exit_reason.get());

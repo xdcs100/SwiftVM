@@ -74,6 +74,16 @@ enum class HostFlags : u64 {
 
 DECLARE_ENUM_FLAG_OPERATORS(HostFlags)
 
+enum class DensityCategory : size_t {
+    Flags,
+    Uniform,
+    MoveWidth,
+    NaN,
+    Boundary,
+    Work,
+    Count,
+};
+
 class JitTranslator {
 public:
     struct BackedgeBlockMetadata {
@@ -380,9 +390,20 @@ private:
             u32& loop_hoist_prefix_begin,
             u32& loop_hoist_prefix_ops);
 
-    void EmitBlockTerminalAndColdPaths(ir::Block* block,
-                                       bool density,
-                                       std::span<u32> density_bytes);
+    void EmitBlockTerminal(ir::Block* block,
+                           bool density,
+                           std::span<u32> density_bytes);
+
+    struct BlockColdPathPlan;
+    [[nodiscard]] BlockColdPathPlan CaptureBlockColdPathPlan(
+            ir::Block* block,
+            bool density,
+            std::span<const u32> density_ops,
+            std::span<const u32> density_bytes,
+            u32 density_scalar_fp_ops,
+            const ir::LoopHoistMetadata& loop_hoist,
+            u32 loop_hoist_prefix_ops);
+    void EmitBlockColdPathPlan(BlockColdPathPlan plan);
 
     void PrintBlockDensity(ir::Block* block,
                            bool density,
@@ -801,6 +822,57 @@ private:
         std::unique_ptr<Label> repaired{std::make_unique<Label>()};
     };
 
+    struct PendingExitPollFault {
+        size_t metadata_index{};
+        Label* recovery{};
+    };
+
+    struct BlockColdPathPlan {
+        ir::Block* block{};
+        bool density{};
+        std::array<u32, static_cast<size_t>(DensityCategory::Count)>
+                density_ops{};
+        std::array<u32, static_cast<size_t>(DensityCategory::Count)>
+                density_bytes{};
+        u32 density_scalar_fp_ops{};
+        const ir::LoopHoistMetadata* loop_hoist{};
+        u32 loop_hoist_prefix_ops{};
+        std::array<u32, static_cast<size_t>(PFAFDensityKind::Count)>
+                pfaf_density_bytes{};
+        bool boundary_density_enabled{};
+        u32 boundary_terminal_link_bytes{};
+        std::array<u32, static_cast<size_t>(BoundarySubsequence::Count)>
+                boundary_density_bytes{};
+        std::array<std::map<std::string, u32>,
+                   static_cast<size_t>(BoundarySubsequence::Count)>
+                boundary_density_mnemonics{};
+        std::map<std::string, u32> boundary_terminal_link_mnemonics{};
+        std::vector<std::pair<u32, u32>> boundary_terminal_link_ranges{};
+        bool save_in_nzcv{};
+        bool nzcv_dirty{};
+        HostFlags nzcv_requested{};
+        bool flags_token_valid{};
+        u32 flags_token_result_code{};
+        bool flags_token_keep{};
+        FlagsRegsAuditEdgeKind flags_audit_block_edge{};
+        bool flags_audit_strict_advance{};
+        std::unique_ptr<Label> backedge_exit_label{};
+        bool backedge_exit_referenced{};
+        std::map<u64, std::unique_ptr<Label>> direct_cycle_exits{};
+        u32 direct_cycle_cut_edges{};
+        std::unique_ptr<BackedgeFlagsPlan> backedge_flags_plan{};
+        std::unique_ptr<Label> loop_hoist_body_entry{};
+        u32 backedge_host_begin{};
+        u32 backedge_host_end{};
+        u32 region_block_edges{};
+        u32 region_block_cycles{};
+        u32 region_block_fallthroughs{};
+        u32 region_block_local_branch_bytes{};
+        std::vector<PendingExitPollFault> pending_exit_poll_faults{};
+        std::vector<std::unique_ptr<VecNaNColdSite>> vec_nan_cold_sites{};
+        std::optional<JitContext::DeferredFlagsRegsAudit> flags_audit{};
+    };
+
     void QueueVecNaNColdPath(VecNaNColdKind kind,
                              const VRegister &result,
                              const VRegister &left,
@@ -991,10 +1063,6 @@ private:
     u32 backedge_host_end{};
     std::vector<BackedgeBlockMetadata> backedge_block_metadata{};
     std::vector<FaultMetadata> fault_metadata{};
-    struct PendingExitPollFault {
-        size_t metadata_index{};
-        Label* recovery{};
-    };
     std::vector<PendingExitPollFault> pending_exit_poll_faults{};
     struct PendingDeferredFault {
         size_t metadata_index{};
@@ -1009,6 +1077,7 @@ private:
     std::array<IndirectExitMissSite, 32> indirect_exit_miss_sites{};
     std::array<IndirectExitMissSite, 32> pending_call_miss_sites{};
     std::vector<std::unique_ptr<VecNaNColdSite>> vec_nan_cold_sites{};
+    std::vector<BlockColdPathPlan> block_cold_path_plans{};
     struct DeferredNZCVMergeStub {
         XRegister scratch{};
         XRegister token{};

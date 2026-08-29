@@ -4,6 +4,7 @@ add_executable(swift_test
         region_link_trampoline_test.cpp
         guarded_return_stack_test.cpp
         indirect_target_preservation_test.cpp
+        cold_path_layout_test.cpp
         region_edges_test.cpp
         direct_link_production_test.cpp
         double_shift_test.cpp
