@@ -334,51 +334,6 @@ bool JitTranslator::BlockIsFlagsTransparent(ir::Block* block) const {
     return true;
 }
 
-bool JitTranslator::SuccessorCoversIncomingNzcv(ir::Block* succ,
-                                               HostFlags incoming) const {
-    if (!succ || !True(incoming)) {
-        return false;
-    }
-    HostFlags needed = incoming;
-    for (auto& inst : succ->GetInstList()) {
-        const auto op = inst.GetOp();
-        if (op == ir::OpCode::GetFlags || op == ir::OpCode::CallLambda ||
-            op == ir::OpCode::CallLocation || op == ir::OpCode::CallDynamic ||
-            op == ir::OpCode::X87Op || op == ir::OpCode::TestFlags ||
-            op == ir::OpCode::TestNotFlags || op == ir::OpCode::Adc ||
-            op == ir::OpCode::Sbb ||
-            op == ir::OpCode::CondSelect || op == ir::OpCode::CondSet) {
-            return false;
-        }
-        if (op == ir::OpCode::ClearFlags) {
-            needed &= static_cast<HostFlags>(
-                    ~static_cast<u64>(GuestNZCVToHost(
-                            inst.GetArg<ir::Flags>(0) & ir::Flags::NZCV)));
-            if (!True(needed)) {
-                return true;
-            }
-            continue;
-        }
-        if (op == ir::OpCode::BranchOnlyFlags) {
-            // The Flags arg is the Jcc live subset, not the PSTATE write.
-            // CMP/TEST/INC already left architectural NZCV in the host.
-            return true;
-        }
-        if (op == ir::OpCode::SaveFlags) {
-            needed &= static_cast<HostFlags>(
-                    ~static_cast<u64>(GuestNZCVToHost(inst.GetArg<ir::Flags>(1))));
-            if (!True(needed)) {
-                return true;
-            }
-            continue;
-        }
-    }
-    // mov/jmp/ret: PSTATE still holds TEST/CMP NZ (C=V=0). Guest RET copies it.
-    // Not NZV (INC): copy-all would smash preserved CF.
-    return BlockIsFlagsTransparent(succ) &&
-           (incoming == HostFlags::NZCV || incoming == HostFlags::NZ);
-}
-
 bool JitTranslator::EmitRegionIf(const ir::terminal::If& terminal,
                                  bool allow_fallthrough) {
     const auto then_target = RegionLeafTarget(terminal.then_);
@@ -390,25 +345,6 @@ bool JitTranslator::EmitRegionIf(const ir::terminal::If& terminal,
     }
 
     const auto local = LocalConditionFor(terminal.cond);
-    auto* then_block = region_block_map.contains(then_target->Value())
-            ? region_block_map[then_target->Value()]
-            : nullptr;
-    auto* else_block = region_block_map.contains(else_target->Value())
-            ? region_block_map[else_target->Value()]
-            : nullptr;
-    // Skip only when both successors SaveFlags the incoming bits before any
-    // x26 observer. Do not force dirty at entry, so unpacked preds still Tst
-    // x26 only on the non-skip path.
-    const bool skip_pack =
-            FlagsRegsEnabled() && True(nzcv_requested) &&
-            SuccessorCoversIncomingNzcv(then_block, nzcv_requested) &&
-            SuccessorCoversIncomingNzcv(else_block, nzcv_requested);
-    if (skip_pack) {
-        PublishFlagsToken();
-    } else {
-        MergeNZCV(FlagsRegsAuditMergeCause::PStateClobber,
-                  FlagsRegsAuditEdgeKind::RegionInternal);
-    }
     auto branch = [&](Label* label, bool on_true) {
         if (!EmitDeadEdgeZeroBranch(terminal.cond, label, on_true)) {
             if (local) {
@@ -423,6 +359,18 @@ bool JitTranslator::EmitRegionIf(const ir::terminal::If& terminal,
             }
         }
     };
+    if (FlagsRegsEnabled() && True(nzcv_requested)) {
+        if (EmitRegionFlagsJoin(
+                    PlanRegionFlagsJoin(*then_target,
+                                        *else_target,
+                                        allow_fallthrough),
+                    branch)) {
+            return true;
+        }
+    } else {
+        MergeNZCV(FlagsRegsAuditMergeCause::PStateClobber,
+                  FlagsRegsAuditEdgeKind::RegionInternal);
+    }
     auto needs_stub = [&](ir::Location target) {
         return IsRegionCycleEdge(target) || IsDirectCycleCutEdge(target);
     };
@@ -473,31 +421,27 @@ bool JitTranslator::EmitRegionCondition(
     }
 
     const auto host_cond = MapCond(terminal.cond);
-    auto* then_block = region_block_map.contains(then_target->Value())
-            ? region_block_map[then_target->Value()]
-            : nullptr;
-    auto* else_block = region_block_map.contains(else_target->Value())
-            ? region_block_map[else_target->Value()]
-            : nullptr;
-    const bool skip_pack =
-            FlagsRegsEnabled() && save_in_nzcv && nzcv_dirty &&
-            True(nzcv_requested) &&
-            SuccessorCoversIncomingNzcv(then_block, nzcv_requested) &&
-            SuccessorCoversIncomingNzcv(else_block, nzcv_requested);
-    if (skip_pack) {
-        PublishFlagsToken();
-    } else if (save_in_nzcv && nzcv_dirty) {
-        MergeNZCV(FlagsRegsAuditMergeCause::PStateClobber,
-                  FlagsRegsAuditEdgeKind::RegionInternal);
-    } else {
-        LoadNZCVFromFlags();
-    }
     auto branch = [&](Label* label, bool on_true) {
         const auto cond = on_true
                 ? host_cond
                 : static_cast<Condition>(static_cast<u8>(host_cond) ^ 1);
         __ B(label, cond);
     };
+    if (FlagsRegsEnabled() && save_in_nzcv && nzcv_dirty &&
+        True(nzcv_requested)) {
+        if (EmitRegionFlagsJoin(
+                    PlanRegionFlagsJoin(*then_target,
+                                        *else_target,
+                                        allow_fallthrough),
+                    branch)) {
+            return true;
+        }
+    } else if (save_in_nzcv && nzcv_dirty) {
+        MergeNZCV(FlagsRegsAuditMergeCause::PStateClobber,
+                  FlagsRegsAuditEdgeKind::RegionInternal);
+    } else {
+        LoadNZCVFromFlags();
+    }
     auto needs_stub = [&](ir::Location target) {
         return IsRegionCycleEdge(target) || IsDirectCycleCutEdge(target);
     };

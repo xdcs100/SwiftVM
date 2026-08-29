@@ -412,6 +412,7 @@ struct RegionBranchRun {
     u64 observed_flags{};
     u32 code_size{};
     u64 code_hash{};
+    bool branch_precedes_merge{};
 };
 
 RegionBranchRun RunRegionBranchFunction(bool enabled,
@@ -525,6 +526,30 @@ RegionBranchRun RunRegionBranchFunction(bool enabled,
             .code_size = code_size,
             .code_hash = code_hash,
     };
+    constexpr u32 kMrsNZCV = 0xD53B'4200u;
+    constexpr u32 kMrsMask = 0xFFFF'FFE0u;
+    constexpr u32 kBCond = 0x5400'0000u;
+    constexpr u32 kBCondMask = 0xFF00'0010u;
+    constexpr u32 kCompareBranch = 0x3400'0000u;
+    constexpr u32 kCompareBranchMask = 0x7E00'0000u;
+    std::vector<u32> instructions(code_size / sizeof(u32));
+    std::memcpy(instructions.data(), code,
+                instructions.size() * sizeof(u32));
+    size_t first_branch = instructions.size();
+    size_t first_merge = instructions.size();
+    for (size_t index = 0; index < instructions.size(); ++index) {
+        const bool branch =
+                (instructions[index] & kBCondMask) == kBCond ||
+                (instructions[index] & kCompareBranchMask) == kCompareBranch;
+        const bool merge = (instructions[index] & kMrsMask) == kMrsNZCV;
+        if (branch && first_branch == instructions.size()) {
+            first_branch = index;
+        }
+        if (merge && first_merge == instructions.size()) {
+            first_merge = index;
+        }
+    }
+    run.branch_precedes_merge = first_branch < first_merge;
     u8 final_selector{};
     std::memcpy(&final_selector,
                 runtime.GetUniformBuffer().data() + selector_offset,
@@ -2180,6 +2205,8 @@ TEST_CASE("region branch flags materialize only on the observing exit",
     REQUIRE(hot_off.halt == HaltReason::CallHost);
     REQUIRE(hot_on.halt == HaltReason::CallHost);
     REQUIRE(hot_on.selector == hot_off.selector);
+    REQUIRE(hot_on.observed_flags == hot_off.observed_flags);
+    REQUIRE(hot_on.branch_precedes_merge);
 
     // Host calls after the final producer are committed-state boundaries.
     // They reject the plan just like a faulting memory operation.

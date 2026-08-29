@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -587,10 +588,33 @@ private:
                         bool fallthrough = false,
                         bool record_edge_counters = true,
                         bool commit_flags = true);
+    enum class RegionFlagsJoinMode : u8 {
+        Canonical,
+        Deferred,
+        Split,
+    };
+    struct RegionFlagsJoinPlan {
+        RegionFlagsJoinMode mode{RegionFlagsJoinMode::Canonical};
+        ir::Location compatible_target{};
+        ir::Location canonical_target{};
+        bool compatible_on_true{};
+        bool canonical_fallthrough{};
+        bool canonical_merge_token{};
+    };
+    [[nodiscard]] RegionFlagsJoinPlan PlanRegionFlagsJoin(
+            ir::Location then_target,
+            ir::Location else_target,
+            bool allow_fallthrough) const;
+    [[nodiscard]] bool EmitRegionFlagsJoin(
+            const RegionFlagsJoinPlan& plan,
+            const std::function<void(vixl::aarch64::Label*, bool)>& branch);
+    [[nodiscard]] bool RegionSuccessorAcceptsEdgeFlags(
+            ir::Location target,
+            const EdgeFlagsState& incoming) const;
+    [[nodiscard]] bool RegionSuccessorOverwritesFlagsToken(
+            ir::Location target) const;
     [[nodiscard]] bool EmitRegionIf(const ir::terminal::If& terminal,
                                     bool allow_fallthrough);
-    [[nodiscard]] bool SuccessorCoversIncomingNzcv(ir::Block* succ,
-                                                  HostFlags incoming) const;
     [[nodiscard]] bool BlockIsFlagsTransparent(ir::Block* block) const;
     [[nodiscard]] bool EmitRegionCondition(const ir::terminal::Condition& terminal,
                                            bool allow_fallthrough);

@@ -67,23 +67,30 @@ struct EdgeFlagsState {
 
 struct EdgeFlagsTargetContract {
     u32 overwrite_before_observe{};
+    u8 observed_nzcv_mask{};
     bool commits_before_fault{};
-    bool observes_before_commit{};
+    bool barrier_before_commit{};
     u64 packed_flags_version{};
 
     [[nodiscard]] constexpr bool IsWellFormed() const {
-        return (overwrite_before_observe & ~kEdgeNZCVMask) == 0;
+        return (overwrite_before_observe & ~kEdgeNZCVMask) == 0 &&
+               (observed_nzcv_mask & ~0xFu) == 0;
+    }
+
+    [[nodiscard]] constexpr u32 ObservedHostMask() const {
+        return static_cast<u32>(observed_nzcv_mask) << 28;
     }
 
     [[nodiscard]] constexpr bool CanPublishPendingEntry() const {
         return IsWellFormed() && overwrite_before_observe != 0 && commits_before_fault &&
-               !observes_before_commit;
+               !barrier_before_commit;
     }
 
     [[nodiscard]] constexpr bool Accepts(const EdgeFlagsState& incoming) const {
         return CanPublishPendingEntry() && incoming.HasPendingPState() &&
                incoming.packed_flags_version == packed_flags_version &&
-               (incoming.valid_nzcv_mask & ~overwrite_before_observe) == 0;
+               (incoming.valid_nzcv_mask & ~overwrite_before_observe) == 0 &&
+               (incoming.valid_nzcv_mask & ObservedHostMask()) == 0;
     }
 
     bool operator==(const EdgeFlagsTargetContract&) const = default;

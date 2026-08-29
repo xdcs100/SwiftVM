@@ -571,8 +571,9 @@ void WriteUnit(BlobWriter& w, const SerialUnit& unit) {
         w.U32(b.direct_code_offset);
         w.U32(b.pending_flags_code_offset);
         w.U32(b.pending_flags_contract.overwrite_before_observe);
+        w.U8(b.pending_flags_contract.observed_nzcv_mask);
         w.U8(b.pending_flags_contract.commits_before_fault);
-        w.U8(b.pending_flags_contract.observes_before_commit);
+        w.U8(b.pending_flags_contract.barrier_before_commit);
         w.U64(b.pending_flags_contract.packed_flags_version);
         w.U8(b.entry_flags);
     }
@@ -630,20 +631,22 @@ bool ReadUnit(BlobReader& r, SerialUnit& unit) {
     }
     unit.blocks.resize(count);
     for (auto& b : unit.blocks) {
+        u8 observed_nzcv_mask{};
         u8 commits_before_fault{};
-        u8 observes_before_commit{};
+        u8 barrier_before_commit{};
         if (!r.U64(b.guest_start) || !r.U64(b.guest_end) || !r.U32(b.code_offset) ||
             !r.U64(b.guest_bytes_hash) || !r.U32(b.direct_code_offset) ||
             !r.U32(b.pending_flags_code_offset) ||
             !r.U32(b.pending_flags_contract.overwrite_before_observe) ||
-            !r.U8(commits_before_fault) || !r.U8(observes_before_commit) ||
+            !r.U8(observed_nzcv_mask) || !r.U8(commits_before_fault) ||
+            !r.U8(barrier_before_commit) ||
             !r.U64(b.pending_flags_contract.packed_flags_version) || !r.U8(b.entry_flags)) {
             return false;
         }
+        b.pending_flags_contract.observed_nzcv_mask = observed_nzcv_mask;
         b.pending_flags_contract.commits_before_fault = commits_before_fault;
-        b.pending_flags_contract.observes_before_commit =
-                observes_before_commit;
-        if (commits_before_fault > 1 || observes_before_commit > 1 ||
+        b.pending_flags_contract.barrier_before_commit = barrier_before_commit;
+        if (commits_before_fault > 1 || barrier_before_commit > 1 ||
             (b.entry_flags & ~SerialBlock::Linkable) != 0 ||
             !b.pending_flags_contract.IsWellFormed() || b.code_offset >= code_size ||
             b.guest_end < b.guest_start ||

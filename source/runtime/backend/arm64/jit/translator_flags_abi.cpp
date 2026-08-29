@@ -54,17 +54,18 @@ EdgeFlagsTargetContract JitTranslator::AnalyzeEdgeFlagsTarget(
                 GuestNZCVToHost(ir::Flags::NZCV & ~remaining));
     };
     auto observes = [&](ir::Flags flags_mask) {
-        if (True(remaining & flags_mask)) {
-            contract.observes_before_commit = true;
-        }
+        const auto observed = static_cast<u32>(GuestNZCVToHost(
+                remaining & flags_mask & ir::Flags::NZCV));
+        contract.observed_nzcv_mask |= static_cast<u8>(observed >> 28);
     };
 
     for (const auto& inst : found->second->GetInstList()) {
-        if (MayFaultOrObserve(inst.GetOp())) {
-            contract.observes_before_commit = true;
+        const auto op = inst.GetOp();
+        if (MayFaultOrObserve(op)) {
+            contract.barrier_before_commit = true;
             return contract;
         }
-        switch (inst.GetOp()) {
+        switch (op) {
             case ir::OpCode::TestFlags:
             case ir::OpCode::TestNotFlags:
                 observes(inst.GetArg<ir::Flags>(0));
@@ -74,18 +75,22 @@ EdgeFlagsTargetContract JitTranslator::AnalyzeEdgeFlagsTarget(
                 break;
             case ir::OpCode::Adc:
             case ir::OpCode::Sbb:
+                observes(ir::Flags::Carry);
+                break;
             case ir::OpCode::InvertCarry:
                 observes(ir::Flags::Carry);
                 break;
             case ir::OpCode::CondSelect:
             case ir::OpCode::CondSet:
+                observes(ir::Flags::NZCV);
+                break;
             case ir::OpCode::LocalCondSet:
                 observes(ir::Flags::NZCV);
                 break;
             case ir::OpCode::Goto:
             case ir::OpCode::NotGoto:
             case ir::OpCode::BindLabel:
-                contract.observes_before_commit = true;
+                contract.barrier_before_commit = true;
                 return contract;
             case ir::OpCode::SaveFlags:
                 overwrite(inst.GetArg<ir::Flags>(1));
@@ -100,6 +105,8 @@ EdgeFlagsTargetContract JitTranslator::AnalyzeEdgeFlagsTarget(
                 overwrite(ir::Flags::Overflow);
                 break;
             case ir::OpCode::PublishFCmpFlags:
+                overwrite(ir::Flags::NZCV);
+                break;
             case ir::OpCode::BranchOnlyFlags:
                 overwrite(ir::Flags::NZCV);
                 break;
@@ -109,13 +116,10 @@ EdgeFlagsTargetContract JitTranslator::AnalyzeEdgeFlagsTarget(
             case ir::OpCode::AdvancePC:
                 contract.commits_before_fault =
                         contract.overwrite_before_observe != 0 &&
-                        !contract.observes_before_commit;
+                        !contract.barrier_before_commit;
                 return contract;
             default:
                 break;
-        }
-        if (contract.observes_before_commit) {
-            return contract;
         }
     }
     return contract;
