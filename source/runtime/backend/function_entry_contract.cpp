@@ -1,10 +1,13 @@
 #include "runtime/backend/function_entry_contract.h"
 
 #include <algorithm>
+#include <type_traits>
+#include <unordered_map>
 
 #include "runtime/backend/address_space.h"
 #include "runtime/backend/module.h"
 #include "runtime/common/logging.h"
+#include "runtime/common/variant_util.h"
 #include "runtime/ir/block.h"
 #include "runtime/ir/hir_builder.h"
 
@@ -36,7 +39,93 @@ bool EntryIsWellFormed(const FunctionEntryPointContract& entry,
            (!entry.Present() || entry.code_offset < allocation_size);
 }
 
+std::optional<ir::Location> CanonicalTerminalTarget(
+        const ir::Terminal& terminal) {
+    return VisitVariant<std::optional<ir::Location>>(
+            terminal, [](const auto& item) -> std::optional<ir::Location> {
+                using T = std::decay_t<decltype(item)>;
+                if constexpr (std::is_same_v<T, ir::terminal::LinkBlock> ||
+                              std::is_same_v<T, ir::terminal::LinkBlockFast>) {
+                    return item.next;
+                }
+                return std::nullopt;
+            });
+}
+
 }  // namespace
+
+std::unordered_set<u64>
+FunctionEntryContract::AnalyzeCanonicalTerminalEntries(
+        ir::HIRFunction& function) {
+    std::unordered_set<u64> entries;
+    std::unordered_set<u64> block_locations;
+    for (auto& block : function.GetHIRBlocksRPO()) {
+        block_locations.insert(block.GetBlock()->GetStartLocation().Value());
+    }
+    std::unordered_set<u64> external_roots;
+    external_roots.insert(function.GetFunction()->GetStartLocation().Value());
+    for (const auto& provenance : function.GetFunctionEntryProvenance()) {
+        if (provenance.IsAccepted() && provenance.external_root) {
+            external_roots.insert(provenance.target.Value());
+        }
+    }
+
+    std::unordered_map<ir::HIRBlock*, u32> call_return_owners;
+    for (auto& block : function.GetHIRBlocksRPO()) {
+        if (auto* target = block.GetCallReturnBlock()) {
+            ++call_return_owners[target];
+        }
+    }
+
+    auto has_shape = [&](ir::HIRBlock& hir_block) {
+        auto* block = hir_block.GetBlock();
+        const auto target = block && block->HasTerminal()
+                ? CanonicalTerminalTarget(block->GetTerminal())
+                : std::nullopt;
+        return block && block->GetInstList().empty() && target &&
+               block_locations.contains(target->Value());
+    };
+    for (auto& hir_block : function.GetHIRBlocksRPO()) {
+        if (!has_shape(hir_block)) {
+            continue;
+        }
+        const u64 location = hir_block.GetBlock()->GetStartLocation().Value();
+        if (external_roots.contains(location) ||
+            (hir_block.IsCallReturnBlock() &&
+             call_return_owners[&hir_block] == 1)) {
+            entries.insert(location);
+        }
+    }
+
+    bool changed;
+    do {
+        changed = false;
+        for (auto& hir_block : function.GetHIRBlocksRPO()) {
+            if (!has_shape(hir_block)) {
+                continue;
+            }
+            const u64 location = hir_block.GetBlock()->GetStartLocation().Value();
+            if (entries.contains(location) ||
+                hir_block.GetPredecessors().empty()) {
+                continue;
+            }
+            const bool canonical = std::all_of(
+                    hir_block.GetPredecessors().begin(),
+                    hir_block.GetPredecessors().end(),
+                    [&](ir::HIRBlock* predecessor) {
+                        return predecessor && entries.contains(
+                                predecessor->GetBlock()
+                                        ->GetStartLocation()
+                                        .Value());
+                    });
+            if (canonical) {
+                entries.insert(location);
+                changed = true;
+            }
+        }
+    } while (changed);
+    return entries;
+}
 
 FunctionEntryContract FunctionEntryContract::Restore(
         ir::Location guest,
@@ -85,12 +174,29 @@ FunctionEntryContract FunctionEntryContract::Build(
         ir::HIRFunction& function,
         ir::Block& block,
         FunctionEntryCodeOffsets offsets,
-        EdgeFlagsTargetContract pending_contract) {
+        EdgeFlagsTargetContract pending_contract,
+        bool canonical_terminal) {
+    ASSERT(!canonical_terminal ||
+           (block.GetInstList().empty() && block.HasTerminal() &&
+            CanonicalTerminalTarget(block.GetTerminal()).has_value()));
+    auto guest_end = block.GetEndLocation();
+    if (canonical_terminal &&
+        guest_end.Value() <= block.GetStartLocation().Value()) {
+        guest_end = ir::Location{block.GetStartLocation().Value() + 1};
+    }
     auto contract = Restore(block.GetStartLocation(),
-                            block.GetEndLocation(),
+                            guest_end,
                             offsets,
                             pending_contract);
     contract.origin = FunctionEntryOrigin::DecodedBlock;
+    if (canonical_terminal) {
+        contract.linkable = false;
+        contract.direct_link.code_offset = kInvalidFunctionEntryOffset;
+        contract.pending_flags.code_offset = kInvalidFunctionEntryOffset;
+        contract.continuation.code_offset = kInvalidFunctionEntryOffset;
+        contract.pending_flags_continuation.code_offset =
+                kInvalidFunctionEntryOffset;
+    }
 
     contract.dependencies.reserve(block.GetGuestCodeDependencies().size());
     for (const auto& dependency : block.GetGuestCodeDependencies()) {

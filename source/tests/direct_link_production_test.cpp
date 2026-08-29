@@ -1487,6 +1487,96 @@ TEST_CASE("canonical external roots stay inside one code object",
 #endif
 }
 
+TEST_CASE("terminal-only call returns enter through canonical links",
+          "[function-entry][continuation][production]") {
+#if defined(__aarch64__)
+    ScopedEnvironment disk_cache{"SVM_JIT_CACHE", ""};
+    ScopedEnvironment flags_regs{"SVM_FLAGS_REGS", "1"};
+
+    const size_t page_size = static_cast<size_t>(getpagesize());
+    const size_t guest_size = 4 * page_size;
+    void* guest_memory = mmap(nullptr,
+                              guest_size,
+                              PROT_READ | PROT_WRITE,
+                              MAP_PRIVATE | MAP_ANON,
+                              -1,
+                              0);
+    REQUIRE(guest_memory != MAP_FAILED);
+    {
+        const VAddr source_guest = page_size + 0x100;
+        const VAddr return_guest = page_size + 0x180;
+        const VAddr relay_guest = page_size + 0x1c0;
+        const VAddr target_guest = 2 * page_size + 0x100;
+        constexpr u64 kFingerprint = 0x4c51'9a27'd806'3be5ull;
+        Config config{
+                .loc_start = 0,
+                .loc_end = guest_size,
+                .enable_jit = true,
+                .enable_asm_interp = false,
+                .has_local_operation = false,
+                .backend_isa = kArm64,
+                .uniform_buffer_size = 64,
+                .global_opts = Optimizations::BlockLink |
+                               Optimizations::ReturnStackBuffer,
+                .region_edges = true,
+                .memory_base = guest_memory,
+                .guest_addr_mask = guest_size - 1,
+        };
+        AddressSpace space{config};
+        auto module = space.GetDefaultModule();
+
+        HIRBuilder builder{4, true};
+        auto* function = builder.AppendFunction(
+                Location{source_guest}, Location{target_guest + 1});
+        const auto source_value = function
+                                          ->LoadImm(Imm{u64{1}})
+                                          .SetType(ValueType::U64);
+        function->StoreUniform(Uniform{8, ValueType::U64}, source_value);
+        builder.RegisterCallReturn(Location{return_guest});
+        auto* connector = function->CreateOrGetBlock(Location{return_guest});
+        builder.AdvancePC(Imm{u64{1}});
+        function->EndBlock(terminal::ReturnToHost{});
+
+        builder.SetCurBlock(connector);
+        auto* relay = builder.LinkBlock(
+                terminal::LinkBlock{Location{relay_guest}});
+        builder.SetCurBlock(relay);
+        auto* target = builder.LinkBlock(
+                terminal::LinkBlock{Location{target_guest}});
+        builder.SetCurBlock(target);
+        const auto value = function
+                                   ->LoadImm(Imm{kFingerprint})
+                                   .SetType(ValueType::U64);
+        function->StoreUniform(Uniform{0, ValueType::U64}, value);
+        builder.AdvancePC(Imm{u64{1}});
+        function->EndBlock(terminal::ReturnToHost{});
+        function->EndFunction();
+
+        REQUIRE(TranslateIR(module, function) != nullptr);
+        REQUIRE(space.GetCodeCache(Location{return_guest}) != nullptr);
+        REQUIRE(space.GetCodeCache(Location{relay_guest}) != nullptr);
+        REQUIRE_FALSE(space.GetLinkManager().QueryTarget(return_guest));
+        REQUIRE_FALSE(space.GetLinkManager().QueryTarget(relay_guest));
+
+        Runtime runtime{&space};
+        runtime.SetLocation(return_guest);
+        REQUIRE(runtime.Run() == HaltReason::CallHost);
+        u64 observed{};
+        const auto uniform = runtime.GetUniformBuffer();
+        REQUIRE(uniform.size() >= sizeof(observed));
+        std::memcpy(&observed, uniform.data(), sizeof(observed));
+        REQUIRE(observed == kFingerprint);
+
+        space.InvalidateCodeRange(return_guest, return_guest + 1);
+        REQUIRE(space.GetCodeCache(Location{return_guest}) == nullptr);
+        REQUIRE(space.GetCodeCache(Location{relay_guest}) == nullptr);
+    }
+    REQUIRE(munmap(guest_memory, guest_size) == 0);
+#else
+    SUCCEED("terminal-only call-return execution requires an AArch64 host");
+#endif
+}
+
 TEST_CASE("fault-backed continuation rejects empty and mismatched frames",
           "[direct-link][continuation][fault]") {
 #if defined(__aarch64__)

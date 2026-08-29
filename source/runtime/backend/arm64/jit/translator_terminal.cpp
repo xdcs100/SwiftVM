@@ -13,6 +13,26 @@ namespace swift::runtime::backend::arm64 {
 
 #define __ masm.
 
+bool JitTranslator::IsCanonicalTerminalEntry() const {
+    return cur_block && canonical_terminal_entries.contains(
+            cur_block->GetStartLocation().Value());
+}
+
+bool JitTranslator::EmitCanonicalTerminalEdge(ir::Location target) {
+    if (!IsCanonicalTerminalEntry() || !IsRegionInternalEdge(target)) {
+        return false;
+    }
+    context.RecordExecCounter(exec_offset_exit_direct);
+    ++region_block_edges;
+    region_block_local_branch_bytes += sizeof(u32);
+    const u32 link_before = context.CurrentBufferSize();
+    __ B(context.GetLabel(target.Value()));
+    RecordBoundaryRange(BoundarySubsequence::LinkTail,
+                        link_before,
+                        context.CurrentBufferSize());
+    return true;
+}
+
 void JitTranslator::EmitDispatcherTerminal(
         LinkSiteKind direct_link_kind,
         DirectLinkFlagsBypass flags_bypass,
@@ -80,6 +100,9 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
             __ Str(ipw, MemOperand(state, state_offset_halt_reason));
             context.ReturnHost();
         } else if constexpr (std::is_same_v<T, ir::terminal::LinkBlock>) {
+            if (EmitCanonicalTerminalEdge(term.next)) {
+                return;
+            }
             if (IsRegionInternalEdge(term.next)) {
                 EmitRegionEdge(term.next);
                 return;
@@ -115,6 +138,9 @@ void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
             RecordBoundaryRange(BoundarySubsequence::LinkTail, link_before,
                                 context.CurrentBufferSize());
         } else if constexpr (std::is_same_v<T, ir::terminal::LinkBlockFast>) {
+            if (EmitCanonicalTerminalEdge(term.next)) {
+                return;
+            }
             if (IsRegionInternalEdge(term.next)) {
                 EmitRegionEdge(term.next);
                 return;

@@ -1088,12 +1088,17 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
         const auto allocation_size = static_cast<u32>(buffer.size);
         backend::FunctionEntryPublisher entry_publisher{*module, buffer.exec_data, allocation_size};
         std::vector<backend::SerialBlock> cache_blocks;
+        const auto canonical_terminal_entries =
+                backend::FunctionEntryContract::AnalyzeCanonicalTerminalEntries(
+                        *function);
         for (auto& hir_block : function->GetHIRBlocksRPO()) {
             auto* block = hir_block.GetBlock();
-            if (block->GetInstList().empty()) {
+            const auto guest = block->GetStartLocation().Value();
+            const bool canonical_terminal =
+                    canonical_terminal_entries.contains(guest);
+            if (block->GetInstList().empty() && !canonical_terminal) {
                 continue;
             }
-            const auto guest = block->GetStartLocation().Value();
             const auto offset = emitted_context->GetCodeOffset(guest);
             const auto direct_offset =
                     emitted_context->GetDirectLinkCodeOffset(guest);
@@ -1117,15 +1122,16 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
                             .continuation = to_offset(call_offset),
                             .pending_flags_continuation = to_offset(call_pending_flags_offset),
                     },
-                    pending_flags_contract);
+                    pending_flags_contract,
+                    canonical_terminal);
             ASSERT(entry_contract.IsWellFormed(allocation_size));
             {
                 PerfScope2 perf_pub_l2{GetPerfStats2().publish_l2};
                 (void)entry_publisher.Publish(entry_contract);
             }
             cache_blocks.push_back({
-                    .guest_start = guest,
-                    .guest_end = block->GetEndLocation().Value(),
+                    .guest_start = entry_contract.Guest().Value(),
+                    .guest_end = entry_contract.GuestEnd().Value(),
                     .code_offset = entry_contract.Canonical().code_offset,
                     .guest_bytes_hash = 0,
                     .direct_code_offset = entry_contract.DirectLink().code_offset,
@@ -1141,8 +1147,8 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
                 mutable_address_space.GetSmcTracker().RegisterNode(
                         module,
                         ir_function,
-                        block->GetStartLocation().Value(),
-                        block->GetEndLocation().Value());
+                        entry_contract.Guest().Value(),
+                        entry_contract.GuestEnd().Value());
                 for (const auto& dependency : entry_contract.Dependencies()) {
                     mutable_address_space.GetSmcTracker().RegisterNode(
                             module, ir_function, dependency.start.Value(),

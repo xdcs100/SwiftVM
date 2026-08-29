@@ -18,6 +18,7 @@
 #include "aarch64/disasm-aarch64.h"
 #include "runtime/backend/context.h"
 #include "runtime/backend/arm64/defines.h"
+#include "runtime/backend/function_entry_contract.h"
 #include "runtime/common/backedge_control.h"
 #include "runtime/common/svm_config.h"
 #include "translator/x86/cpu.h"
@@ -1324,6 +1325,8 @@ void JitTranslator::Translate(ir::HIRFunction* function) {
     placement_unit_pc = function->GetFunction()->GetStartLocation().Value();
     context.SetCurrent(function->GetFunction());
     disable_instructions.resize(function->MaxInstrCount());
+    canonical_terminal_entries =
+            FunctionEntryContract::AnalyzeCanonicalTerminalEntries(*function);
     PrepareRegionEdges(function);
     std::vector<ir::Block*> emitted_blocks;
     for (auto& hir_block : function->GetHIRBlocksRPO()) {
@@ -1395,6 +1398,7 @@ void JitTranslator::Translate(ir::HIRFunction* function) {
     share_cycle_exit_reason = false;
     PlacementPoint("unit", placement_unit_pc);
     next_region_block.reset();
+    canonical_terminal_entries.clear();
 }
 
 

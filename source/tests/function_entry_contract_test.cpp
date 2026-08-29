@@ -115,4 +115,48 @@ TEST_CASE("function entry contract captures external entry requirements",
     REQUIRE_FALSE(rejected.PendingFlagsContinuation().Present());
 }
 
+TEST_CASE("canonical terminal entries propagate through stateless links",
+          "[function-entry][contract]") {
+    constexpr LocationDescriptor kStart = 0x4000;
+    constexpr LocationDescriptor kReturn = 0x4010;
+    constexpr LocationDescriptor kRelay = 0x4020;
+    constexpr LocationDescriptor kTarget = 0x4030;
+
+    HIRBuilder builder{4, true, false, FeatureSet{}};
+    auto* function = builder.AppendFunction(Location{kStart});
+    builder.RegisterCallReturn(Location{kReturn});
+    auto* connector = function->CreateOrGetBlock(Location{kReturn});
+    function->EndBlock(terminal::ReturnToHost{});
+
+    builder.SetCurBlock(connector);
+    auto* relay = builder.LinkBlock(terminal::LinkBlock{Location{kRelay}});
+    builder.SetCurBlock(relay);
+    auto* target = builder.LinkBlock(terminal::LinkBlock{Location{kTarget}});
+    builder.SetCurBlock(target);
+    const auto value = function
+                               ->LoadImm(Imm{swift::u64{1}})
+                               .SetType(ValueType::U64);
+    function->StoreUniform(Uniform{0, ValueType::U64}, value);
+    target->GetBlock()->SetEndLocation(Location{kTarget + 1});
+    function->EndBlock(terminal::ReturnToHost{});
+    function->EndFunction();
+    function->ComputeRPO();
+
+    const auto entries =
+            FunctionEntryContract::AnalyzeCanonicalTerminalEntries(*function);
+    REQUIRE(entries ==
+            std::unordered_set<swift::u64>{kReturn, kRelay});
+
+    const auto connector_contract = FunctionEntryContract::Build(
+            *function,
+            *connector->GetBlock(),
+            {.canonical = 0, .direct_link = 4},
+            {},
+            true);
+    REQUIRE(connector_contract.IsWellFormed(8));
+    REQUIRE(connector_contract.GuestEnd() == Location{kReturn + 1});
+    REQUIRE_FALSE(connector_contract.Linkable());
+    REQUIRE_FALSE(connector_contract.DirectLink().Present());
+}
+
 }  // namespace

@@ -626,6 +626,8 @@ private:
     [[nodiscard]] bool BlockIsFlagsTransparent(ir::Block* block) const;
     [[nodiscard]] bool EmitRegionCondition(const ir::terminal::Condition& terminal,
                                            bool allow_fallthrough);
+    [[nodiscard]] bool IsCanonicalTerminalEntry() const;
+    [[nodiscard]] bool EmitCanonicalTerminalEdge(ir::Location target);
     [[nodiscard]] bool HasSelfEdge(const ir::Terminal& terminal) const;
     [[nodiscard]] bool IsSelfEdge(ir::Location target) const;
     [[nodiscard]] Label* LocalBranchTarget(ir::Location target) const;
@@ -1163,6 +1165,7 @@ private:
     std::unordered_set<u64> region_blocks{};
     std::map<u64, ir::Block*> region_block_map{};
     std::set<std::pair<u64, u64>> region_cycle_edges{};
+    std::unordered_set<u64> canonical_terminal_entries{};
     std::optional<u64> next_region_block{};
     u32 region_block_edges{};
     u32 region_block_cycles{};

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <unordered_set>
 #include <vector>
 
 #include "runtime/backend/edge_flags_state.h"
@@ -8,6 +9,7 @@
 
 namespace swift::runtime::ir {
 class Block;
+class HIRBlock;
 class HIRFunction;
 }
 
@@ -84,7 +86,10 @@ public:
             ir::HIRFunction& function,
             ir::Block& block,
             FunctionEntryCodeOffsets offsets,
-            EdgeFlagsTargetContract pending_flags_contract);
+            EdgeFlagsTargetContract pending_flags_contract,
+            bool canonical_terminal = false);
+    [[nodiscard]] static std::unordered_set<u64>
+    AnalyzeCanonicalTerminalEntries(ir::HIRFunction& function);
     [[nodiscard]] static FunctionEntryContract Restore(
             ir::Location guest,
             ir::Location guest_end,
