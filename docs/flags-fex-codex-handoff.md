@@ -3500,6 +3500,18 @@ peepholes.
   diagnostic path or fallback remains. Next establish non-FlagM Direct/Inverted/Unknown source
   provenance before attempting non-fallthrough multi-predecessor joins.
 
+- `0caec7c` makes non-FlagM edge carry polarity explicit. A per-block `EdgeCarrySourceState` observes
+  only the existing U8 `ThreadContext64::carry_inverted` publication: constant 0/1 resolves to
+  Direct/Inverted, while dynamic, wrong-width and non-boolean values remain Unknown. FlagM sources
+  remain Direct and masks without C remain Unknown. This is compile-time metadata only; it emits no
+  host instruction or runtime branch. The production static-forward matrix covers full Direct, NZ
+  Unknown, non-contiguous `N|C` Direct and non-FlagM `N|C` Inverted through link and invalidation.
+  Mac passes 200 direct-link flags, 97 focused static-forward, 913 production direct-link, 360
+  JIT-cache, 48 region-flags, 769 non-stress SMC and 105 continuation assertions. Debug smallpt stays
+  at 279 roots / 49,265 instructions with the canonical PPM; the 8-second Debug SQLite screen is not
+  benefit evidence. No new env switch, probe, diagnostic path or fallback remains. Next require a
+  shared `{mask, polarity, version}` veneer before extending mixed joins beyond canonical fallthrough.
+
 ## Orb loop
 
 ```

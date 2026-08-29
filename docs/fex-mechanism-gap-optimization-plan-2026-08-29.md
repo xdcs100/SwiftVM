@@ -882,3 +882,26 @@ outline site 在 12 秒门限内被检测为自环；两条路径均已删除。
 
 EdgeFlags 剩余项继续收窄为非 FlagM 路径的 Direct/Inverted/Unknown source provenance，以及
 无法利用 canonical fallthrough 的多前驱 mixed-polarity join；后者需要可共享且不增长静态代码的 entry veneer。
+
+### 16.18 non-FlagM edge carry provenance
+
+提交 `0caec7c` 让 `EdgeFlagsState::carry_polarity` 从仅有 FlagM `Direct` 与其他 `Unknown`，
+扩展为可从现有 x86 `carry_inverted` publication 证明的三态 source contract。新的
+`EdgeCarrySourceState` 在每个 HIR block 进入时清空；ARM64 `StoreUniform` 只在目标精确为
+U8 `ThreadContext64::carry_inverted` 且 value 是常量 0/1 时发布 Direct/Inverted。动态值、
+错误宽度或非 0/1 常量立即退回 Unknown。FlagM canonical carry 仍优先解析为 Direct；
+incoming mask 不含 C 时仍必须为 Unknown。
+
+该追踪只更新 JIT 编译期 metadata，不发射 host 指令、不增加 runtime branch，也不新建
+第二个极性存储。生产 static-forward 用例现在覆盖 full-NZCV Direct、NZ Unknown、
+non-contiguous `N|C` Direct 和关闭 FlagM 后的 `N|C` Inverted；四种 source 均进入既有
+LinkManager contract，并覆盖 link 与 target invalidation 恢复。
+
+Mac 通过 200 条 direct-link flags、97 条 static-forward 生产断言、913 条 production direct-link、
+360 条 jit-cache、48 条 region-flags、769 条非压力 SMC 和 105 条 continuation 断言。
+Debug smallpt `4 8 6` 保持 279 roots / 49,265 条与 canonical PPM SHA-256。Debug SQLite 在
+8 秒门限结束，不作为收益或回退证据。本阶段没有新增 env 开关、probe、诊断日志、
+临时路径或运行时兜底。
+
+EdgeFlags 下一步不再是补极性枚举，而是让无 canonical fallthrough 的多前驱 join 共享按
+`{mask, polarity, version}` 区分的 canonicalizing veneer；只有 veneer 成本被多条边摊薄且总静态代码不增长时才晋级。
