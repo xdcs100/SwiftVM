@@ -500,19 +500,20 @@ bool JitTranslator::EmitContinuationForward() {
     }
     const auto location = context.X(*dynamic_next_loc);
     dynamic_next_loc.reset();
-    auto& miss_site = indirect_exit_miss_sites[location.GetCode()];
-    if (!miss_site.label) {
-        miss_site.label = std::make_unique<Label>();
-        miss_site.guest_start = cur_block->GetStartLocation().Value();
+    auto& mismatch_site = continuation_mismatch_sites[location.GetCode()];
+    if (!mismatch_site.label) {
+        mismatch_site.label = std::make_unique<Label>();
+        mismatch_site.guest_start = cur_block->GetStartLocation().Value();
     }
-    miss_site.reset_return_stack = true;
+    auto& dispatch_site = indirect_dispatch_sites[location.GetCode()];
+    if (!dispatch_site.label) {
+        dispatch_site.label = std::make_unique<Label>();
+        dispatch_site.guest_start = cur_block->GetStartLocation().Value();
+    }
     dynamic_location_miss = nullptr;
     const u32 link_before = context.CurrentBufferSize();
-    const auto fault = context.ForwardContinuation(
-            location, miss_site.label.get());
-    RecordDeferredFault(fault,
-                        miss_site.label.get(),
-                        FaultRecoveryKind::ContinuationMiss);
+    const auto fault = context.ForwardContinuation(location, mismatch_site.label.get());
+    RecordDeferredFault(fault, dispatch_site.label.get(), FaultRecoveryKind::ExternalContinuation);
     RecordBoundaryRange(BoundarySubsequence::LinkTail, link_before,
                         context.CurrentBufferSize());
     return true;
@@ -571,21 +572,20 @@ bool JitTranslator::EmitIndirectCallForward(bool pending_flags) {
     const auto location = context.X(*dynamic_next_loc);
     dynamic_next_loc.reset();
     auto& miss_site = (pending_flags ? pending_call_miss_sites
-                                     : indirect_exit_miss_sites)[location.GetCode()];
+                                     : indirect_call_miss_sites)[location.GetCode()];
     if (!miss_site.label) {
         miss_site.label = std::make_unique<Label>();
         miss_site.guest_start = cur_block->GetStartLocation().Value();
     }
-    IndirectCallContinuationSite continuation_site{
-            .miss = std::make_unique<Label>(),
-            .resume = std::make_unique<Label>(),
-            .shared_miss = miss_site.label.get(),
-    };
-    auto* call_miss = continuation_site.miss.get();
-    auto* call_resume = continuation_site.resume.get();
+    if (!pending_flags) {
+        auto& dispatch_site = indirect_dispatch_sites[location.GetCode()];
+        if (!dispatch_site.label) {
+            dispatch_site.label = std::make_unique<Label>();
+            dispatch_site.guest_start = cur_block->GetStartLocation().Value();
+        }
+    }
     const u32 link_before = context.CurrentBufferSize();
-    const auto faults =
-            context.ForwardIndirectCall(location, call_miss, call_resume, pending_flags);
+    const auto faults = context.ForwardIndirectCall(location, miss_site.label.get(), pending_flags);
     fault_metadata.push_back({
             .guest_start = cur_block->GetStartLocation().Value(),
             .host_begin = faults.lookup_fault.begin,
@@ -593,8 +593,8 @@ bool JitTranslator::EmitIndirectCallForward(bool pending_flags) {
             .recovery_reg = dynamic_location_miss ? location.GetCode()
                                                   : UINT32_MAX,
     });
-    RecordDeferredFault(faults.target_fault, call_miss, FaultRecoveryKind::IndirectCallMiss);
-    indirect_call_continuation_sites.push_back(std::move(continuation_site));
+    RecordDeferredFault(
+            faults.target_fault, miss_site.label.get(), FaultRecoveryKind::IndirectCallMiss);
     if (pending_flags && !flags_token_keep) {
         nzcv_dirty = false;
         nzcv_requested = {};
@@ -605,36 +605,15 @@ bool JitTranslator::EmitIndirectCallForward(bool pending_flags) {
     return true;
 }
 
-void JitTranslator::EmitIndirectCallContinuationStubs(Label* shared_miss) {
-    std::vector<IndirectCallContinuationSite*> matching;
-    for (auto& site : indirect_call_continuation_sites) {
-        if (site.shared_miss == shared_miss) {
-            matching.push_back(&site);
-        }
-    }
-    for (size_t index = 0; index < matching.size(); ++index) {
-        auto& site = *matching[index];
-        ASSERT(site.miss && site.resume);
-        __ Bind(site.miss.get());
-        ResolveDeferredFaults(site.miss.get());
-        __ Adr(x30, site.resume.get());
-        if (index + 1 != matching.size()) {
-            __ B(shared_miss);
-        }
-        site.shared_miss = nullptr;
-    }
-}
-
 void JitTranslator::EmitIndirectExitColdPaths() {
     for (u32 reg = 0; reg < pending_call_miss_sites.size(); ++reg) {
         auto& site = pending_call_miss_sites[reg];
         if (!site.label) {
             continue;
         }
-        EmitIndirectCallContinuationStubs(site.label.get());
         __ Bind(site.label.get());
         ResolveDeferredFaults(site.label.get());
-        ContinuationContract::PublishFrame(masm);
+        ContinuationContract::PublishExternalFrame(masm);
         const XRegister location{reg};
         const XRegister scratch = location == ip0 ? ip1 : ip0;
         EmitNZCVMerge(static_cast<u64>(HostFlags::NZCV),
@@ -644,37 +623,42 @@ void JitTranslator::EmitIndirectExitColdPaths() {
         __ B(recovery);
         site = {};
     }
-    for (u32 reg = 0; reg < indirect_exit_miss_sites.size(); ++reg) {
-        auto& site = indirect_exit_miss_sites[reg];
-        if (!site.label) {
+    for (u32 reg = 0; reg < indirect_dispatch_sites.size(); ++reg) {
+        auto& call_site = indirect_call_miss_sites[reg];
+        auto& mismatch_site = continuation_mismatch_sites[reg];
+        auto& dispatch_site = indirect_dispatch_sites[reg];
+        if (!dispatch_site.label) {
+            ASSERT(!call_site.label && !mismatch_site.label);
             continue;
         }
-        EmitIndirectCallContinuationStubs(site.label.get());
-        __ Bind(site.label.get());
-        ResolveDeferredFaults(site.label.get());
-        if (site.reset_return_stack) {
+        if (call_site.label) {
+            __ Bind(call_site.label.get());
+            ResolveDeferredFaults(call_site.label.get());
+            ContinuationContract::PublishExternalFrame(masm);
+            if (mismatch_site.label) {
+                __ B(dispatch_site.label.get());
+            }
+        }
+        if (mismatch_site.label) {
+            __ Bind(mismatch_site.label.get());
+            ResolveDeferredFaults(mismatch_site.label.get());
             __ Ldr(rsb_ptr, MemOperand(state, state_offset_rsb_empty));
         }
-        if (!site.reset_return_stack) {
-            ContinuationContract::PublishFrame(masm);
-        }
+        __ Bind(dispatch_site.label.get());
+        ResolveDeferredFaults(dispatch_site.label.get());
         const XRegister location{reg};
         auto* recovery = terminal_location_publication.MissLabel(location);
         const auto fault = context.ForwardIndirectL1(location, recovery);
         fault_metadata.push_back({
-                .guest_start = site.guest_start,
+                .guest_start = dispatch_site.guest_start,
                 .host_begin = fault.begin,
                 .host_end = fault.end,
                 .recovery_reg = recovery ? reg : UINT32_MAX,
         });
-        site = {};
+        call_site = {};
+        mismatch_site = {};
+        dispatch_site = {};
     }
-    ASSERT(std::all_of(indirect_call_continuation_sites.begin(),
-                       indirect_call_continuation_sites.end(),
-                       [](const auto& site) {
-                           return site.shared_miss == nullptr;
-                       }));
-    indirect_call_continuation_sites.clear();
 }
 
 Condition JitTranslator::MapCond(ir::Cond cond) {

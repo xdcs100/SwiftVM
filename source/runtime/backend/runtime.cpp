@@ -367,29 +367,15 @@ struct Runtime::Impl final {
                         reinterpret_cast<u8*>(link_register - sizeof(u32)),
                         entry);
                 has_entry &=
-                        entry.recovery_kind ==
-                                backend::FaultRecoveryKind::ContinuationMiss ||
-                        entry.recovery_kind ==
-                                backend::FaultRecoveryKind::IndirectCallMiss;
+                        entry.recovery_kind == backend::FaultRecoveryKind::IndirectCallMiss ||
+                        entry.recovery_kind == backend::FaultRecoveryKind::ExternalContinuation;
             }
         }
         if (!has_entry) {
             return false;
         }
-        if (entry.recovery_kind == backend::FaultRecoveryKind::ContinuationMiss) {
-            if (fault_addr != 0 || !entry.recovery || !self->return_stack ||
-                !backend::SignalHandler::SetContextGPR(
-                        uctx,
-                        25,
-                        reinterpret_cast<std::uintptr_t>(
-                                self->return_stack->Empty()))) {
-                return false;
-            }
-            backend::SignalHandler::SetContextPC(
-                    uctx, reinterpret_cast<std::uintptr_t>(entry.recovery));
-            return true;
-        }
-        if (entry.recovery_kind == backend::FaultRecoveryKind::IndirectCallMiss) {
+        if (entry.recovery_kind == backend::FaultRecoveryKind::IndirectCallMiss ||
+            entry.recovery_kind == backend::FaultRecoveryKind::ExternalContinuation) {
             if (fault_addr != 0 || !entry.recovery) {
                 return false;
             }

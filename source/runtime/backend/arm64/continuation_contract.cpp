@@ -16,6 +16,10 @@ void ContinuationContract::PublishFrame(MacroAssembler& masm) {
     masm.Stp(x14, x30, MemOperand(x25, -16, PreIndex));
 }
 
+void ContinuationContract::PublishExternalFrame(MacroAssembler& masm) {
+    masm.Stp(x14, xzr, MemOperand(x25, -16, PreIndex));
+}
+
 void ContinuationContract::ConsumeFrame(MacroAssembler& masm,
                                         const Register& guest_return,
                                         const Register& host_continuation) {

@@ -736,14 +736,11 @@ bool ReadUnit(BlobReader& r, SerialUnit& unit) {
             !r.U8(site.recovery_kind)) {
             return false;
         }
-        if ((site.host_begin & 3u) != 0 ||
-            site.host_end != site.host_begin + sizeof(u32) ||
+        if ((site.host_begin & 3u) != 0 || site.host_end != site.host_begin + sizeof(u32) ||
             site.host_end > code_size ||
             (site.recovery_offset != UINT32_MAX &&
-             ((site.recovery_offset & 3u) != 0 ||
-              site.recovery_offset >= code_size)) ||
-            site.recovery_kind >
-                    static_cast<u8>(FaultRecoveryKind::IndirectCallMiss)) {
+             ((site.recovery_offset & 3u) != 0 || site.recovery_offset >= code_size)) ||
+            site.recovery_kind > static_cast<u8>(FaultRecoveryKind::ExternalContinuation)) {
             return false;
         }
     }

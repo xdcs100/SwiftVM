@@ -42,8 +42,8 @@ struct NoneAddressNode {};
 
 enum class FaultRecoveryKind : u8 {
     GuestFault,
-    ContinuationMiss,
     IndirectCallMiss,
+    ExternalContinuation,
 };
 
 // JIT fault table entry. Function units may contribute one subrange per

@@ -920,9 +920,8 @@ JitContext::ForwardContinuation(const Register& location, Label* miss) {
 
 JitContext::IndirectCallForwardResult JitContext::ForwardIndirectCall(const Register& location,
                                                                       Label* miss,
-                                                                      Label* resume,
                                                                       bool pending_flags) {
-    ASSERT(miss && resume);
+    ASSERT(miss);
     ReserveTmpX(XRegister{location.GetCode()});
     const auto index = GetTmpX();
     const auto entry = GetTmpX();
@@ -941,7 +940,6 @@ JitContext::IndirectCallForwardResult JitContext::ForwardIndirectCall(const Regi
     __ B(miss, ne);
     const u32 target_fault_begin = CurrentBufferSize();
     __ Blr(entry);
-    __ Bind(resume);
     return {
             .lookup_fault = {fault_begin, fault_end},
             .target_fault = {target_fault_begin, CurrentBufferSize()},

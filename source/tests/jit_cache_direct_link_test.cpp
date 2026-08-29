@@ -36,7 +36,7 @@ using namespace swift::runtime::ir;
 constexpr const char* kPhaseEnv = "DIRECT_LINK_CACHE_PHASE";
 constexpr const char* kDirEnv = "DIRECT_LINK_CACHE_DIR";
 constexpr const char* kRoundTripTest =
-        "disk cache v17 round trips direct-link sites across processes";
+        "disk cache v18 round trips direct-link sites across processes";
 
 IntrusivePtr<Block> BuildTarget(VAddr guest, u64 fingerprint) {
     IntrusivePtr<Block> block{new Block(0, Location{guest})};
@@ -424,7 +424,7 @@ TEST_CASE("disk cache scanner keeps move-wide constants and rejects PC-relative 
     }
 }
 
-TEST_CASE("disk cache v17 serializes link and fault-site records",
+TEST_CASE("disk cache v18 serializes link and fault-site records",
           "[direct-link][jit-cache][serializer]") {
     SerialUnit input{};
     input.guest_start = 0x1000;
@@ -466,8 +466,8 @@ TEST_CASE("disk cache v17 serializes link and fault-site records",
              56, 64, kMergeResumeAdr, 0, 60, pending_nzcv},
     };
     input.fault_sites = {
-            {0x1000, 4, 8, 72, 1},
-            {0x1000, 8, 12, 76, 2},
+            {0x1000, 4, 8, 72, static_cast<u8>(FaultRecoveryKind::IndirectCallMiss)},
+            {0x1000, 8, 12, 76, static_cast<u8>(FaultRecoveryKind::ExternalContinuation)},
     };
     BlobWriter writer;
     WriteUnit(writer, input);
@@ -506,12 +506,14 @@ TEST_CASE("disk cache v17 serializes link and fault-site records",
     REQUIRE(output.fault_sites[0].host_begin == 4);
     REQUIRE(output.fault_sites[0].host_end == 8);
     REQUIRE(output.fault_sites[0].recovery_offset == 72);
-    REQUIRE(output.fault_sites[0].recovery_kind == 1);
+    REQUIRE(output.fault_sites[0].recovery_kind ==
+            static_cast<u8>(FaultRecoveryKind::IndirectCallMiss));
     REQUIRE(output.fault_sites[1].guest_start == 0x1000);
     REQUIRE(output.fault_sites[1].host_begin == 8);
     REQUIRE(output.fault_sites[1].host_end == 12);
     REQUIRE(output.fault_sites[1].recovery_offset == 76);
-    REQUIRE(output.fault_sites[1].recovery_kind == 2);
+    REQUIRE(output.fault_sites[1].recovery_kind ==
+            static_cast<u8>(FaultRecoveryKind::ExternalContinuation));
 }
 
 TEST_CASE(kRoundTripTest, "[direct-link][jit-cache][production][smc]") {

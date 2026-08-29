@@ -194,7 +194,6 @@ public:
     ForwardContinuation(const Register& location, Label* miss);
     [[nodiscard]] IndirectCallForwardResult ForwardIndirectCall(const Register& location,
                                                                 Label* miss,
-                                                                Label* resume,
                                                                 bool pending_flags = false);
     void ReturnToDispatcher(const Register& location);
     void ReturnHost();

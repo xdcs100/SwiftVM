@@ -120,6 +120,7 @@ void* TranslateIndirectCallSource(const std::shared_ptr<Module>& module,
     builder.RegisterCallReturn(Location{return_guest});
     function->EndBlock(terminal::ReturnToDispatch{});
     builder.SetCurBlock(Location{return_guest});
+    builder.AdvancePC(Imm{1});
     function->EndBlock(terminal::ReturnToHost{});
     function->EndFunction();
     return TranslateIR(module, function);
@@ -1410,7 +1411,8 @@ TEST_CASE("call misses preserve host continuation across dispatch",
     ScopedEnvironment flags_regs{"SVM_FLAGS_REGS", "1"};
 
     const bool static_call = GENERATE(false, true);
-    CAPTURE(static_call);
+    const bool outer_frame = GENERATE(false, true);
+    CAPTURE(static_call, outer_frame);
     const size_t page_size = static_cast<size_t>(getpagesize());
     const size_t guest_size = 8 * page_size;
     void* guest_memory =
@@ -1442,26 +1444,47 @@ TEST_CASE("call misses preserve host continuation across dispatch",
                                       module, source_guest, target_guest, return_guest)
                             : TranslateIndirectCallSource(module, source_guest, return_guest);
         REQUIRE(source_code != nullptr);
+        if (!static_call) {
+            REQUIRE(space.GetCodeCache(return_guest) != nullptr);
+            const auto return_entry = space.GetLinkManager().QueryTarget(return_guest);
+            REQUIRE(return_entry);
+            REQUIRE(return_entry->generation != 0);
+        }
 
         Runtime runtime{&space};
         auto* empty = runtime.GetState()->rsb_pointer;
         REQUIRE(empty != nullptr);
+        auto* expected = empty;
+        if (outer_frame) {
+            expected = empty - 1;
+            expected->guest_location = return_guest + 0x100;
+            expected->dispatch_index = 1;
+            runtime.GetState()->rsb_pointer = expected;
+        }
         std::memcpy(runtime.GetUniformBuffer().data() + 8, &target_guest, sizeof(target_guest));
         std::memcpy(runtime.GetUniformBuffer().data() + 16, &return_guest, sizeof(return_guest));
         runtime.SetLocation(source_guest);
         REQUIRE(runtime.Run() == HaltReason::CodeMiss);
         REQUIRE(runtime.GetLocation() == target_guest);
-        REQUIRE(runtime.GetState()->rsb_pointer == empty - 1);
-        REQUIRE((empty - 1)->guest_location == return_guest);
-        REQUIRE((empty - 1)->dispatch_index != 0);
+        REQUIRE(runtime.GetState()->rsb_pointer == expected - 1);
+        REQUIRE((expected - 1)->guest_location == return_guest);
+        if (static_call) {
+            REQUIRE((expected - 1)->dispatch_index != 0);
+        } else {
+            REQUIRE((expected - 1)->dispatch_index == 0);
+        }
 
         auto* target_code = TranslateReturningCallTarget(module, target_guest, kFingerprint);
         REQUIRE(target_code != nullptr);
         REQUIRE(runtime.Run() == HaltReason::CallHost);
-        REQUIRE(runtime.GetState()->rsb_pointer == empty);
+        REQUIRE(runtime.GetState()->rsb_pointer == expected);
         u64 result{};
         std::memcpy(&result, runtime.GetUniformBuffer().data(), sizeof(result));
         REQUIRE(result == kFingerprint);
+
+        space.InvalidateCodeRange(source_guest, source_guest + 1);
+        REQUIRE(space.GetCodeCache(source_guest) == nullptr);
+        REQUIRE(space.GetCodeCache(return_guest) == nullptr);
     }
     REQUIRE(munmap(guest_memory, guest_size) == 0);
 #else
@@ -1487,8 +1510,10 @@ TEST_CASE("fault-backed indirect call preserves an invalidated target frame",
     {
         const VAddr source_guest = page_size + 0x180;
         const VAddr return_guest = source_guest + 1;
+        const VAddr return_driver_guest = 2 * page_size + 0x180;
         const VAddr target_guest = 5 * page_size + 0x180;
         constexpr u64 kFingerprint = 0x1234'5678'9abc'def0ull;
+        constexpr u64 kReturnFingerprint = 0x0ddc'0ffe'e15e'beefull;
         Config config{
                 .loc_start = 0,
                 .loc_end = guest_size,
@@ -1523,10 +1548,27 @@ TEST_CASE("fault-backed indirect call preserves an invalidated target frame",
         REQUIRE(runtime.Run() == HaltReason::CallHost);
         REQUIRE(runtime.GetState()->rsb_pointer == empty - 1);
         REQUIRE((empty - 1)->guest_location == return_guest);
-        REQUIRE((empty - 1)->dispatch_index != 0);
+        REQUIRE((empty - 1)->dispatch_index == 0);
         u64 result{};
         std::memcpy(&result, runtime.GetUniformBuffer().data(), sizeof(result));
         REQUIRE(result == kFingerprint);
+
+        space.InvalidateCodeRange(source_guest, source_guest + 1);
+        REQUIRE(space.GetCodeCache(return_guest) == nullptr);
+        REQUIRE(TranslateContinuationReturnSource(module, return_driver_guest) != nullptr);
+        std::memcpy(runtime.GetUniformBuffer().data(), &return_guest, sizeof(return_guest));
+        runtime.SetLocation(return_driver_guest);
+        REQUIRE(runtime.Run() == HaltReason::CodeMiss);
+        REQUIRE(runtime.GetLocation() == return_guest);
+        REQUIRE(runtime.GetState()->rsb_pointer == empty);
+
+        auto replacement = BuildTarget(return_guest, kReturnFingerprint);
+        auto* replacement_code = TranslateIR(module, replacement);
+        REQUIRE(replacement_code != nullptr);
+        space.PushCodeCache(Location{return_guest}, replacement_code);
+        REQUIRE(runtime.Run() == HaltReason::CallHost);
+        std::memcpy(&result, runtime.GetUniformBuffer().data(), sizeof(result));
+        REQUIRE(result == kReturnFingerprint);
     }
     REQUIRE(munmap(guest_memory, guest_size) == 0);
 #else
