@@ -974,7 +974,6 @@ private:
     std::map<ir::Inst*, NarrowComparePlan> narrow_compares{};
     std::map<ir::Inst*, NarrowCarryFusion> narrow_carry_fusions{};
     std::map<ir::Inst*, u16> pinned_gpr_values{};
-    std::map<std::pair<ir::Inst*, const ir::Inst*>, u16> pinned_gpr_use_homes{};
     std::map<ir::Inst*, PinnedGPRCopy> pinned_gpr_copies{};
     std::map<ir::Inst*, PinnedSelectPublication> pinned_select_results{};
     std::map<ir::Inst*, PinnedSelectPublication> pinned_select_publications{};

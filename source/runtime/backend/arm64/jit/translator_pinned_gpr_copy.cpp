@@ -385,14 +385,19 @@ std::optional<WRegister> JitTranslator::ResolvePinnedGPRWUse(ir::Value value,
     if (!value.Def() || !consumer) {
         return std::nullopt;
     }
-    const auto use = pinned_gpr_use_homes.find({value.Def(), consumer});
-    if (use != pinned_gpr_use_homes.end()) {
-        return WRegister(use->second);
+    const auto residence = guest_state_map.RegisteredFixedHomeForUse(
+            value, consumer);
+    if (residence && residence->width == sizeof(u32)) {
+        return WRegister(residence->home);
     }
     const auto pinned = fused_pin_gpr_reads.find(value.Def());
-    return pinned == fused_pin_gpr_reads.end()
-                   ? std::nullopt
-                   : std::optional<WRegister>{WRegister(pinned->second)};
+    if (pinned != fused_pin_gpr_reads.end()) {
+        return WRegister(pinned->second);
+    }
+    const auto inferred = guest_state_map.FixedHomeForUse(value, consumer);
+    return inferred && inferred->width == sizeof(u32)
+            ? std::optional<WRegister>{WRegister(inferred->home)}
+            : std::nullopt;
 }
 
 std::optional<Register> JitTranslator::ResolvePinnedGPRUse(ir::Value value,
@@ -403,6 +408,10 @@ std::optional<Register> JitTranslator::ResolvePinnedGPRUse(ir::Value value,
     if (const auto pinned = ResolvePinnedGPRWUse(value, consumer)) {
         return Register{*pinned};
     }
+    const auto residence = guest_state_map.FixedHomeForUse(value, consumer);
+    if (residence && residence->width == sizeof(u64)) {
+        return Register{XRegister(residence->home)};
+    }
     return std::nullopt;
 }
 
@@ -411,7 +420,6 @@ void JitTranslator::PreparePinnedGPRCopies(ir::Block* block) {
     fused_pin_sign_extends.clear();
     fused_pin_gpr_reads.clear();
     pinned_gpr_values.clear();
-    pinned_gpr_use_homes.clear();
     pinned_gpr_copies.clear();
     for (auto& inst : block->GetInstList()) {
         auto plan = MatchPinnedGPRCopy(&inst);
@@ -442,7 +450,14 @@ void JitTranslator::PreparePinnedGPRCopies(ir::Block* block) {
             }
         }
         for (auto [value, consumer] : plan->transferred_uses) {
-            pinned_gpr_use_homes.emplace(std::make_pair(value, consumer), plan->target);
+            guest_state_map.RegisterFixedHomeUse(
+                    value,
+                    consumer,
+                    GuestStateMap::FixedHomeValue{
+                            .home = plan->target,
+                            .width = sizeof(u32),
+                            .known_zero_above_32 = true,
+                    });
         }
         pinned_gpr_copies.emplace(&inst, *plan);
     }

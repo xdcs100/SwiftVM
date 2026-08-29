@@ -8,6 +8,9 @@ void GuestStateMap::Analyze(ir::Block* next_block,
                             const FeatureSet& next_features) {
     block = next_block;
     features = next_features;
+    fixed_home_uses.clear();
+    fixed_home_use_counts.clear();
+    registered_fixed_home_uses.clear();
 }
 
 bool GuestStateMap::ClobbersFixedHome(const ir::Inst& inst,

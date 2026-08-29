@@ -88,11 +88,48 @@ bool JitTranslator::IsDeadPinnedGPRWrite(ir::Inst* inst) const {
 
 void JitTranslator::PrepareDeadPinnedGPRWrites(ir::Block* block) {
     dead_pinned_gpr_writes.clear();
+    StackVector<GuestStateMap::CoalescedWrite, 8> coalesced_writes;
+    StackVector<ir::Inst*, 8> published_versions;
+    bool has_reused_publication = false;
     for (auto& inst : block->GetInstList()) {
-        if (IsDeadPinnedGPRWrite(&inst)) {
+        if (!has_reused_publication) {
+            for (auto value : inst.GetValues()) {
+                if (value.Def() &&
+                    std::ranges::find(published_versions, value.Def()) !=
+                            published_versions.end()) {
+                    has_reused_publication = true;
+                    break;
+                }
+            }
+        }
+        const bool dead = IsDeadPinnedGPRWrite(&inst);
+        if (dead) {
             dead_pinned_gpr_writes.insert(&inst);
         }
+        if (inst.GetOp() != ir::OpCode::SetHostGPR ||
+            inst.GetArg<ir::Imm>(2).Get() != 0 || dead) {
+            continue;
+        }
+        const u32 home = inst.GetArg<ir::Imm>(1).Get();
+        if (!IsPinnedGPR(home)) {
+            continue;
+        }
+        auto published = inst.GetArg<ir::Value>(0);
+        if (!has_reused_publication && published.Def()) {
+            published_versions.push_back(published.Def());
+            if (published.Def()->GetOp() == ir::OpCode::ZeroExtend32To64) {
+                auto narrow = published.Def()->GetArg<ir::Value>(0);
+                if (narrow.Def()) {
+                    published_versions.push_back(narrow.Def());
+                }
+            }
+        }
+        if (context.IsGPRMappedTo(published, home)) {
+            coalesced_writes.push_back({&inst, static_cast<u16>(home)});
+        }
     }
+    guest_state_map.BuildValueVersions(
+            dead_pinned_gpr_writes, coalesced_writes, has_reused_publication);
 }
 
 }  // namespace swift::runtime::backend::arm64

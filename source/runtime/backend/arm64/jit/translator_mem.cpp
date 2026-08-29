@@ -1164,6 +1164,9 @@ void JitTranslator::EmitGetHostGPR(ir::Inst* inst) {
     if (fused_pin_gpr_reads.contains(inst)) {
         return;
     }
+    if (guest_state_map.ValueFullyResident(inst)) {
+        return;
+    }
     auto offset = inst->GetArg<ir::Imm>(1).Get();
     auto reg_index = inst->GetArg<ir::Imm>(0).Get();
     const u32 value_size = ir::GetValueSizeByte(inst->ReturnType());
@@ -1388,9 +1391,10 @@ void JitTranslator::EmitSetHostGPR(ir::Inst* inst) {
     auto host_reg = XRegister(reg_index);
     auto value = inst->GetArg<ir::Value>(0);
     const bool fused_zext32 = value.Def() && fused_pin_zext32.contains(value.Def());
+    const auto residence = guest_state_map.FixedHomeForUse(value, inst);
     auto value_reg = fused_zext32
             ? context.X(value.Def()->GetArg<ir::Value>(0))
-            : context.X(value);
+            : (residence ? XRegister(residence->home) : context.X(value));
     const auto bit_offset = offset * 8;
     const auto bit_width = ir::GetValueSizeByte(value.Type()) * 8;
     ASSERT_MSG(bit_offset + bit_width <= 64,
@@ -1400,7 +1404,10 @@ void JitTranslator::EmitSetHostGPR(ir::Inst* inst) {
             reg_index == 21 || reg_index == 22 || reg_index == 23 ||
             reg_index == 29;
     if (bit_offset == 0 && bit_width == 32 && pin_ext_reg) {
-        if (value_reg.W() != host_reg.W()) {
+        const bool normalize_resident_home = residence &&
+                value_reg.W() == host_reg.W() &&
+                !residence->known_zero_above_32;
+        if (value_reg.W() != host_reg.W() || normalize_resident_home) {
             __ Mov(host_reg.W(), value_reg.W());
         }
     } else if (bit_offset == 0 && bit_width == 64) {

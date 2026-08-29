@@ -33,7 +33,8 @@ std::vector<std::string> Disassemble(arm64::JitContext& context) {
     return lines;
 }
 
-std::vector<std::string> EmitTransfer(bool overwrite_target) {
+std::vector<std::string> EmitTransfer(bool overwrite_target,
+                                      bool alu_consumer = false) {
     Config config{
             .loc_start = 0,
             .loc_end = 1ull << 48,
@@ -49,16 +50,25 @@ std::vector<std::string> EmitTransfer(bool overwrite_target) {
     block->SetHostGPR(old_source, HostRegIndex(23), Imm{0u});
     auto new_source = block->LoadImm(Imm{swift::u64{0x2000}}).SetType(ValueType::U64);
     block->SetHostGPR(new_source, HostRegIndex(1), Imm{0u});
-    auto first_address = block->BitCast(old_source).SetType(ValueType::U64);
-    auto first = block->LoadMemory(Operand{first_address, Imm{8u}}).SetType(ValueType::U64);
-    block->StoreUniform(Uniform{64, ValueType::U64}, first);
-    if (overwrite_target) {
-        auto replacement = block->LoadImm(Imm{swift::u64{0x3000}}).SetType(ValueType::U64);
-        block->SetHostGPR(replacement, HostRegIndex(23), Imm{0u});
+    if (alu_consumer) {
+        auto result = block->Add(old_source, Operand{Imm{swift::u64{7}}})
+                              .SetType(ValueType::U64);
+        block->StoreUniform(Uniform{64, ValueType::U64}, result);
+    } else {
+        auto first_address = block->BitCast(old_source).SetType(ValueType::U64);
+        auto first = block->LoadMemory(Operand{first_address, Imm{8u}})
+                             .SetType(ValueType::U64);
+        block->StoreUniform(Uniform{64, ValueType::U64}, first);
+        if (overwrite_target) {
+            auto replacement = block->LoadImm(Imm{swift::u64{0x3000}})
+                                       .SetType(ValueType::U64);
+            block->SetHostGPR(replacement, HostRegIndex(23), Imm{0u});
+        }
+        auto second_address = block->BitCast(old_source).SetType(ValueType::U64);
+        auto second = block->LoadMemory(Operand{second_address, Imm{16u}})
+                              .SetType(ValueType::U64);
+        block->StoreUniform(Uniform{72, ValueType::U64}, second);
     }
-    auto second_address = block->BitCast(old_source).SetType(ValueType::U64);
-    auto second = block->LoadMemory(Operand{second_address, Imm{16u}}).SetType(ValueType::U64);
-    block->StoreUniform(Uniform{72, ValueType::U64}, second);
     block->SetTerminal(terminal::ReturnToDispatch{});
     block->ReIdInstr();
 
@@ -134,6 +144,12 @@ TEST_CASE("overwriting the resident GPR version keeps the source snapshot") {
     const auto lines = EmitTransfer(true);
     REQUIRE(Count(lines, "ldr x", "[x23, #8]") == 0);
     REQUIRE(Count(lines, "ldr x", "[x23, #16]") == 0);
+}
+
+TEST_CASE("published value versions feed general ALU consumers") {
+    const auto lines = EmitTransfer(false, true);
+    REQUIRE(Count(lines, "mov x23, x1", "") == 1);
+    REQUIRE(Count(lines, "add x", "x23") == 1);
 }
 
 TEST_CASE("resident helper contracts preserve pinned value versions") {
