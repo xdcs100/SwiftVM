@@ -12,6 +12,7 @@
 #include <vector>
 #include "base/common_funcs.h"
 #include "jit_context.h"
+#include "guest_state_map.h"
 #include "raw_carry_branch_analysis.h"
 #include "resident_scalar_fpr_analysis.h"
 #include "scalar_fpr_liveness.h"
@@ -991,6 +992,7 @@ private:
     RawCarryBranchAnalysis raw_carry_branch_analysis{};
     ScalarFPRLiveness scalar_fpr_liveness{};
     ScalarIdentityAnalysis scalar_identity_analysis{};
+    GuestStateMap guest_state_map{};
     ir::Flags flags_set{};
     ir::Flags flags_clear{};
     bool save_in_nzcv{true};

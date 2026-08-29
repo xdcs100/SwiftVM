@@ -1,6 +1,5 @@
 #include <algorithm>
 
-#include "runtime/backend/arm64/helper_call_contract.h"
 #include "translator.h"
 
 namespace swift::runtime::backend::arm64 {
@@ -73,14 +72,9 @@ JitTranslator::MatchPinnedSelectPublication(ir::Inst* publication) const {
         return std::nullopt;
     }
 
-    for (auto& scan : cur_block->GetInstList()) {
-        if (scan.Id() > producer->Id() && scan.Id() < publication->Id() &&
-            &scan != extend &&
-            (MayFaultOrObserve(scan.GetOp()) ||
-             (scan.GetOp() == ir::OpCode::SetHostGPR &&
-              scan.GetArg<ir::Imm>(1).Get() == target))) {
-            return std::nullopt;
-        }
+    if (!guest_state_map.PublicationWindowSafe(
+                target, producer->Id(), publication->Id(), extend)) {
+        return std::nullopt;
     }
 
     bool saw_publication = false;
@@ -125,15 +119,9 @@ JitTranslator::MatchPinnedSelectPublication(ir::Inst* publication) const {
         }
     }
 
-    for (auto& scan : cur_block->GetInstList()) {
-        if (scan.Id() <= publication->Id() || scan.Id() >= last_use) {
-            continue;
-        }
-        if ((scan.GetOp() == ir::OpCode::SetHostGPR && scan.GetArg<ir::Imm>(1).Get() == target) ||
-            (target <= 9 &&
-             HelperCallContract::InstructionClobbersGPR(scan, target, context.GetFeatures()))) {
-            return std::nullopt;
-        }
+    if (!guest_state_map.FixedHomeSurvives(
+                target, publication->Id(), last_use)) {
+        return std::nullopt;
     }
 
     return PinnedSelectPublication{

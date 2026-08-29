@@ -1007,28 +1007,7 @@ bool JitTranslator::PreservesHostNZCV(ir::OpCode op) {
 }
 
 bool JitTranslator::MayFaultOrObserve(ir::OpCode op) {
-    switch (op) {
-        case ir::OpCode::LoadMemory:
-        case ir::OpCode::StoreMemory:
-        case ir::OpCode::LoadMemoryTSO:
-        case ir::OpCode::StoreMemoryTSO:
-        case ir::OpCode::MemoryCopy:
-        case ir::OpCode::MemoryCopyTSO:
-        case ir::OpCode::CompareAndSwap:
-        case ir::OpCode::CompareAndSwap128:
-        case ir::OpCode::CheckMemoryAlignment:
-        case ir::OpCode::AtomicExchange:
-        case ir::OpCode::AtomicFetchAdd:
-        case ir::OpCode::AtomicRMW:
-        case ir::OpCode::CallLambda:
-        case ir::OpCode::CallLocation:
-        case ir::OpCode::CallDynamic:
-        case ir::OpCode::X87Op:
-        case ir::OpCode::Sse42Str:
-            return true;
-        default:
-            return false;
-    }
+    return GuestStateMap::MayFaultOrObserve(op);
 }
 
 bool JitTranslator::IsSelfEdge(ir::Location target) const {

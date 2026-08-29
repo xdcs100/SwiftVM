@@ -20,6 +20,7 @@ using namespace swift::runtime::ir;
 enum class PinnedWidthShape {
     NarrowSelect,
     PublishedLow32,
+    PublishedLow32MultiUse,
     SelectPublication,
     SelectPublicationFault,
 };
@@ -50,7 +51,8 @@ std::vector<std::string> EmitWidthFact(PinnedWidthShape shape, bool overwrite_ta
         auto alternate = block->LoadImm(Imm{swift::u32{7}}).SetType(ValueType::U32);
         auto selected = block->Select(condition, alternate, widened).SetType(ValueType::U32);
         block->StoreUniform(Uniform{64, ValueType::U32}, selected);
-    } else if (shape == PinnedWidthShape::PublishedLow32) {
+    } else if (shape == PinnedWidthShape::PublishedLow32 ||
+               shape == PinnedWidthShape::PublishedLow32MultiUse) {
         auto base = block->GetHostGPR(HostRegIndex(1), Imm{0u}).SetType(ValueType::U64);
         auto value = block->Add(base, Operand{Imm{1u}}).SetType(ValueType::U64);
         block->SetHostGPR(value, HostRegIndex(22), Imm{0u});
@@ -61,6 +63,10 @@ std::vector<std::string> EmitWidthFact(PinnedWidthShape shape, bool overwrite_ta
         auto low = block->BitExtract(value, Imm{0u}, Imm{32u}).SetType(ValueType::U32);
         auto compare = block->Sub(low, Operand{Imm{8u}}).SetType(ValueType::U32);
         block->SaveFlags(compare, Flags::All);
+        if (shape == PinnedWidthShape::PublishedLow32MultiUse) {
+            auto sum = block->Add(low, Operand{Imm{3u}}).SetType(ValueType::U32);
+            block->StoreUniform(Uniform{72, ValueType::U32}, sum);
+        }
     } else {
         auto test = block->LoadImm(Imm{swift::u64{3}}).SetType(ValueType::U64);
         auto zero = block->LoadImm(Imm{swift::u64{0}}).SetType(ValueType::U64);
@@ -142,6 +148,14 @@ TEST_CASE("overwriting a full-width publication preserves its low snapshot") {
     const auto lines = EmitWidthFact(PinnedWidthShape::PublishedLow32, true);
     REQUIRE(Count(lines, "lsr w", "#0") == 1);
     REQUIRE(Count(lines, "subs w", "w22, #0x8") == 0);
+}
+
+TEST_CASE("a published low view serves multiple consumers from one value version") {
+    const auto lines = EmitWidthFact(
+            PinnedWidthShape::PublishedLow32MultiUse, false);
+    REQUIRE(Count(lines, "lsr w", "#0") == 0);
+    REQUIRE(Count(lines, "subs w", "w22, #0x8") == 1);
+    REQUIRE(Count(lines, "add w", "w22, #0x3") == 1);
 }
 
 TEST_CASE("a zero-extended SelectZero result publishes directly to its pinned home") {

@@ -1,24 +1,25 @@
 #include "translator.h"
 
-#include "runtime/backend/arm64/helper_call_contract.h"
-
 namespace swift::runtime::backend::arm64 {
 
 namespace {
 
 bool IsPinnedGPR(u32 index) { return index <= 9 || (index >= 19 && index <= 23) || index == 29; }
 
-bool IsLowViewAlias(ir::Block* block, ir::Inst* alias, ir::Inst* value) {
+std::optional<u32> LowViewLastUse(ir::Block* block,
+                                  ir::Inst* alias,
+                                  ir::Inst* value) {
     if (alias->GetOp() != ir::OpCode::BitExtract || alias->GetArg<ir::Value>(0).Def() != value ||
-        alias->GetArg<ir::Imm>(1).Get() != 0 || alias->GetUses() != 1 ||
-        alias->GetUses(false) != 1) {
-        return false;
+        alias->GetArg<ir::Imm>(1).Get() != 0) {
+        return std::nullopt;
     }
     const u32 width = ir::GetValueSizeByte(alias->ReturnType());
     if ((width != sizeof(u8) && width != sizeof(u16) && width != sizeof(u32)) ||
         alias->GetArg<ir::Imm>(2).Get() != width * 8) {
-        return false;
+        return std::nullopt;
     }
+    u32 ordinary_uses{};
+    u32 last_use = alias->Id();
     for (auto& consumer : block->GetInstList()) {
         const auto uses = std::ranges::count_if(
                 consumer.GetValues(), [&](ir::Value input) { return input.Def() == alias; });
@@ -29,23 +30,14 @@ bool IsLowViewAlias(ir::Block* block, ir::Inst* alias, ir::Inst* value) {
         if (uses != 1 ||
             (op != ir::OpCode::Add && op != ir::OpCode::Sub && op != ir::OpCode::Select) ||
             ir::GetValueSizeByte(consumer.ReturnType()) != width) {
-            return false;
+            return std::nullopt;
         }
-        return true;
+        ordinary_uses += uses;
+        last_use = std::max<u32>(last_use, consumer.Id());
     }
-    return false;
-}
-
-u32 AliasLastUse(ir::Block* block, ir::Inst* alias) {
-    u32 last_use = alias->Id();
-    for (auto& consumer : block->GetInstList()) {
-        for (auto input : consumer.GetValues()) {
-            if (input.Def() == alias) {
-                last_use = std::max<u32>(last_use, consumer.Id());
-            }
-        }
-    }
-    return last_use;
+    return ordinary_uses != 0 && ordinary_uses == alias->GetUses(false)
+            ? std::optional<u32>{last_use}
+            : std::nullopt;
 }
 
 }  // namespace
@@ -83,25 +75,21 @@ std::optional<JitTranslator::PinnedGPRPublicationView> JitTranslator::MatchPinne
             saw_publication = true;
             continue;
         }
+        const auto alias_last_use = LowViewLastUse(
+                cur_block, &consumer, value);
         if (consumer.Id() <= publication->Id() || uses != 1 ||
-            !IsLowViewAlias(cur_block, &consumer, value)) {
+            !alias_last_use) {
             return std::nullopt;
         }
         aliases.push_back(&consumer);
-        last_use = std::max(last_use, AliasLastUse(cur_block, &consumer));
+        last_use = std::max(last_use, *alias_last_use);
     }
     if (!saw_publication || aliases.empty() || ordinary_uses != value->GetUses(false)) {
         return std::nullopt;
     }
-    for (auto& scan : cur_block->GetInstList()) {
-        if (scan.Id() <= publication->Id() || scan.Id() >= last_use) {
-            continue;
-        }
-        if ((scan.GetOp() == ir::OpCode::SetHostGPR && scan.GetArg<ir::Imm>(1).Get() == target) ||
-            (target <= 9 &&
-             HelperCallContract::InstructionClobbersGPR(scan, target, context.GetFeatures()))) {
-            return std::nullopt;
-        }
+    if (!guest_state_map.FixedHomeSurvives(
+                target, publication->Id(), last_use)) {
+        return std::nullopt;
     }
     return PinnedGPRPublicationView{
             .value = value,

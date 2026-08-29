@@ -1,7 +1,5 @@
 #include "translator.h"
 
-#include "runtime/backend/arm64/helper_call_contract.h"
-
 namespace swift::runtime::backend::arm64 {
 
 namespace {
@@ -67,15 +65,9 @@ std::optional<JitTranslator::PinnedGPRValueTransfer> JitTranslator::MatchPinnedG
         return std::nullopt;
     }
 
-    for (auto& scan : cur_block->GetInstList()) {
-        if (scan.Id() <= read->Id() || scan.Id() >= publication->Id()) {
-            continue;
-        }
-        if ((scan.GetOp() == ir::OpCode::SetHostGPR && scan.GetArg<ir::Imm>(1).Get() == source) ||
-            (source <= 9 &&
-             HelperCallContract::InstructionClobbersGPR(scan, source, context.GetFeatures()))) {
-            return std::nullopt;
-        }
+    if (!guest_state_map.FixedHomeSurvives(
+                source, read->Id(), publication->Id())) {
+        return std::nullopt;
     }
 
     std::vector<ir::Inst*> values{read};
@@ -114,15 +106,9 @@ std::optional<JitTranslator::PinnedGPRValueTransfer> JitTranslator::MatchPinnedG
         return std::nullopt;
     }
 
-    for (auto& scan : cur_block->GetInstList()) {
-        if (scan.Id() <= publication->Id() || scan.Id() >= last_use) {
-            continue;
-        }
-        if ((scan.GetOp() == ir::OpCode::SetHostGPR && scan.GetArg<ir::Imm>(1).Get() == target) ||
-            (target <= 9 &&
-             HelperCallContract::InstructionClobbersGPR(scan, target, context.GetFeatures()))) {
-            return std::nullopt;
-        }
+    if (!guest_state_map.FixedHomeSurvives(
+                target, publication->Id(), last_use)) {
+        return std::nullopt;
     }
 
     return PinnedGPRValueTransfer{

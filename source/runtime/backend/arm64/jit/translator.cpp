@@ -745,6 +745,7 @@ JitTranslator::PrepareBlockState(ir::Block* block) {
     call_return_pc.reset();
     compound_logical_clear_pending = false;
     compound_logical_zero_pending = false;
+    guest_state_map.Analyze(block, context.GetFeatures());
     // Function mode keeps one function-sized suppression bitmap. Grow it
     // before the per-block backedge proof marks the two sunk IR instructions.
     disable_instructions.resize(
