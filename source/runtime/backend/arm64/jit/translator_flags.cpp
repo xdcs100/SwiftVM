@@ -260,7 +260,8 @@ void JitTranslator::MergeNZCV() {
 }
 
 void JitTranslator::EmitNZCVMerge(u64 requested,
-                                  const Register& scratch) {
+                                  const Register& scratch,
+                                  const Register* mask_scratch) {
     const u64 nzcv = static_cast<u64>(HostFlags::NZCV);
     ASSERT(requested && !(requested & ~nzcv));
     const u32 lsb = std::countr_zero(requested);
@@ -275,9 +276,20 @@ void JitTranslator::EmitNZCVMerge(u64 requested,
 
     u64 keep = ~requested;
     __ Mrs(scratch, NZCV);
-    __ And(flags, flags, ForceCast<s64>(keep));
+    if (mask_scratch) {
+        ASSERT(*mask_scratch != scratch);
+        __ Mov(*mask_scratch, keep);
+        __ And(flags, flags, *mask_scratch);
+    } else {
+        __ And(flags, flags, ForceCast<s64>(keep));
+    }
     if (requested != nzcv) {
-        __ And(scratch, scratch, static_cast<u32>(requested));
+        if (mask_scratch) {
+            __ Mov(*mask_scratch, requested);
+            __ And(scratch, scratch, *mask_scratch);
+        } else {
+            __ And(scratch, scratch, static_cast<u32>(requested));
+        }
     }
     __ Orr(flags, flags, scratch);
 }
@@ -429,7 +441,13 @@ DirectLinkFlagsBypass JitTranslator::MergeNZCV(
                 flags_bypass = EmitOutlinedNZCVMerge();
             }
         } else {
-            EmitNZCVMerge(req, context.GetSharedTmpX());
+            const auto scratch = context.GetSharedTmpX();
+            if (context.ColdScratchActive()) {
+                const Register mask_scratch = scratch == ip0 ? ip1 : ip0;
+                EmitNZCVMerge(req, scratch, &mask_scratch);
+            } else {
+                EmitNZCVMerge(req, scratch);
+            }
         }
         const u32 merge_end = context.CurrentBufferSize();
         if (!deferred_merge && FlagsRegsEnabled() && region_edges_active &&

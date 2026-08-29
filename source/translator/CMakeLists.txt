@@ -5,6 +5,8 @@ add_library(swift_translator STATIC
         arm64/translator.cpp
         arm64/translator.h
         x86/cpu.h
+        x86/function_decode_frontier.cpp
+        x86/function_decode_frontier.h
         x86/translator.cpp
         x86/translator.h
         )

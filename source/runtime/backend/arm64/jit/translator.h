@@ -580,7 +580,8 @@ private:
     PendingNZCVMergeMask(FlagsRegsAuditMergeCause cause) const;
     [[nodiscard]] bool
     CanDeferFullNZCVMerge(FlagsRegsAuditMergeCause cause) const;
-    void EmitNZCVMerge(u64 requested, const Register& scratch);
+    void EmitNZCVMerge(u64 requested, const Register& scratch,
+                       const Register* mask_scratch = nullptr);
     void PublishFlagsToken();
 
     // Restore host NZCV from the flags register (uses the emission's shared scratch).

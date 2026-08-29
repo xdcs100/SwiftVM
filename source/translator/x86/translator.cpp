@@ -43,6 +43,7 @@
 #include "runtime/common/perf_stats.h"
 #include "runtime/frontend/x86/decoder.h"
 #include "runtime/include/sruntime.h"
+#include "function_decode_frontier.h"
 #include "translator.h"
 #include "translator/function_stats.h"
 
@@ -671,6 +672,7 @@ struct X86Instance::Impl final {
             PerfScope2 perf_ir_setup{GetPerfStats2().ir_setup};
             ir::HIRBuilder builder{1, true, features};
             auto* hir_func = builder.AppendFunction(pc);
+            FunctionDecodeFrontier decode_frontier{hir_func};
             perf_ir_setup.Stop();
 
             // The current linear-scan allocator is intentionally conservative
@@ -706,7 +708,76 @@ struct X86Instance::Impl final {
             size_t decoded_count = 0;
             bool hit_block_cap = false;
             PerfScope perf_decode{GetPerfStats().decode_ns};
+            auto local_target = [&](LocationDescriptor addr) {
+                return !lazy ||
+                       (IsLocalFunctionTarget(pc, addr) &&
+                        (addr == pc || !IsEndbr64Boundary(addr)));
+            };
+            auto nearest_entry = [&](LocationDescriptor addr, VAddr upper) {
+                LocationDescriptor stop{};
+                for (auto& candidate : hir_func->GetHIRBlockList()) {
+                    const auto location = candidate.GetBlock()
+                                                  ->GetStartLocation()
+                                                  .Value();
+                    if (location > addr && location < upper &&
+                        (stop == 0 || location < stop)) {
+                        stop = location;
+                    }
+                }
+                return stop;
+            };
+            auto decode = [&](LocationDescriptor addr, ir::HIRBlock* block,
+                              LocationDescriptor stop) {
+                builder.SetCurBlock(block);
+                ir::Assembler assembler{&builder};
+                x86::X64Decoder decoder{
+                        addr,
+                        &memory_impl,
+                        &assembler,
+                        true,
+                        address_space->GetConfig().arm64_features,
+                        address_space->GetConfig().sse_afp_nan,
+                        !address_space->GetConfig().memory_base &&
+                                !address_space->GetConfig().page_table,
+                        features,
+                        stop};
+                decoder.Decode();
+            };
             while (decoded_count < decode_cap) {
+                bool replayed_split = false;
+                for (auto& candidate : hir_func->GetHIRBlockList()) {
+                    auto* block = candidate.GetBlock();
+                    if (!block->GetInstList().empty() || block->HasTerminal()) {
+                        continue;
+                    }
+                    const auto target = block->GetStartLocation().Value();
+                    if (!local_target(target)) {
+                        continue;
+                    }
+                    auto split = decode_frontier.FindSplit(target);
+                    if (!split) {
+                        continue;
+                    }
+                    auto* owner = split->owner;
+                    const auto owner_start =
+                            owner->GetBlock()->GetStartLocation().Value();
+                    if (!builder.ResetDecodedBlock(owner)) {
+                        decode_frontier.Reject(target);
+                        replayed_split = true;
+                        break;
+                    }
+                    decode(owner_start, owner, target);
+                    if (FunctionDecodeFrontier::DecodedEnd(owner->GetBlock()) == target) {
+                        decode_frontier.Accept(target);
+                    } else {
+                        decode_frontier.Reject(target);
+                    }
+                    replayed_split = true;
+                    break;
+                }
+                if (replayed_split) {
+                    continue;
+                }
                 std::vector<LocationDescriptor> to_decode;
                 for (auto& hb : hir_func->GetHIRBlockList()) {
                     auto* blk = hb.GetBlock();
@@ -723,14 +794,12 @@ struct X86Instance::Impl final {
                         // to the existing code.  Without this, region growth
                         // duplicates work: at budget 4 on func_tests it compiled
                         // 1628 blocks where only 1147 are ever executed.
-                        if (lazy && address_space->GetCodeCache(addr)) {
+                        if (lazy && !decode_frontier.IsAccepted(addr) &&
+                            address_space->GetCodeCache(addr)) {
                             continue;
                         }
                         // Split cold sections stay external and compile through the lazy edge.
-                        if (lazy && !IsLocalFunctionTarget(pc, addr)) {
-                            continue;
-                        }
-                        if (lazy && addr != pc && IsEndbr64Boundary(addr)) {
+                        if (!local_target(addr)) {
                             continue;
                         }
                         to_decode.push_back(addr);
@@ -744,49 +813,15 @@ struct X86Instance::Impl final {
                         hit_block_cap = true;
                         break;
                     }
-                    auto nearest_entry = [&](VAddr upper) {
-                        LocationDescriptor stop{};
-                        for (auto& candidate : hir_func->GetHIRBlockList()) {
-                            const auto location = candidate.GetBlock()
-                                                          ->GetStartLocation()
-                                                          .Value();
-                            if (location > addr && location < upper &&
-                                (stop == 0 || location < stop)) {
-                                stop = location;
-                            }
-                        }
-                        return stop;
-                    };
-                    auto decode = [&](LocationDescriptor stop) {
-                        ir::Assembler assembler{&builder};
-                        x86::X64Decoder decoder{
-                                addr,
-                                &memory_impl,
-                                &assembler,
-                                true,
-                                address_space->GetConfig().arm64_features,
-                                address_space->GetConfig().sse_afp_nan,
-                                !address_space->GetConfig().memory_base &&
-                                        !address_space->GetConfig().page_table,
-                                features,
-                                stop};
-                        decoder.Decode();
-                    };
                     auto* decoded_block = hir_func->CreateOrGetBlock(addr);
-                    builder.SetCurBlock(decoded_block);
                     PerfScope2 perf_decode_detail{GetPerfStats2().decode_total};
-                    decode(nearest_entry(UINT64_MAX));
-                    u64 decoded_bytes{};
-                    for (auto& inst : decoded_block->GetInstList()) {
-                        if (inst.GetOp() == ir::OpCode::AdvancePC) {
-                            decoded_bytes += inst.GetArg<ir::Imm>(0).Get();
-                        }
-                    }
-                    const auto end = addr + decoded_bytes;
-                    if (const auto late_entry = nearest_entry(end);
+                    decode(addr, decoded_block, nearest_entry(addr, UINT64_MAX));
+                    const auto end =
+                            FunctionDecodeFrontier::DecodedEnd(decoded_block->GetBlock());
+                    if (const auto late_entry = nearest_entry(addr, end);
                         late_entry != 0 &&
                         builder.ResetDecodedBlock(decoded_block)) {
-                        decode(late_entry);
+                        decode(addr, decoded_block, late_entry);
                     }
                     ++decoded_count;
                 }
