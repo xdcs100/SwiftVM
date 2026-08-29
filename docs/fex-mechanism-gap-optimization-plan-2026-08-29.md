@@ -1069,3 +1069,29 @@ SQLite 两侧均为 2,114 roots / 354,915 条，100% root/top-20 覆盖且正常
 新的跨 CFG consumer，因此本阶段只声明机制覆盖和零回退，不声明宏观缩小。没有运行压力测试或长
 基准，也没有保留 env 开关、probe、日志、临时源路径或兼容兜底。第 7 节剩余项收窄为
 `KnownZeroAbove(8/16)`、`KnownSignExtended(8/16/32)` 和 memory/XMM consumer 的实际接入。
+
+### 16.25 zero/sign extension facts 与生产 consumer
+
+提交 `f4ca978` 用首类 `ExtensionFacts` 替换 `known_zero_above_32` 布尔量，不保留两套宽度机制。
+每个 resident value 和 CFG entry 现在可表达 `KnownZeroAbove(8/16/32)`，以及
+`KnownSignExtended(from,to)`；32/64 位 publication、窄 partial write、helper clobber、external root、
+diamond 和 backedge 都消费同一 transfer/meet 规则。不同 predecessor 的 zero facts 取共同较弱宽度，
+sign facts 取共同较大 source width 与较小 destination width，无法共同证明时退回 Unknown。
+
+`SetHostGPR` 发布链会沿 `ZeroExtend32To64`、`ZeroExtend32` 和 `SignExtend` 记录低位 SSA alias。
+后续 U8/U16 `ZeroExtend32` 或 `SignExtend` 只有在同一 home 仍承载该版本且扩展范围匹配时，才把
+`uxtb/uxth/sxtb/sxth` 收敛为 resident-home move；target overwrite、fault clobber 和 helper clobber
+都会撤销该事实。扩展 consumer 暂不参与 definition-level `GetHostGPR` 删除计数，因为旧
+`fused_pin_zext32` 仍可能先于新 consumer 合同返回。曾经允许它参与的中间版本在 smallpt/SQLite
+第 84 个 root 后因未物化原结果寄存器提前退出；该路径已删除，最终 Release 两个语料均正常完成。
+
+Mac Debug 的 pinned 分组通过 120 条断言 / 33 个 case，覆盖 U8 zero extension、S8 sign extension、
+overwrite、external root、diamond 和 backedge；fault-snapshot、SelectZero、helper 和 region-flags
+分组分别通过 56、4、86 和 60 条断言。Release 以 `911c57e` 为同源基线，smallpt 保持 275 roots、
+100% root/top-20 覆盖和 canonical PPM，`49,107 -> 49,095`（`-12`，`-0.024436%`）；SQLite 保持
+2,114 roots 和 100% root/top-20 覆盖，`354,915 -> 354,800`（`-115`，`-0.032402%`），无增长 root。
+
+一次同机 profile 的 codegen 为 312.1 ms 与 316.9 ms，TOTAL 为 1.486 s 与 1.485 s；只作为没有
+明显 wall-time 回退的一致性检查，不声明性能结论。没有运行压力测试或长基准，也没有保留 env
+开关、probe、日志、临时源路径或兼容兜底。第 7 节下一步只扩展到能由同一事实格证明的 narrow
+memory/compare consumer 和 XMM scalar lane，不再增加 producer 形态白名单。

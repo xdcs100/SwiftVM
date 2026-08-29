@@ -3602,6 +3602,21 @@ peepholes.
   switch, probe, diagnostic path, temporary source/build path or fallback remains. Next add 8/16-bit
   zero/sign-extension facts and let memory/compare consumers use the joined lattice.
 
+- `f4ca978` replaces the old high-32 boolean with one `ExtensionFacts` lattice carrying
+  `KnownZeroAbove(8/16/32)` and bounded sign-extension ranges. Publications preserve nested
+  ZeroExtend/SignExtend aliases; partial writes, helper clobbers, external roots, diamonds and
+  backedges transfer or meet the same facts. Repeated U8/U16 zero/sign extensions may consume the
+  resident home only when its version and full extension range still match. Extension consumers do
+  not yet participate in definition-level GetHost elimination: an intermediate version combined
+  that with the older fused-zext early return and left a result register unmaterialized, causing both
+  short workloads to stop after 84 roots; the rejected path is fully removed. Mac Debug passes 120
+  pinned, 56 fault-snapshot, 4 SelectZero, 86 helper and 60 region-flags assertions. Exact Release A/B
+  against `911c57e` keeps all roots/top-20 with no growth: smallpt `49,107 -> 49,095` (`-12`) plus
+  canonical PPM, and SQLite `354,915 -> 354,800` (`-115`) with rc=0. One profile pair is effectively
+  flat in TOTAL (`1.486s -> 1.485s`); no long run is used as evidence. No env switch, probe, log,
+  temporary source/build path or fallback remains. Next route narrow memory/compare and XMM scalar
+  consumers through this lattice instead of adding more producer matchers.
+
 ## Orb loop
 
 ```
