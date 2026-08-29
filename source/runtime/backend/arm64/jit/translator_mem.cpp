@@ -1304,6 +1304,14 @@ void JitTranslator::EmitGetHostFPR(ir::Inst* inst) {
 }
 
 void JitTranslator::EmitSetHostGPR(ir::Inst* inst) {
+    if (auto direct = pinned_select_publications.find(inst);
+        direct != pinned_select_publications.end()) {
+        const auto reproved = MatchPinnedSelectPublication(inst);
+        ASSERT_MSG(reproved && *reproved == direct->second,
+                   "pinned SelectZero publication proof diverged at IR {}",
+                   inst->Id());
+        return;
+    }
     if (auto view = pinned_gpr_publication_views.find(inst);
         view != pinned_gpr_publication_views.end()) {
         const auto reproved = MatchPinnedGPRPublicationView(inst);

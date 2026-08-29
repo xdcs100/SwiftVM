@@ -132,10 +132,24 @@ void JitTranslator::EmitSelectZero(ir::Inst* inst) {
     auto test = inst->GetArg<ir::Value>(0);
     auto zero_value = inst->GetArg<ir::Value>(1);
     auto nonzero_value = inst->GetArg<ir::Value>(2);
-    auto result = context.R(ir::Value{inst});
+    auto direct = pinned_select_results.find(inst);
+    if (direct != pinned_select_results.end()) {
+        const auto reproved = MatchPinnedSelectPublication(
+                direct->second.publication);
+        ASSERT_MSG(reproved && *reproved == direct->second,
+                   "pinned SelectZero publication proof diverged at IR {}",
+                   inst->Id());
+    }
+    Register result = direct == pinned_select_results.end()
+            ? context.R(ir::Value{inst})
+            : Register{WRegister{direct->second.target}};
+    auto resolve = [&](ir::Value value) -> Register {
+        return result.Is64Bits() ? Register{context.X(value)}
+                                 : Register{context.W(value)};
+    };
     MergeNZCV();
     __ Cmp(context.R(test), 0);
-    __ Csel(result, context.R(zero_value), context.R(nonzero_value), eq);
+    __ Csel(result, resolve(zero_value), resolve(nonzero_value), eq);
 }
 
 #undef __

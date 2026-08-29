@@ -3334,6 +3334,22 @@ peepholes.
   Mac/Orb focused tests cover the positive view and target-home overwrite rejection. No new env
   switch, diagnostic path, fallback, probe or stress run remains.
 
+- Zero-extended SelectZero results can now publish their low 32 bits directly to a pinned W home.
+  A dedicated post-RA planner keeps the original IR/RA graph and proves the complete extension and
+  low-alias use sets, the producer-to-publication fault/observer boundary, target-home lifetime and
+  caller-saved helper preservation. When the proof holds, `EmitSelectZero` writes `CSEL` directly to
+  the pinned W register and the extension/publication emit no instructions. Repeated SQLite
+  candidates are shape-identical; after excluding two known baseline-optional variants above 20
+  instructions, 32 stable common roots shrink by 99 instructions with no growth.
+  `pcache1TruncateUnsafe@0x412f50` moves `188 -> 182` versus FEX at 141, and timing-normalized output
+  is byte-identical. The optional roots prevent an honest formal 99.9% join claim. Smallpt keeps all
+  267 roots and moves `37,126 -> 37,125` with the same PPM SHA-256. CoreMark keeps 299 stable roots,
+  moves the common set `37,146 -> 37,145`, and repeats `crcfinal=0x382f`. Mac/Orb pinned tests pass
+  101 assertions across 27 cases, and Mac/Orb x86 div/idiv fuzz passes. Hot/cold tail deferral and
+  generic zero-constant SSA deletion both caused reproducible SQLite heap corruption and were fully
+  removed; the former requires an explicit serializable cold-stub contract and the latter changes
+  RA/fixed-home lifetime. No probe, env switch, debug path, fallback or stress run remains.
+
 ## Orb loop
 
 ```

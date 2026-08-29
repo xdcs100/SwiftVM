@@ -515,3 +515,38 @@ view，root 从 164 降到 161，相对 FEX 120 条的残差降到 41 条。短�
 
 该阶段没有新增环境开关、诊断日志、临时 probe 或运行时兜底。后续宽度事实仍按 value version 和
 观察边界扩展，不把 fixed-home view 变成全局寄存器别名。
+
+### 16.6 SelectZero 结果的 pinned 低位直接发布
+
+`Div -> MulSub -> SelectZero -> ZeroExtend32To64 -> SetHostGPR` 一类链路中，寄存器分配仍把
+`SelectZero` 结果放入普通临时寄存器，随后再 move 到 pinned GPR。这里真正需要发布的是选择结果的
+低 32 位，而不是重新构造一个 guest value version。
+
+本阶段新增独立的分配后 publication planner。它只接受零偏移、非 dead、未由 RA 合并的 pinned
+`SetHostGPR`，并要求来源精确为 `ZeroExtend32To64(SelectZero(...))`。planner 保留原有 IR 和 RA
+生命周期，枚举 extension 以及 publication 之后零偏移 U32 alias 的完整 ordinary use set；producer
+到 publication 之间存在 fault、helper、架构观察或目标 home 覆盖时拒绝，publication 到最后一个
+映射 use 之间存在目标覆盖，或 caller-saved home 跨 helper 时同样拒绝。证明成立后，`EmitSelectZero`
+直接向目标 W home 发出 `CSEL`，extension 和 `SetHostGPR` 不再生成指令，后续已证明的低位 consumer
+复用同一 W home。emitter 会重新执行 matcher 并校验计划，避免准备阶段和发射阶段的事实漂移。
+
+短门禁结果：
+
+- SQLite 候选重复两次均正常退出，保持 2,239 roots，shape 完全一致；与 fresh HEAD 的稳定公共集合
+  比较，32 个 root 共减少 99 条，0 个增长。`pcache1TruncateUnsafe@0x412f50` 从 188 降到 182，
+  相对 FEX 141 条的残差降到 41 条。时间归一化输出逐字节一致，SHA-256 为
+  `3f68fab47764cf6ac36bf315944cb6746d318e0b665f7cbc1317b2a262c6de06`。
+- SQLite 的 `0x413270`、`0x48aa47`、`0x505da0` 会在同一 baseline 机制下形成不同的可选 root；
+  因此本阶段不宣称 formal 99.9% join 通过，只报告重复候选稳定且排除两个大于 20 条的已知可选
+  variant 后的成对公共集合。该波动不是候选新增的 code growth。
+- smallpt `4 8 6` 保持全部 267 个 root，`37,126 -> 37,125`，无增长；PPM SHA-256 保持
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`。
+- CoreMark 显式 20k 两次均保持 `crcfinal=0x382f` 和 299 个稳定 root；共同 root
+  `37,146 -> 37,145`，无增长。基线中另有一个 10 条的运行时可选 root，不计入机制收益。
+- Mac/Orb 的 pinned 定向测试均通过 101 条断言、27 个 case，新增边界覆盖直接 W-home 发布、
+  目标覆盖拒绝和 publication 前 fault 拒绝；Mac/Orb 的 x86 `div/idiv` fuzz 同时通过。
+
+热冷 block-tail 延迟发射和通用零常量 SSA 删除两个原型都触发了可重复的 SQLite heap corruption，
+已完整删除。前者需要先定义可序列化的 cold-stub 编译状态 contract，后者会改变 RA/fixed-home
+生命周期；在对应机制建立前不再按局部 peephole 重试。交付中没有保留 probe、环境开关、调试路径
+或兼容兜底。
