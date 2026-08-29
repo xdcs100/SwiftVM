@@ -24,7 +24,10 @@ FunctionDecodeFrontier::DiscoverExternalRoots(u32 minimum_sources) {
     }
     std::vector<runtime::LocationDescriptor> roots;
     for (const auto& [target, count] : sources) {
-        if (count >= minimum_sources && FindExternalSplit(target)) {
+        if (count < minimum_sources) {
+            continue;
+        }
+        if (FindExternalSplit(target)) {
             roots.push_back(target);
         }
     }
@@ -99,12 +102,6 @@ std::optional<FunctionDecodeFrontier::Split> FunctionDecodeFrontier::FindSplit(
     }
 
     capture_owner(owner);
-    if (record.provenance.call_return_owned) {
-        record.provenance.disposition = runtime::ir::FunctionEntryDisposition::Rejected;
-        record.provenance.rejection = Rejection::CallReturnOwnership;
-        records.emplace(target, std::move(record));
-        return std::nullopt;
-    }
 
     auto [it, inserted] = records.emplace(target, std::move(record));
     (void)inserted;

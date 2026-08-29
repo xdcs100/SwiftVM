@@ -16,7 +16,6 @@ enum class FunctionEntryRejection : u8 {
     None,
     NoOwner,
     AmbiguousOwner,
-    CallReturnOwnership,
     OwnerResetFailed,
     BoundaryMismatch,
 };

@@ -288,10 +288,16 @@ void ReleaseTerminalUses(const Terminal& terminal) {
 
 bool HIRFunction::ResetDecodedBlock(HIRBlock* hir_block) {
     ASSERT(hir_block && hir_block->function == this);
-    // RegisterCallReturn also marks the target block. Replaying only the source
-    // would leave that ownership stale.
     if (hir_block->call_return_block) {
-        return false;
+        auto* return_block = hir_block->call_return_block;
+        for (auto& candidate : block_list) {
+            if (&candidate != hir_block &&
+                candidate.call_return_block == return_block) {
+                return false;
+            }
+        }
+        return_block->call_return_target = false;
+        hir_block->call_return_block = nullptr;
     }
 
     std::erase_if(external_direct_links,

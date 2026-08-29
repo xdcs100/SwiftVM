@@ -48,26 +48,41 @@ TEST_CASE("function decode frontier preserves split provenance",
                     {Location{kStart + 1}, Location{kTarget}}});
 }
 
-TEST_CASE("function decode frontier records stable rejection reasons",
+TEST_CASE("function decode frontier transfers call return ownership",
           "[function-entry][frontier]") {
     constexpr LocationDescriptor kStart = 0x2000;
-    constexpr LocationDescriptor kReturn = kStart + 4;
+    constexpr LocationDescriptor kSplit = kStart + 4;
     constexpr LocationDescriptor kEnd = kStart + 8;
+    constexpr LocationDescriptor kReturn = kEnd + 4;
 
     HIRBuilder builder{4, true, false, FeatureSet{}};
     auto* function = builder.AppendFunction(Location{kStart});
+    auto* owner = function->GetCurrentBlock();
     builder.AdvancePC(Imm{kEnd - kStart});
     builder.RegisterCallReturn(Location{kReturn});
+    auto* return_block = function->CreateOrGetBlock(Location{kReturn});
+    REQUIRE(return_block->IsCallReturnBlock());
 
     FunctionDecodeFrontier frontier{function};
-    REQUIRE_FALSE(frontier.FindSplit(kReturn));
-    const auto* call_return = frontier.FindProvenance(kReturn);
-    REQUIRE(call_return != nullptr);
-    REQUIRE(call_return->rejection ==
-            FunctionEntryRejection::CallReturnOwnership);
-    REQUIRE_FALSE(frontier.FindSplit(kReturn));
+    const auto split = frontier.FindExternalSplit(kSplit);
+    REQUIRE(split);
+    REQUIRE(split->provenance->call_return_owned);
+    REQUIRE(builder.ResetDecodedBlock(owner));
+    REQUIRE(owner->GetCallReturnBlock() == nullptr);
+    REQUIRE_FALSE(return_block->IsCallReturnBlock());
 
-    constexpr LocationDescriptor kMissing = kEnd + 4;
+    builder.AdvancePC(Imm{kSplit - kStart});
+    builder.ExternalLinkBlock(
+            terminal::ExternalLinkBlock{Location{kSplit}});
+    auto* root = function->CreateOrGetBlock(Location{kSplit});
+    builder.SetCurBlock(root);
+    builder.AdvancePC(Imm{kEnd - kSplit});
+    builder.RegisterCallReturn(Location{kReturn});
+    REQUIRE(root->GetCallReturnBlock() == return_block);
+    REQUIRE(return_block->IsCallReturnBlock());
+    frontier.Accept(kSplit);
+
+    constexpr LocationDescriptor kMissing = kReturn + 4;
     REQUIRE_FALSE(frontier.FindSplit(kMissing));
     const auto* missing = frontier.FindProvenance(kMissing);
     REQUIRE(missing != nullptr);
