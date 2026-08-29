@@ -1005,6 +1005,17 @@ void JitTranslator::EmitMul(ir::Inst* inst) {
     }
 }
 
+void JitTranslator::EmitMulSub(ir::Inst* inst) {
+    const auto left = inst->GetArg<ir::Value>(0);
+    const auto right = inst->GetArg<ir::Value>(1);
+    const auto accumulator = inst->GetArg<ir::Value>(2);
+    ASSERT(left.Type() == right.Type() && left.Type() == accumulator.Type());
+    __ Msub(context.R(ir::Value{inst}),
+            context.R(left),
+            context.R(right),
+            context.R(accumulator));
+}
+
 void JitTranslator::EmitCondSelect(ir::Inst* inst) {
     auto cond = inst->GetArg<ir::Cond>(0);
     auto true_value = inst->GetArg<ir::Value>(1);

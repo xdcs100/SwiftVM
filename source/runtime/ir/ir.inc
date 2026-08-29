@@ -85,6 +85,7 @@ INST(Adc, Value, Value, Operand)
 INST(Sbb, Value, Value, Operand)
 // Mul & Div
 INST(Mul, Value, Value, Operand)
+INST(MulSub, Value, Value, Value, Value)
 INST(Div, Value, Value, Operand)
 INST(SignedDiv64, U64, Value, Value)
 INST(Div128, U64, Value, Value, Value, Imm)

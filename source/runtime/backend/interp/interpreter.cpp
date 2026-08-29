@@ -506,6 +506,13 @@ void Interpreter::RunMul(ir::Inst* inst, InterpStack& stack) {
     WriteScalar(stack, inst, l * r);
 }
 
+void Interpreter::RunMulSub(ir::Inst* inst, InterpStack& stack) {
+    const u64 left = ReadScalar(stack, inst->GetArg<ir::Value>(0));
+    const u64 right = ReadScalar(stack, inst->GetArg<ir::Value>(1));
+    const u64 accumulator = ReadScalar(stack, inst->GetArg<ir::Value>(2));
+    WriteScalar(stack, inst, accumulator - left * right);
+}
+
 void Interpreter::RunDiv(ir::Inst* inst, InterpStack& stack) {
     const auto left = inst->GetArg<ir::Value>(0);
     const auto type = left.Type();

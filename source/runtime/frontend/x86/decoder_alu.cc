@@ -52,12 +52,12 @@ static DivResult Divide64(ir::Assembler* assembler,
     auto quotient = sign
             ? assembler->SignedDiv64(numerator, denominator)
             : assembler->Div(numerator, ir::Operand{denominator});
-    auto product = assembler->Mul(quotient, ir::Operand{denominator});
-    auto remainder = assembler->Sub(numerator, ir::Operand{product});
+    auto remainder = assembler->MulSub(quotient, denominator, numerator)
+                             .SetType(ir::ValueType::U64);
     remainder = assembler
-                        ->Select(assembler->TestNotZero(denominator),
-                                 remainder,
-                                 assembler->LoadImm(ir::Imm(u64(0))))
+                        ->SelectZero(denominator,
+                                     assembler->LoadImm(ir::Imm(u64(0))),
+                                     remainder)
                         .SetType(ir::ValueType::U64);
     return {quotient, remainder};
 }

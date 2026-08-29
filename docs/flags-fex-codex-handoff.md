@@ -3220,6 +3220,18 @@ peepholes.
   retains `crcfinal=0x382f`. Mac and Orb pass the BMI-enabled 27-assertion width/encoding matrix.
   No stress run, diagnostic path or environment switch remains.
 
+- Narrow DIV/IDIV remainder construction now maps directly to the host instruction shape. The
+  zero-denominator guard selects on the denominator itself through `SelectZero`, and the quotient
+  remainder expression uses a shared `MulSub` IR operation lowered to AArch64 `MSUB` instead of
+  separate multiply and subtract instructions. The same-input SQLite diff retains all 2,164 roots,
+  has 100% host and entry coverage, and moves `269,235 -> 269,006` (`-229`, `-0.085056%`) with no
+  growth. `pcache1TruncateUnsafe` moves `199 -> 190` versus FEX at 141, and its emitted root contains
+  the expected three `MSUB` instructions. The `SelectZero` part accounts for 154 instructions and
+  `MulSub` removes another 75. Two final SQLite shapes are byte-identical and their timing-normalized
+  output matches both each other and the baseline. Bounded smallpt moves `37,920 -> 37,917` with the
+  same PPM SHA; CoreMark moves `37,908 -> 37,904` and retains `crcfinal=0x382f`. Mac and Orb pass the
+  fixed-seed 256-iteration DIV/IDIV differential. No dedicated probe or debug switch was added.
+
 ## Orb loop
 
 ```
