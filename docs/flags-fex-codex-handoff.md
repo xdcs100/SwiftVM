@@ -3388,6 +3388,24 @@ peepholes.
   run remains. Next unify static/indirect/return/direct-link continuation publication and common
   cold tails before any trace scheduling.
 
+- `0fb3113` adds a first-class ARM64 `ContinuationContract` for the `{x14 guest return, x30 host
+  continuation}` frame and region traversal tags. Resolved static calls still enter the call entry;
+  unresolved static calls publish the source continuation in the region trampoline before dispatcher
+  traversal. Indirect-call key misses and invalidated target faults use per-site cold continuation
+  preparation followed by a register-shared publisher; ordinary and pending-flags misses publish the
+  frame before L1 fallback or flags/current-location recovery. Pre-call lookup guard faults retain the
+  existing signal recovery and do not create a phantom call frame. A production test covers static and
+  indirect `CodeMiss -> later target compilation -> guest return` and proves that x25 persists across
+  the host round trip, returns to the original source continuation and becomes empty afterward. Mac
+  passes 57 continuation, 785 production direct-link, 706 non-stress SMC, 33 indirect-L1, 5 guarded-RSB
+  and 3 cold-layout assertions. Fresh `73082f5`/`0fb3113` smallpt `4 8 6` keeps 279 roots and the
+  canonical PPM SHA; 17 call-miss cold roots add 50 instructions (`49,498 -> 49,548`) while 262 roots
+  and the indirect-call hot-hit emitter remain unchanged. The single paired elapsed values
+  `3.437s -> 3.464s` are consistency only. Orb SSH still closes immediately. No probe, debug path,
+  runtime env switch, temporary source path or compatibility fallback remains. The next continuation
+  step is generation-aware unlink/invalidation; P0 external return entries can later remove the
+  per-call-site cold continuation materialization.
+
 ## Orb loop
 
 ```

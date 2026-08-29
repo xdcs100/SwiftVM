@@ -636,3 +636,36 @@ target 位于后续 hot block 之后。
 该阶段没有新增环境开关、诊断日志、运行时探针、临时路径或兼容兜底。下一步统一 static call、
 indirect call、return 和 direct link 的 continuation publication contract 与公共 cold tail；在这一合同
 完成前不进行任意 trace scheduling。
+
+### 16.10 call miss continuation publication contract
+
+提交 `0fb3113` 引入 ARM64 `ContinuationContract`，把 `{x14 guest return, x30 host continuation}`
+frame、push/pop 和 region traversal tag 收进同一 ABI。普通 call entry、pending-flags call entry 和 return
+consume 不再各自手写 frame 操作。region linker 对已解析 call 仍进入 call entry；未解析、retiring、far
+失败或 generation 失配的 call 使用 `CallMiss` traversal，trampoline 在进入 dispatcher 前只发布一次
+原 site continuation。
+
+indirect-call L1 的热命中序列保持不变。每个 call site 只在函数 cold 区生成 continuation 准备入口，
+miss 或失效 target fault 在那里物化该 site 的 BLR 后继地址，再进入按 location register 共享的 publisher。
+ordinary 和 pending-flags miss 都先发布 frame，再分别执行规范 L1 fallback 或 flags merge/current-location
+publication。lookup guard fault 发生在 guest call 提交前，继续走既有 signal/terminal recovery，不错误压入
+未发生的调用；return mismatch 仍重置栈并走普通 indirect fallback，也不会被当成 call miss。
+
+短门禁结果：
+
+- 新增生产测试让 static 和 indirect call 都先命中真实 `CodeMiss`，验证 frame 跨 host 往返保留；目标随后
+  编译后从 canonical entry 执行 guest return，均回到原 source continuation 并把 RSB 恢复为空。失效
+  indirect-call target 的 host exit 现在明确保留尚未 guest-ret 的 frame。
+- Mac 的 `[continuation]`、`[direct-link][production]`、非压力 `[smc]` 和 `[indirect-l1]` 分组分别
+  通过 57、785、706 和 33 条断言；guarded return stack 与 cold-path layout 通过 5 和 3 条断言。
+- fresh `73082f5` 与 `0fb3113` 的 smallpt `4 8 6` static-only 配对均为 279 roots，PPM SHA-256 均为
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`。精确 host continuation 使
+  17 个含 call-miss 冷入口的 root 共增加 50 条静态指令，`49,498 -> 49,548`；其余 262 个 root 不变，
+  indirect-call 热命中 emitter 没有新增指令。单次 wall-time 为 `3.437s -> 3.464s`，只作一致性检查，
+  不作为性能结论。
+- Orb SSH 仍由 `198.18.0.190:22` 立即关闭，本阶段未宣称远端门禁通过。
+
+该阶段没有新增环境开关、诊断日志、运行时 probe、临时源路径或兼容兜底。静态冷区增长来自当前
+return PC 只能使用代码对象内部入口；P0 external veneer/多入口 ABI 完成后，可让冷 miss 使用可失效的
+外部 return entry，届时再收回逐 call-site continuation 准备入口。continuation 剩余工作是把 generation
+与 unlink/invalidation 纳入同一首类 contract，而不是继续扩展 traversal tag。
