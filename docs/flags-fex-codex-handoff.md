@@ -3512,6 +3512,19 @@ peepholes.
   benefit evidence. No new env switch, probe, diagnostic path or fallback remains. Next require a
   shared `{mask, polarity, version}` veneer before extending mixed joins beyond canonical fallthrough.
 
+- `81405ec` introduces a block-local ARM64 `GuestStateMap` as the first snapshot-aware guest-state
+  layer. It centralizes fixed-home survival, helper clobber and fault/observation window queries for
+  full-width transfer, publication-view and SelectZero planners; the old per-planner scans are
+  removed, and the existing `MayFaultOrObserve` users delegate to the same classification. A
+  zero-offset U8/U16/U32 publication view may now serve multiple audited same-width Add/Sub/Select
+  consumers when every ordinary use is accounted for and the fixed home survives to the last use.
+  Mac Debug passes the 3-assertion multi-use case, 5 fault/overwrite assertions, 104 pinned and 37
+  published assertions. Exact Release A/B remains identical at 279 roots / 49,265 instructions plus
+  canonical PPM for smallpt and 2,188 roots / 356,545 instructions for SQLite main/size1. This stage
+  does not claim benchmark shrinkage or the complete section-7 dataflow: guest-slot versions, width
+  facts, fault snapshots, CFG joins and memory/XMM consumers remain. No stress run, long benchmark,
+  env switch, probe, diagnostic path, temporary source path or fallback remains.
+
 ## Orb loop
 
 ```

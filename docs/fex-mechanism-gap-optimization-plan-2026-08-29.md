@@ -905,3 +905,29 @@ Debug smallpt `4 8 6` 保持 279 roots / 49,265 条与 canonical PPM SHA-256。D
 
 EdgeFlags 下一步不再是补极性枚举，而是让无 canonical fallthrough 的多前驱 join 共享按
 `{mask, polarity, version}` 区分的 canonicalizing veneer；只有 veneer 成本被多条边摊薄且总静态代码不增长时才晋级。
+
+### 16.19 pinned GuestStateMap 生命周期基础层
+
+提交 `81405ec` 新增独立的 ARM64 `GuestStateMap`，把 pinned GPR planner 原先各自扫描
+`SetHostGPR`、helper clobber 和 fault/observation 窗口的逻辑收敛为同一个 block 分析对象。
+full-width value transfer、publication low view 和 SelectZero publication 现在分别消费
+`FixedHomeSurvives` 与 `PublicationWindowSafe`；`MayFaultOrObserve` 也由该对象提供唯一分类，
+region 与其他既有 consumer 继续调用同一入口，不保留旧扫描作为兜底。
+
+publication low view 同时从单 consumer 扩展为完整 use 集可审核的多 consumer。零偏移
+U8/U16/U32 `BitExtract` 的每个普通 use 都必须恰好一次进入同宽 `Add`、`Sub` 或 `Select`，
+目标 fixed home 必须存活到最后一个 use；任何额外 use、覆盖或 caller-saved helper clobber
+都会拒绝整条计划。生产定向用例验证一个已发布低 32 位视图同时服务 `Sub` 和 `Add`，且不生成
+`lsr W,#0`。
+
+Mac Debug 通过 multi-use 3 条断言、fault/overwrite 边界 5 条、pinned 分组 104 条和
+published 分组 37 条断言。Release 同源 A/B 的 smallpt `4 8 6` 两侧均为 279 roots /
+49,265 条 host 指令，PPM SHA-256 保持
+`a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`；SQLite
+`--size 1 --testset main :memory:` 两侧均为 2,188 roots / 356,545 条且正常完成。本阶段建立
+统一生命周期与观察边界，不宣称这两个短 workload 已产生净代码量收益。
+
+该对象当前仍是 block-local 的 pinned fixed-home 基础层，不等同于第 7 节完整状态格。
+下一阶段需要在同一对象上加入 guest slot/value version、width facts 和 fault snapshot，随后才允许
+事实跨 diamond/backedge join 或扩展到 memory/XMM consumer。本阶段没有新增 env 开关、probe、
+诊断日志、临时源路径、运行时分支或旧机制兜底，也没有运行压力测试或长基准。
