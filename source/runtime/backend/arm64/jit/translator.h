@@ -221,6 +221,21 @@ private:
     };
     [[nodiscard]] std::optional<NarrowExtractExtension>
     MatchNarrowExtractExtension(ir::Inst* wrapper) const;
+    struct FunnelShiftPlan {
+        ir::Inst* first{};
+        ir::Inst* second{};
+        ir::Inst* result{};
+        ir::Value high{};
+        ir::Value low{};
+        u8 amount{};
+
+        bool operator==(const FunnelShiftPlan&) const = default;
+    };
+    [[nodiscard]] std::optional<FunnelShiftPlan>
+    MatchFunnelShift(ir::Inst* result) const;
+    void PrepareFunnelShifts(ir::Block* block);
+    [[nodiscard]] bool EmitFunnelShiftPart(ir::Inst* inst);
+    [[nodiscard]] bool EmitFunnelShiftResult(ir::Inst* inst);
     struct NarrowMaskedInput {
         ir::Inst* extract{};
         ir::Value source{};
@@ -807,6 +822,9 @@ private:
     std::map<ir::Inst*, NarrowExtractExtension> narrow_extract_extensions{};
     std::map<ir::Inst*, ir::Inst*> fused_narrow_extracts{};
     std::map<ir::Inst*, ir::Inst*> fused_narrow_extract_shifts{};
+    std::map<ir::Inst*, FunnelShiftPlan> funnel_shifts{};
+    std::map<ir::Inst*, ir::Inst*> funnel_shift_parts{};
+    std::map<ir::Inst*, ir::Inst*> funnel_shift_parity_producers{};
     std::map<ir::Inst*, NarrowMaskedInput> narrow_masked_inputs{};
     std::map<ir::Inst*, ir::Inst*> fused_narrow_masked_extracts{};
     std::map<ir::Inst*, ShiftMaskedInput> shift_masked_inputs{};

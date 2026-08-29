@@ -780,6 +780,7 @@ JitTranslator::PrepareBlockState(ir::Block* block) {
     raw_carry_branch_analysis.Analyze(block);
     raw_carry_pending = nullptr;
     PrepareNarrowExtractExtensions(block);
+    PrepareFunnelShifts(block);
     PrepareScalarFPRPublications(block);
     backedge_flags_plan = dead_edge_integer_branch
             ? nullptr

@@ -6,6 +6,8 @@ add_executable(swift_test
         indirect_target_preservation_test.cpp
         region_edges_test.cpp
         direct_link_production_test.cpp
+        double_shift_test.cpp
+        funnel_shift_codegen_test.cpp
         flags_merge_test.cpp
         jit_cache_direct_link_test.cpp
         integer_width_elimination_test.cpp

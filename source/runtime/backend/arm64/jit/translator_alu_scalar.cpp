@@ -600,6 +600,9 @@ void JitTranslator::EmitAndNot(ir::Inst* inst) {
 }
 
 void JitTranslator::EmitOr(ir::Inst* inst) {
+    if (EmitFunnelShiftResult(inst)) {
+        return;
+    }
     if (local_conditions.contains(inst)) {
         return;
     }
@@ -617,6 +620,10 @@ void JitTranslator::EmitOr(ir::Inst* inst) {
             BeginFlagsTokenProducer(pseudo_flags);
         }
         SaveLogicalResultFlags(value, left.Type(), pseudo_flags);
+        if (const auto producer = funnel_shift_parity_producers.find(inst);
+            producer != funnel_shift_parity_producers.end()) {
+            FinishFlagsTokenProducer(value, left.Type(), pseudo_flags, producer->second);
+        }
         return;
     }
     auto right_pinned = right.GetLeft().IsValue()
@@ -719,6 +726,9 @@ void JitTranslator::EmitAsrImm(ir::Inst* inst) {
 }
 
 void JitTranslator::EmitLslImm(ir::Inst* inst) {
+    if (EmitFunnelShiftPart(inst)) {
+        return;
+    }
     auto value = inst->GetArg<ir::Value>(0);
     auto lsl = inst->GetArg<ir::Imm>(1).Get();
     auto result = context.R(ir::Value{inst});
@@ -726,6 +736,9 @@ void JitTranslator::EmitLslImm(ir::Inst* inst) {
 }
 
 void JitTranslator::EmitLsrImm(ir::Inst* inst) {
+    if (EmitFunnelShiftPart(inst)) {
+        return;
+    }
     if (fused_shift_masked_shifts.contains(inst)) {
         return;
     }

@@ -904,26 +904,57 @@ void X64Decoder::DecodeDoubleShift(_DInst& insn, bool right) {
         dst = __ ZeroExtend32(dst);
         src = __ ZeroExtend32(src);
     }
-    auto count = __ And(ToValue(Src(insn, op2)),
-                        ir::Operand{ir::Imm(width == 64 ? u64(0x3F) : u64(0x1F))});
-    auto complement = __ Sub(__ LoadImm(ir::Imm(u64(width))), ir::Operand{count});
-    auto shifted_dst = right ? __ LsrValue(dst, count) : __ LslValue(dst, count);
-    auto shifted_src = right ? __ LslValue(src, complement) : __ LsrValue(src, complement);
-    auto calculated = __ Or(shifted_dst, ir::Operand{shifted_src});
+    const auto count_data = Src(insn, op2);
+    const u64 count_mask = width == 64 ? 0x3F : 0x1F;
+    const u32 constant_count =
+            count_data.IsImm() ? static_cast<u32>(count_data.imm.Get() & count_mask) : UINT32_MAX;
+    const bool immediate_fast =
+            features_.shift_imm_fast && width >= 32 && constant_count > 0 && constant_count < width;
+    if (features_.shift_imm_fast && constant_count == 0) {
+        Dst(insn, op0, dst);
+        return;
+    }
+
+    ir::Value count;
+    ir::Value complement;
+    ir::Value calculated;
+    if (immediate_fast) {
+        auto shifted_dst = right ? __ LsrImm(dst, ir::Imm(constant_count))
+                                 : __ LslImm(dst, ir::Imm(constant_count));
+        auto shifted_src = right ? __ LslImm(src, ir::Imm(width - constant_count))
+                                 : __ LsrImm(src, ir::Imm(width - constant_count));
+        calculated = __ Or(shifted_dst, ir::Operand{shifted_src});
+    } else {
+        count = __ And(ToValue(count_data), ir::Operand{ir::Imm(count_mask)});
+        complement = __ Sub(__ LoadImm(ir::Imm(u64(width))), ir::Operand{count});
+        auto shifted_dst = right ? __ LsrValue(dst, count) : __ LslValue(dst, count);
+        auto shifted_src = right ? __ LslValue(src, complement) : __ LsrValue(src, complement);
+        calculated = __ Or(shifted_dst, ir::Operand{shifted_src});
+    }
     if (width < 64) {
         calculated = __ And(calculated, ir::Operand{ir::Imm(value_mask)});
     }
     // Count zero is a strict no-op. For the 16-bit form, masked counts above
     // 16 have architecturally undefined results and flags; this deterministic
     // calculation is intentionally not advertised as stronger behavior.
-    auto nonzero = __ TestNotZero(count);
-    auto result = __ Select(nonzero, calculated, dst).SetType(GetSize(width));
+    ir::Value nonzero;
+    auto result = calculated.SetType(GetSize(width));
+    if (!immediate_fast) {
+        nonzero = __ TestNotZero(count);
+        result = __ Select(nonzero, calculated, dst).SetType(GetSize(width));
+    }
 
-    auto skip_flags = __ NotGoto(nonzero);
+    ir::Value skip_flags;
+    if (!immediate_fast) {
+        skip_flags = __ NotGoto(nonzero);
+    }
     auto flag_value = __ Or(result, ir::Operand{ir::Imm(u64(0))});
     __ SaveFlags(flag_value, ir::Flags::Negate | ir::Flags::Zero | ir::Flags::Parity);
     ir::Value cf;
-    if (right) {
+    if (immediate_fast) {
+        const u32 bit = right ? constant_count - 1 : width - constant_count;
+        cf = __ And(__ LsrImm(dst, ir::Imm(bit)), ir::Operand{ir::Imm(u64(1))});
+    } else if (right) {
         auto count_m1 = __ Sub(count, ir::Operand{ir::Imm(u64(1))});
         cf = __ And(__ LsrValue(dst, count_m1), ir::Operand{ir::Imm(u64(1))});
     } else {
@@ -938,8 +969,12 @@ void X64Decoder::DecodeDoubleShift(_DInst& insn, bool right) {
     // destination sign bit. It is architecturally undefined for larger counts.
     __ SetOverflow(__ Xor(old_msb, ir::Operand{new_msb}));
     StorePolarity(false);
-    __ BindLabel(skip_flags);
-    MergeConditionalCarryPolarity();
+    if (immediate_fast) {
+        carry_ = CarryPolarity::Direct;
+    } else {
+        __ BindLabel(skip_flags);
+        MergeConditionalCarryPolarity();
+    }
     Dst(insn, op0, result);
 }
 
