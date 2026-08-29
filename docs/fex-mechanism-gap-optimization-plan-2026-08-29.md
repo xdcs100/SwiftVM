@@ -133,6 +133,9 @@ SQLite 与 FEX 的共同正差 root 中，当前可归因的正向超额合计�
 4. LinkManager 发布入口 generation，并在 SMC invalidation 中一次性撤销该代码对象的全部外部入口。
 5. 通过 `freeSpace` 的 direct-entry 账确认收益后，再扩展到其他 root；不先泛化到重叠指令流或不透明间接目标。
 
+截至 `340247d`，前四步已在现有 function-level decoded roots 上闭合；第五步仍以 external return
+entry 回收 call-miss cold materialization 为下一项收益门禁，不把契约落地本身算作代码密度收益。
+
 ### 5.6 验收
 
 - 同一目标分别从内部边和外部边进入，结果一致且走不同标签。
@@ -669,3 +672,38 @@ publication。lookup guard fault 发生在 guest call 提交前，继续走既�
 return PC 只能使用代码对象内部入口；P0 external veneer/多入口 ABI 完成后，可让冷 miss 使用可失效的
 外部 return entry，届时再收回逐 call-site continuation 准备入口。continuation 剩余工作是把 generation
 与 unlink/invalidation 纳入同一首类 contract，而不是继续扩展 traversal tag。
+
+### 16.11 function entry provenance 与多入口代码对象 ABI
+
+提交 `340247d` 把 function-level 编译原有的多入口能力从隐式发布循环收敛为首类 ABI。现有 backend
+本来已经为每个已解码 HIR block 生成 canonical、direct-link、pending-flags、continuation 和
+pending-flags continuation 入口，并由 LinkManager 按 allocation owner/generation 管理；本阶段没有
+重复生成第二套入口，而是补齐此前缺少的来源证明和统一发布事务。
+
+`FunctionDecodeFrontier` 现在为 candidate、accepted 和 rejected split target 保留稳定 provenance，包含
+target、唯一 owner 范围、重解码前的 guest dependency、call-return ownership 以及明确 rejection reason。
+provenance 随 HIRFunction 进入 backend，不在 x86 frontend 局部对象销毁时丢失。`FunctionEntryContract`
+统一记录入口 kind、canonical/pending flags 要求、fixed-home 要求、continuation frame 要求、guest 范围、
+dependency ownership 和来源；`FunctionEntryPublisher` 负责 LinkManager target generation、canonical L2、
+call L1 与 pending-call L1 的一次性发布。
+
+只有 accepted split、普通 decoded block 和 function root 可进入 LinkManager。ambiguous owner、call-return
+ownership、owner reset 失败或 boundary mismatch 的 split 仍保留 canonical L2 正确性入口，但不会发布
+direct/pending/call target。该 linkable 属性写入 disk-cache v17，恢复后的代码对象不会把被拒绝的 split
+重新升级为可链接入口。函数在线编译与磁盘恢复复用同一 publisher；同一 allocation 的 generation 与
+SMC invalidation 仍由既有 LinkManager/SmcTracker owner transaction 一次性撤销。
+
+短门禁结果：
+
+- `[function-entry]` 通过 42 条断言；`[direct-link][jit-cache]` 通过 355 条断言，其中 v17 跨进程恢复
+  聚合为 259 条；`[region-edges][production]` 通过 42 条，覆盖函数三个 external entry 的同 owner SMC
+  失效。
+- 本阶段修改前 binary 与 `340247d` candidate 的 smallpt `4 8 6` static-only 配对均为 279 roots、
+  49,548 条 host 指令、100% PC/version/top-20 coverage，delta 为 0。最终 candidate 单跑为 3.415s，
+  PPM SHA-256 仍为 `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`；elapsed
+  只作一致性检查。
+- 没有新增运行时 env 开关、诊断日志、probe、临时源路径或旧机制兜底；只运行了 8 秒上限的
+  static-only screen，没有压力测试或正式长基准。
+
+P0 当前剩余的是让 external return entry 消费这份 generation-aware contract，随后删除每个 call site
+单独物化 BLR 后继地址的 cold preparation；契约阶段本身保持 JIT emission 零变化。

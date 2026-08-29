@@ -3406,6 +3406,20 @@ peepholes.
   step is generation-aware unlink/invalidation; P0 external return entries can later remove the
   per-call-site cold continuation materialization.
 
+- `340247d` makes the existing function-level multi-entry publication a first-class
+  `FunctionEntryContract`. `FunctionDecodeFrontier` now exports stable accepted/rejected provenance
+  with owner ranges, dependencies, call-return ownership and rejection reasons into HIR. Function
+  compilation and disk restore publish canonical/direct/pending/call entries through one
+  `FunctionEntryPublisher`, retaining the existing allocation owner and LinkManager generation/SMC
+  transaction. Rejected ambiguous, call-return-owned, reset-failed or boundary-mismatched splits keep
+  canonical L2 correctness but are not LinkManager targets; disk cache v17 preserves that unlinkable
+  property across processes. Mac passes 42 function-entry, 355 JIT-cache and 42 region-production
+  assertions. The bounded pre-stage/candidate smallpt `4 8 6` static pair is identical at 279 roots,
+  49,548 instructions, 100% coverage and canonical PPM SHA, and the final candidate completes in
+  3.415s. No long benchmark, stress run, probe, env switch, diagnostic log, temporary source path or
+  fallback remains. Next use the generation-aware external return entry to remove per-call-site
+  call-miss continuation preparation, then remeasure the 50-instruction cold delta.
+
 ## Orb loop
 
 ```
