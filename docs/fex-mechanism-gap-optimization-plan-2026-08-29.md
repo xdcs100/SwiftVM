@@ -605,3 +605,34 @@ source 不会进入只覆盖 partial mask 的目标。动态 indirect-call conti
 
 该阶段没有新增环境开关、诊断日志、运行时探针或兼容兜底。下一步为 inverted carry 建立可证明的
 source provenance，或转入 continuation contract 与 hot/cold emission；不让 `Unknown` 极性宽松匹配。
+
+### 16.9 函数级热冷 emission 分离
+
+提交 `888c3db` 把 block terminal 与 cold-path emission 拆成两个阶段。每个 hot block 完成后，
+`BlockColdPathPlan` 移出该 block 的 backedge、cycle exit、fault recovery、VecNaN、flags audit 和 density
+状态；函数全部 hot block 生成完毕后，再按 block 顺序集中发出 cold stubs。独立 block 翻译仍立即消费
+同一 plan，不建立第二套 emitter 协议。新的布局测试直接解码首个 block 的 NaN guard，验证其 cold
+target 位于后续 hot block 之后。
+
+延迟 cold emission 暴露了一个与本阶段无关的既有 indirect-L1 边界：guest target 为零时，空表项的
+零 key/零 value 会被 key-only 热命中误认为可执行地址。提交 `5dcaefb` 在设置 invalid value 时同步初始化
+零 key 的 sentinel value，使 target 0 进入既有 miss trampoline，不增加 JIT 热路径指令或运行时分支。
+
+短门禁结果：
+
+- Mac 的布局、continuation empty/mismatch、invalidated indirect call、SMC L1 redirect、region cycle、
+  observing-exit flags、cycle reason、call-kind continuation、indirect target preservation 和 AFP NaN
+  定向测试通过 209 条断言；`[direct-link][production]`、`[continuation]` 和非压力 `[smc]` 分组分别
+  通过 840、29 和 793 条断言。
+- fresh `63ad1de` 与 `888c3db` 的 smallpt `4 8 6` static-only 对比保持 279 roots、100% host/entry
+  coverage、top-20 `20/20` 和 49,498 条总指令；PPM SHA-256 保持
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`。总 emission 大小不变符合
+  预期，本阶段改变的是 hot/cold 空间顺序。
+- SQLite `main/1` 两侧均在 8 秒门限退出 124，已停止；仅确认候选未出现 host fault、heap corruption
+  或 wild PC，不作为覆盖或性能证据。
+- Orb 在本阶段验证时 SSH 端口立即断开，未宣称远端门禁通过；恢复后需对 `888c3db` 补跑同一组定向
+  测试。
+
+该阶段没有新增环境开关、诊断日志、运行时探针、临时路径或兼容兜底。下一步统一 static call、
+indirect call、return 和 direct link 的 continuation publication contract 与公共 cold tail；在这一合同
+完成前不进行任意 trace scheduling。

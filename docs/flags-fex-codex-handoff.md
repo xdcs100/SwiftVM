@@ -3374,6 +3374,20 @@ peepholes.
   merge instructions. SQLite and counter-based screens were stopped at the 8-second bound and are not
   cited as benefit evidence. No probe, debug path, env switch or stress run remains.
 
+- `888c3db` emits every function hot block before consuming explicit per-block `BlockColdPathPlan`
+  records for backedge, cycle, fault, VecNaN, density and flags-audit cold state. Standalone block
+  translation consumes the same plan immediately. A layout test proves the first block's NaN cold
+  target follows the next hot block. `5dcaefb` separately initializes the indirect-L1 zero-key
+  sentinel with the configured miss value, so guest target zero cannot key-hit a null host target.
+  Mac passes 209 focused layout/continuation/fault/SMC/flags/NaN assertions, 840 production
+  direct-link assertions, 29 continuation assertions and 793 non-stress SMC assertions. Fresh
+  `63ad1de`/`888c3db` smallpt `4 8 6` static-only keeps all 279 roots, 49,498 instructions, 100%
+  coverage and the canonical PPM SHA. SQLite `main/1` was stopped on both arms at the 8-second
+  bound and is not benefit evidence. Orb SSH closed immediately during this stage, so the matching
+  remote gate remains pending. No probe, debug path, env switch, temporary source path or stress
+  run remains. Next unify static/indirect/return/direct-link continuation publication and common
+  cold tails before any trace scheduling.
+
 ## Orb loop
 
 ```
