@@ -3555,6 +3555,22 @@ peepholes.
   terminals remain rejected and require independent canonical replay. No stress run, long benchmark,
   env switch, probe, diagnostic path, temporary source path or compatibility fallback remains.
 
+- `0ad7d65` completes the static helper observation axes in `HelperCallTraits` and the ARM64
+  `HelperCallContract`: implicit guest-state read/write, direct fault, dispatcher reentry and host
+  NZCV preservation now default conservative and compose with the existing register, FPCR, ABI and
+  uniform effects. `EmitHostCall` retains pending NZCV only when the complete contract proves there
+  is no observable boundary and the wrapper preserves host flags. GuestStateMap and region scans are
+  instruction-aware, while physical NZCV and x12 token clobbers remain separate proofs. The first
+  production consumer is the resident REP-string wrapper, which carries NZCV through the AAPCS64
+  callee-saved low half of d8; d8 remains in the wrapper's declared caller-clobbered FPR set. A real
+  `SwiftRepStos1Resident` execution case matches the no-helper pending-flags baseline. Mac Debug
+  passes 86 helper, 60 region-flags and 5 pinned-value assertions. Exact Release static A/B keeps
+  smallpt at 275 roots / 49,249 instructions with canonical PPM; SQLite matches all 2,114 roots and
+  top-20 while moving `355,965 -> 355,961` (`-4`, two roots shrink by two, none grow). Unknown and
+  indirect helpers stay fail-closed. No stress run, long benchmark, env switch, probe, diagnostic
+  path, temporary source/build path or compatibility fallback remains. Next extend GuestStateMap
+  from block-local fixed homes to guest-slot versions, width facts, fault snapshots and safe CFG joins.
+
 ## Orb loop
 
 ```

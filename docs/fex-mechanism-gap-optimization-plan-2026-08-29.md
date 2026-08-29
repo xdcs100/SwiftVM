@@ -986,3 +986,30 @@ A/B 中，smallpt 从 279 roots / 49,265 条变为 275 / 49,249，消除 4 个�
 本阶段没有保留 census probe、env 开关、日志、临时源路径或旧的通用 external-edge 方案，也没有
 运行压力测试或长基准。P0 的 stateless terminal-only return connector 已闭合；含 SSA/PSTATE live-in
 的 terminal 仍必须重解码为独立 canonical root，不能复用本合同。
+
+### 16.22 精确 helper observation 与 host-NZCV contract
+
+提交 `0ad7d65` 为 `HelperCallTraits` 补齐 guest-state read/write、直接 fault、dispatcher reentry 和
+host-NZCV effect。所有零值保持保守；间接 helper、CallLocation/CallDynamic、X87 和专用 Sse42 IR
+继续解析为 opaque contract。`HelperCallContract` 只有在 helper 不访问隐式 guest state、不直接 fault、
+不重入且明确保留 NZCV 时才允许 pending host flags 穿过调用，未知 helper 不建立第二条运行时路径。
+
+`EmitHostCall` 在调用前解析一次 contract，满足完整条件时不再执行无条件 NZCV merge/flush。
+`GuestStateMap` 和 JIT 的 block/region 扫描改为消费 instruction-aware effect；fault/observation 与物理
+NZCV、x12 flags-token clobber 分开判定，避免仅凭“无 fault”推导寄存器状态仍存活。现有静态 opcode
+分类继续服务没有 instruction metadata 的调用点，不保留旧 helper 全屏障作为兜底。
+
+首个生产 consumer 是 resident REP-string wrapper。它已有 x3-x15、q16-q31 和 x30 保存合同；本阶段
+利用 AAPCS64 保留的 d8 低 64 位跨 C helper 保存 NZCV，d8 仍属于 contract 明确声明的 caller-clobbered
+FPR，JIT 会按既有 live snapshot 处理。REP helper 的 guest page fault 继续通过返回值交给紧随其后的
+`CheckMemoryAlignment`，该指令在测试 fault bit 前提交仍存活的旧 guest flags。
+
+Mac Debug 的 helper 分组通过 86 条断言 / 9 个 case，region flags 通过 60 条，pinned value 通过 5 条；
+生产执行用例验证实际 `SwiftRepStos1Resident` 前后的 pending NZCV 与无 helper 基线一致。Release 同源
+static-only A/B 中，smallpt `4 8 6` 两侧均为 275 roots / 49,249 条并保持 canonical PPM SHA-256。
+SQLite `--size 1 --testset main :memory:` 两侧均命中 2,114 roots，100% root/top-20 覆盖，
+`355,965 -> 355,961`（`-4`）；`0x46eb50` 与 `0x4c1e9f` 各减少 2 条，无增长 root。
+
+本阶段没有运行压力测试或长基准，也没有新增 env 开关、probe、日志、临时源路径或兼容兜底；同源
+Release 构建和 capture 目录已删除。其他 helper 只有在函数实现、wrapper 和调用点能同时提供静态证明
+时才可升级；第 7 节完整 guest slot/value version、fault snapshot 与跨 CFG join 仍是下一项机制工作。
