@@ -254,8 +254,10 @@ X64Decoder::X64Decoder(VAddr start,
                        bool sse_afp_nan,
                        bool identity_addressing,
                        const runtime::FeatureSet& features,
-                       VAddr decode_stop)
-        : start(start), pc(start), decode_stop(decode_stop), assembler(visitor), memory(memory),
+                       VAddr decode_stop,
+                       DecodeStopKind decode_stop_kind)
+        : start(start), pc(start), decode_stop(decode_stop),
+          decode_stop_kind(decode_stop_kind), assembler(visitor), memory(memory),
           is_64bit(is_64bit),
           identity_addressing_(identity_addressing), features_(features) {
     addr_mask = is_64bit ? UINT64_MAX : UINT32_MAX;
@@ -300,8 +302,13 @@ public:
 
         while (!decoder.end_decode) {
             if (decoder.decode_stop != 0 && decoder.pc == decoder.decode_stop) {
-                decoder.assembler->LinkBlock(
-                        ir::terminal::LinkBlock{ir::Location{decoder.pc}});
+                if (decoder.decode_stop_kind == DecodeStopKind::External) {
+                    decoder.assembler->ExternalLinkBlock(
+                            ir::terminal::ExternalLinkBlock{ir::Location{decoder.pc}});
+                } else {
+                    decoder.assembler->LinkBlock(
+                            ir::terminal::LinkBlock{ir::Location{decoder.pc}});
+                }
                 decoder.end_decode = true;
                 return;
             }

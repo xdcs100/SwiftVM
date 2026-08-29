@@ -22,6 +22,10 @@ public:
             : function(function) {}
 
     [[nodiscard]] std::optional<Split> FindSplit(runtime::LocationDescriptor target);
+    [[nodiscard]] std::optional<Split> FindExternalSplit(
+            runtime::LocationDescriptor target);
+    [[nodiscard]] std::vector<runtime::LocationDescriptor>
+    DiscoverExternalRoots(u32 minimum_sources);
     [[nodiscard]] bool IsAccepted(runtime::LocationDescriptor target) const;
     void Accept(runtime::LocationDescriptor target);
     void Reject(runtime::LocationDescriptor target, Rejection reason);
@@ -32,6 +36,11 @@ public:
             const runtime::ir::Block* block);
 
 private:
+    [[nodiscard]] std::optional<Split> FindSplit(
+            runtime::LocationDescriptor target,
+            bool external_root,
+            bool record_missing_owner);
+
     struct Record {
         Provenance provenance{};
         runtime::ir::HIRBlock* owner{};

@@ -248,6 +248,10 @@ HaltReason Interpreter::RunTerminal(const ir::Terminal& terminal, InterpStack& s
             state.prev_loc = state.current_loc;
             state.current_loc = term.next;
             result = HaltReason::None;
+        } else if constexpr (std::is_same_v<T, ir::terminal::ExternalLinkBlock>) {
+            state.prev_loc = state.current_loc;
+            state.current_loc = term.next;
+            result = HaltReason::None;
         } else if constexpr (std::is_same_v<T, ir::terminal::PopRSBHint>) {
             // RSB is not modelled (same as the JIT); behave like
             // ReturnToDispatch. current_loc was set by a SetLocation inst.

@@ -36,6 +36,7 @@ struct FunctionEntryProvenance {
     FunctionEntryDisposition disposition{FunctionEntryDisposition::Candidate};
     FunctionEntryRejection rejection{FunctionEntryRejection::None};
     bool call_return_owned{};
+    bool external_root{};
 
     [[nodiscard]] bool IsAccepted() const {
         return disposition == FunctionEntryDisposition::Accepted;

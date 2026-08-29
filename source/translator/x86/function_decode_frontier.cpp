@@ -4,19 +4,54 @@ namespace swift::translator::x86 {
 
 std::optional<FunctionDecodeFrontier::Split> FunctionDecodeFrontier::FindSplit(
         runtime::LocationDescriptor target) {
+    return FindSplit(target, false, true);
+}
+
+std::optional<FunctionDecodeFrontier::Split>
+FunctionDecodeFrontier::FindExternalSplit(
+        runtime::LocationDescriptor target) {
+    return FindSplit(target, true, false);
+}
+
+std::vector<runtime::LocationDescriptor>
+FunctionDecodeFrontier::DiscoverExternalRoots(u32 minimum_sources) {
+    ASSERT(minimum_sources > 0);
+    std::map<runtime::LocationDescriptor, u32> sources;
+    if (function) {
+        for (const auto& link : function->GetExternalDirectLinks()) {
+            ++sources[link.target.Value()];
+        }
+    }
+    std::vector<runtime::LocationDescriptor> roots;
+    for (const auto& [target, count] : sources) {
+        if (count >= minimum_sources && FindExternalSplit(target)) {
+            roots.push_back(target);
+        }
+    }
+    return roots;
+}
+
+std::optional<FunctionDecodeFrontier::Split> FunctionDecodeFrontier::FindSplit(
+        runtime::LocationDescriptor target,
+        bool external_root,
+        bool record_missing_owner) {
     if (const auto it = records.find(target); it != records.end()) {
         if (it->second.provenance.disposition != runtime::ir::FunctionEntryDisposition::Candidate) {
             return std::nullopt;
         }
+        it->second.provenance.external_root |= external_root;
         return Split{it->second.owner, target, &it->second.provenance};
     }
 
     Record record{};
     record.provenance.target = runtime::ir::Location{target};
+    record.provenance.external_root = external_root;
     if (!function) {
-        record.provenance.disposition = runtime::ir::FunctionEntryDisposition::Rejected;
-        record.provenance.rejection = Rejection::NoOwner;
-        records.emplace(target, std::move(record));
+        if (record_missing_owner) {
+            record.provenance.disposition = runtime::ir::FunctionEntryDisposition::Rejected;
+            record.provenance.rejection = Rejection::NoOwner;
+            records.emplace(target, std::move(record));
+        }
         return std::nullopt;
     }
 
@@ -55,9 +90,11 @@ std::optional<FunctionDecodeFrontier::Split> FunctionDecodeFrontier::FindSplit(
         owner = &hir_block;
     }
     if (!owner) {
-        record.provenance.disposition = runtime::ir::FunctionEntryDisposition::Rejected;
-        record.provenance.rejection = Rejection::NoOwner;
-        records.emplace(target, std::move(record));
+        if (record_missing_owner) {
+            record.provenance.disposition = runtime::ir::FunctionEntryDisposition::Rejected;
+            record.provenance.rejection = Rejection::NoOwner;
+            records.emplace(target, std::move(record));
+        }
         return std::nullopt;
     }
 
@@ -85,6 +122,11 @@ void FunctionDecodeFrontier::Accept(runtime::LocationDescriptor target) {
     ASSERT(it != records.end());
     it->second.provenance.disposition = runtime::ir::FunctionEntryDisposition::Accepted;
     it->second.provenance.rejection = Rejection::None;
+    if (it->second.provenance.external_root) {
+        auto* root = function->CreateOrGetBlock(runtime::ir::Location{target});
+        ASSERT(root);
+        function->RegisterExternalEntryRoot(root);
+    }
 }
 
 void FunctionDecodeFrontier::Reject(runtime::LocationDescriptor target, Rejection reason) {

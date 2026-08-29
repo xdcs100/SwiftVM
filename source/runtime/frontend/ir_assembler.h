@@ -93,6 +93,10 @@ public:
 
     HIRBlock* LinkBlock(const terminal::LinkBlock& switch_);
 
+    void ExternalLinkBlock(const terminal::ExternalLinkBlock& link);
+
+    void RegisterExternalDirectLink(Location target);
+
     void ReturnToDispatcher();
 
     void ReturnToHost();

@@ -13,79 +13,65 @@ namespace swift::runtime::backend::arm64 {
 
 #define __ masm.
 
+void JitTranslator::EmitDispatcherTerminal(
+        LinkSiteKind direct_link_kind,
+        DirectLinkFlagsBypass flags_bypass,
+        bool external_edge,
+        bool call_exit) {
+    constexpr auto merge_cause = FlagsRegsAuditMergeCause::TerminalDispatcher;
+    const bool pending_call_flags = CanUseIndirectCallContinuation() &&
+                                    CanDeferFullNZCVMerge(merge_cause);
+    const bool call_continuation = CanUseCallContinuation();
+    const bool local_published_entry = external_edge && static_next_loc &&
+            IsRegionInternalEdge(ir::Location{*static_next_loc});
+    const auto local_flags_bypass = pending_call_flags
+            ? DirectLinkFlagsBypass{}
+            : MergeNZCV(merge_cause,
+                        FlagsRegsAuditEdgeKind::Dispatcher,
+                        !local_published_entry && context.ContinuationActive() &&
+                                static_next_loc &&
+                                context.CanEmitDirectLink(
+                                        ir::Location{*static_next_loc}));
+    const auto terminal_flags_bypass = local_flags_bypass.Valid()
+            ? local_flags_bypass
+            : flags_bypass;
+    context.RecordExecCounter(
+            call_exit && cur_block_is_call
+                    ? exec_offset_exit_call
+                    : (static_next_loc ? exec_offset_exit_direct
+                                       : exec_offset_exit_indirect));
+    if (!EmitStaticForward(call_continuation ? LinkSiteKind::Call
+                                             : direct_link_kind,
+                           terminal_flags_bypass,
+                           external_edge) &&
+        !(CanUseIndirectCallContinuation()
+                  ? EmitIndirectCallForward(pending_call_flags)
+                  : EmitIndirectForward())) {
+        if (!TryEmitReturnFlagsBypass(terminal_flags_bypass)) {
+            context.ReturnHost();
+        }
+    }
+}
+
 void JitTranslator::EmitTerminal(const ir::Terminal& terminal,
                                  LinkSiteKind direct_link_kind,
                                  DirectLinkFlagsBypass flags_bypass) {
     VisitVariant<void>(terminal, [this, direct_link_kind, flags_bypass](auto term) {
         using T = std::decay_t<decltype(term)>;
         if constexpr (!std::is_same_v<T, ir::terminal::Invalid> &&
-                      !std::is_same_v<T, ir::terminal::ReturnToDispatch>) {
+                      !std::is_same_v<T, ir::terminal::ReturnToDispatch> &&
+                      !std::is_same_v<T, ir::terminal::ExternalLinkBlock>) {
             PublishPendingStaticLocation();
         }
         if constexpr (std::is_same_v<T, ir::terminal::Invalid>) {
-            // Flat decoded blocks have no explicit terminal; their trailing
-            // SetLocation supplies the next dispatch location.
-            constexpr auto merge_cause =
-                    FlagsRegsAuditMergeCause::TerminalDispatcher;
-            const bool pending_call_flags =
-                    CanUseIndirectCallContinuation() &&
-                    CanDeferFullNZCVMerge(merge_cause);
-            const bool call_continuation = CanUseCallContinuation();
-            const auto local_flags_bypass = pending_call_flags
-                    ? DirectLinkFlagsBypass{}
-                    : MergeNZCV(merge_cause,
-                                FlagsRegsAuditEdgeKind::Dispatcher,
-                                context.ContinuationActive() && static_next_loc &&
-                                        context.CanEmitDirectLink(
-                                                ir::Location{*static_next_loc}));
-            const auto terminal_flags_bypass = local_flags_bypass.Valid()
-                    ? local_flags_bypass
-                    : flags_bypass;
-            context.RecordExecCounter(static_next_loc ? exec_offset_exit_direct
-                                                      : exec_offset_exit_indirect);
-            if (!EmitStaticForward(
-                        call_continuation ? LinkSiteKind::Call
-                                          : direct_link_kind,
-                        terminal_flags_bypass) &&
-                !(CanUseIndirectCallContinuation()
-                          ? EmitIndirectCallForward(pending_call_flags)
-                          : EmitIndirectForward())) {
-                if (!TryEmitReturnFlagsBypass(terminal_flags_bypass)) {
-                    context.ReturnHost();
-                }
-            }
+            EmitDispatcherTerminal(direct_link_kind, flags_bypass, false, false);
         } else if constexpr (std::is_same_v<T, ir::terminal::ReturnToDispatch>) {
-            constexpr auto merge_cause =
-                    FlagsRegsAuditMergeCause::TerminalDispatcher;
-            const bool pending_call_flags =
-                    CanUseIndirectCallContinuation() &&
-                    CanDeferFullNZCVMerge(merge_cause);
-            const bool call_continuation = CanUseCallContinuation();
-            const auto local_flags_bypass = pending_call_flags
-                    ? DirectLinkFlagsBypass{}
-                    : MergeNZCV(merge_cause,
-                                FlagsRegsAuditEdgeKind::Dispatcher,
-                                context.ContinuationActive() && static_next_loc &&
-                                        context.CanEmitDirectLink(
-                                                ir::Location{*static_next_loc}));
-            const auto terminal_flags_bypass = local_flags_bypass.Valid()
-                    ? local_flags_bypass
-                    : flags_bypass;
-            context.RecordExecCounter(
-                    cur_block_is_call ? exec_offset_exit_call
-                                      : (static_next_loc ? exec_offset_exit_direct
-                                                         : exec_offset_exit_indirect));
-            if (!EmitStaticForward(
-                        call_continuation ? LinkSiteKind::Call
-                                          : direct_link_kind,
-                        terminal_flags_bypass) &&
-                !(CanUseIndirectCallContinuation()
-                          ? EmitIndirectCallForward(pending_call_flags)
-                          : EmitIndirectForward())) {
-                if (!TryEmitReturnFlagsBypass(terminal_flags_bypass)) {
-                    context.ReturnHost();
-                }
-            }
+            EmitDispatcherTerminal(direct_link_kind, flags_bypass, false, true);
+        } else if constexpr (std::is_same_v<T, ir::terminal::ExternalLinkBlock>) {
+            static_next_loc = term.next.Value();
+            dynamic_next_loc.reset();
+            dynamic_location_miss = nullptr;
+            EmitDispatcherTerminal(direct_link_kind, flags_bypass, true, false);
         } else if constexpr (std::is_same_v<T, ir::terminal::ReturnToHost>) {
             MergeNZCV(FlagsRegsAuditMergeCause::HostExit,
                       FlagsRegsAuditEdgeKind::Host);
@@ -452,16 +438,21 @@ bool JitTranslator::RecordLocalCondition(ir::Inst* inst, ir::Cond cond) {
 // invalidation (SmcTracker::ClearDispatchSlots) zeroes the slot, so a stale
 // translation degrades to the Cbz fallback rather than to a wild branch.
 bool JitTranslator::EmitStaticForward(LinkSiteKind direct_link_kind,
-                                      DirectLinkFlagsBypass flags_bypass) {
+                                      DirectLinkFlagsBypass flags_bypass,
+                                      bool external_edge) {
     if (!static_next_loc) {
         return false;
     }
     const u64 target = *static_next_loc;
     const u32 link_before = context.CurrentBufferSize();
     const auto location = ir::Location{target};
-    auto* cycle_exit = GetDirectCycleExit(location);
-    const auto forwarded = context.ForwardStatic(
-            location, cycle_exit, direct_link_kind, flags_bypass);
+    auto* cycle_exit = external_edge ? GetExternalCycleExit(location)
+                                     : GetDirectCycleExit(location);
+    const auto forwarded = external_edge && IsRegionInternalEdge(location)
+            ? JitContext::StaticForwardResult{
+                      true, context.ForwardPublishedEntry(location, cycle_exit)}
+            : context.ForwardStatic(
+                      location, cycle_exit, direct_link_kind, flags_bypass);
     RecordExitPollFault(forwarded.poll_fault, cycle_exit);
     if (forwarded.emitted) {
         static_next_loc.reset();

@@ -827,6 +827,20 @@ JitContext::ForwardLocal(ir::Location location,
     return poll_fault;
 }
 
+std::optional<JitContext::FaultRange>
+JitContext::ForwardPublishedEntry(ir::Location location, Label* cycle_exit) {
+    ASSERT(cur_block);
+    FlushSpillWrites();
+    std::optional<FaultRange> poll_fault;
+    if (cycle_exit) {
+        const u32 begin = CurrentBufferSize();
+        __ Ldr(wzr, MemOperand(state, state_offset_interrupt_poll));
+        poll_fault = FaultRange{begin, CurrentBufferSize()};
+    }
+    __ B(GetLabel(location.Value()));
+    return poll_fault;
+}
+
 bool JitContext::CanEmitDirectLink(ir::Location location) const {
     if (!direct_link_active || !cur_block ||
         location == cur_block->GetStartLocation() ||

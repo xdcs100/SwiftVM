@@ -162,6 +162,8 @@ public:
                  Label* cycle_exit = nullptr,
                  bool fallthrough = false,
                  Label* local_target = nullptr);
+    [[nodiscard]] std::optional<FaultRange>
+    ForwardPublishedEntry(ir::Location location, Label* cycle_exit = nullptr);
     [[nodiscard]] bool CanBypassDispatcher(ir::Location location) const;
     [[nodiscard]] bool CanEmitDirectLink(ir::Location location) const;
     [[nodiscard]] bool CanUseRegionTrampoline() const { return direct_link_active; }

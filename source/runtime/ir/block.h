@@ -287,6 +287,8 @@ template <> struct fmt::formatter<swift::runtime::ir::Terminal> : fmt::formatter
                 content.append(fmt::format("  Link Block 0x{:x}\n", x.next.Value()));
             } else if constexpr (std::is_same_v<T, terminal::LinkBlockFast>) {
                 content.append(fmt::format("  LinkFast Block 0x{:x}\n", x.next.Value()));
+            } else if constexpr (std::is_same_v<T, terminal::ExternalLinkBlock>) {
+                content.append(fmt::format("  ExternalLink Block 0x{:x}\n", x.next.Value()));
             } else if constexpr (std::is_same_v<T, terminal::ReturnToDispatch>) {
                 content.append("  ReturnToDispatch\n");
             } else if constexpr (std::is_same_v<T, terminal::ReturnToHost>) {

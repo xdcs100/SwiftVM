@@ -561,6 +561,10 @@ private:
     void EmitTerminal(const ir::Terminal &terminal,
                       LinkSiteKind direct_link_kind = LinkSiteKind::Unconditional,
                       DirectLinkFlagsBypass flags_bypass = {});
+    void EmitDispatcherTerminal(LinkSiteKind direct_link_kind,
+                                DirectLinkFlagsBypass flags_bypass,
+                                bool external_edge,
+                                bool call_exit);
     [[nodiscard]] bool CanBypassTerminalFlagsMerge(
             const ir::Terminal& terminal) const;
     void PrepareRegionEdges(ir::HIRFunction* function);
@@ -577,6 +581,7 @@ private:
     [[nodiscard]] u32 CountCycleExitCandidates(
             std::span<ir::Block* const> blocks) const;
     [[nodiscard]] Label* GetDirectCycleExit(ir::Location target);
+    [[nodiscard]] Label* GetExternalCycleExit(ir::Location target);
     [[nodiscard]] bool CanUseRegionSuccessorLayout(ir::Location target) const;
     void EmitRegionEdge(ir::Location target,
                         bool fallthrough = false,
@@ -1040,7 +1045,8 @@ private:
     // Emits the inline dispatch for `static_next_loc`; returns false when no
     // static target is known and the caller must Ret to the dispatcher.
     bool EmitStaticForward(LinkSiteKind direct_link_kind,
-                           DirectLinkFlagsBypass flags_bypass = {});
+                           DirectLinkFlagsBypass flags_bypass = {},
+                           bool external_edge = false);
     // Dynamic SetLocation is remembered through the no-op PopRSB marker while
     // it remains the final semantic body value. The terminal can reuse its
     // register without extending an SSA lifetime or reloading State::current_loc.

@@ -18,6 +18,9 @@ void X64Decoder::DecodeCondJump(_DInst& insn, Cond cond) {
                 assembler->LinkBlock(ir::terminal::LinkBlock{target});
                 return;
             }
+            if (assembler->IsFunctionMode()) {
+                assembler->RegisterExternalDirectLink(target);
+            }
         }
         __ SetLocation(address);
         __ ReturnToDispatcher();

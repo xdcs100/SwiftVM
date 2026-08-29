@@ -255,6 +255,11 @@ using HIRBlockList = IntrusiveList<&HIRBlock::list_node>;
 
 class HIRFunction final : public DataContext {
 public:
+    struct ExternalDirectLink {
+        HIRBlock* source{};
+        Location target{};
+    };
+
     explicit HIRFunction(Function* function,
                          const Location& begin,
                          const Location& end,
@@ -355,6 +360,11 @@ public:
     HIRBlockVector& GetHIRBlocks();
     HIRBlockList& GetHIRBlockList();
     HIRBlockList& GetHIRBlocksRPO();
+    void RegisterExternalDirectLink(Location target);
+    [[nodiscard]] const std::vector<ExternalDirectLink>& GetExternalDirectLinks() const {
+        return external_direct_links;
+    }
+    void RegisterExternalEntryRoot(HIRBlock* block);
     void SetFunctionEntryProvenance(std::vector<FunctionEntryProvenance> provenance) {
         function_entry_provenance = std::move(provenance);
     }
@@ -372,12 +382,8 @@ public:
     void MergeAdjacentBlocks(HIRBlock* left, HIRBlock* right);
     bool SplitBlock(HIRBlock* new_block, HIRBlock* old_block);
     bool ResetDecodedBlock(HIRBlock* block);
-    // Populates blocks_rpo with the reverse-post-order of the CFG reachable
-    // from the entry block (the synthetic entry itself is excluded — it holds
-    // no guest instructions, only a LinkBlock to the first real block). Must be
-    // called after EndFunction (predecessors/successors are built there) and
-    // before IdByRPO / function-level register allocation / emission, all of
-    // which rely on a consistent RPO instruction numbering.
+    // Populates blocks_rpo with the reverse-post-order of the primary CFG and
+    // each canonical external-entry root.
     void ComputeRPO();
     void IdByRPO();
 
@@ -481,6 +487,8 @@ private:
     HIRBlockList block_list{};
     // Reverse Post Order
     HIRBlockList blocks_rpo{};
+    std::vector<ExternalDirectLink> external_direct_links{};
+    std::vector<HIRBlock*> external_entry_roots{};
     HIRValueMap values{};
     // Scratch target for IdByRPO's rebuild of `values`; kept as a member so the
     // second (post-pass) renumbering reuses the first one's buffer instead of
@@ -660,6 +668,10 @@ public:
     Vector<CaseBlock> Switch(const terminal::Switch& switch_);
 
     HIRBlock* LinkBlock(const terminal::LinkBlock& switch_);
+
+    void ExternalLinkBlock(const terminal::ExternalLinkBlock& link);
+
+    void RegisterExternalDirectLink(Location target);
 
     void RegisterCallReturn(Location location);
 

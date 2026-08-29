@@ -294,6 +294,11 @@ bool HIRFunction::ResetDecodedBlock(HIRBlock* hir_block) {
         return false;
     }
 
+    std::erase_if(external_direct_links,
+                  [hir_block](const auto& link) {
+                      return link.source == hir_block;
+                  });
+
     auto* block = hir_block->block;
     ReleaseTerminalUses(block->GetTerminal());
     block->SetTerminal(terminal::Invalid{});
@@ -314,6 +319,19 @@ bool HIRFunction::ResetDecodedBlock(HIRBlock* hir_block) {
     return true;
 }
 
+void HIRFunction::RegisterExternalDirectLink(Location target) {
+    ASSERT(current_block);
+    external_direct_links.push_back({current_block, target});
+}
+
+void HIRFunction::RegisterExternalEntryRoot(HIRBlock* block) {
+    ASSERT(block && block->function == this);
+    if (std::find(external_entry_roots.begin(), external_entry_roots.end(), block) ==
+        external_entry_roots.end()) {
+        external_entry_roots.push_back(block);
+    }
+}
+
 void HIRFunction::ComputeRPO() {
     blocks_rpo.clear();
     if (!entry_block) {
@@ -331,7 +349,6 @@ void HIRFunction::ComputeRPO() {
     // reason -- a typical unit now touches the heap zero times here.
     StackVector<u8, 32> visited{};
     visited.resize(MaxBlockCount(), 0);
-    StackVector<HIRBlock*, 32> post_order{};
     struct Frame {
         HIRBlock* block;
         u32 next_succ;
@@ -348,31 +365,39 @@ void HIRFunction::ComputeRPO() {
         visited[id] = 1;
         return true;
     };
-    stack.push_back({entry_block, 0});
-    mark_visited(entry_block);
-    while (!stack.empty()) {
-        auto& frame = stack.back();
-        auto successors = frame.block->GetSuccessors();
-        const u32 successor_count = static_cast<u32>(successors.size()) +
-                (frame.block->GetCallReturnBlock() ? 1u : 0u);
-        if (frame.next_succ < successor_count) {
-            auto* succ = frame.next_succ < successors.size()
-                    ? successors[frame.next_succ]
-                    : frame.block->GetCallReturnBlock();
-            ++frame.next_succ;
-            if (mark_visited(succ)) {
-                stack.push_back({succ, 0});
+    const auto append_component = [&](HIRBlock* root) {
+        if (!root || !mark_visited(root)) {
+            return;
+        }
+        StackVector<HIRBlock*, 32> post_order{};
+        stack.push_back({root, 0});
+        while (!stack.empty()) {
+            auto& frame = stack.back();
+            auto successors = frame.block->GetSuccessors();
+            const u32 successor_count = static_cast<u32>(successors.size()) +
+                    (frame.block->GetCallReturnBlock() ? 1u : 0u);
+            if (frame.next_succ < successor_count) {
+                auto* succ = frame.next_succ < successors.size()
+                        ? successors[frame.next_succ]
+                        : frame.block->GetCallReturnBlock();
+                ++frame.next_succ;
+                if (mark_visited(succ)) {
+                    stack.push_back({succ, 0});
+                }
+            } else {
+                post_order.push_back(frame.block);
+                stack.pop_back();
             }
-        } else {
-            post_order.push_back(frame.block);
-            stack.pop_back();
         }
-    }
-    // Reverse → RPO; drop the synthetic entry block (no guest instructions).
-    for (auto it = post_order.rbegin(); it != post_order.rend(); ++it) {
-        if (*it != entry_block) {
-            blocks_rpo.push_back(**it);
+        for (auto it = post_order.rbegin(); it != post_order.rend(); ++it) {
+            if (*it != entry_block) {
+                blocks_rpo.push_back(**it);
+            }
         }
+    };
+    append_component(entry_block);
+    for (auto* root : external_entry_roots) {
+        append_component(root);
     }
 }
 
@@ -749,6 +774,16 @@ HIRBlock* HIRBuilder::LinkBlock(const terminal::LinkBlock& link) {
     auto next_block = current_function->AppendBlock(link.next);
     current_function->AddEdge(pre_block, next_block, false);
     return next_block;
+}
+
+void HIRBuilder::ExternalLinkBlock(const terminal::ExternalLinkBlock& link) {
+    ASSERT_MSG(current_function, "current function is null!");
+    current_function->EndBlock(link);
+}
+
+void HIRBuilder::RegisterExternalDirectLink(Location target) {
+    ASSERT_MSG(current_function, "current function is null!");
+    current_function->RegisterExternalDirectLink(target);
 }
 
 void HIRBuilder::RegisterCallReturn(Location location) {

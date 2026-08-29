@@ -727,7 +727,8 @@ struct X86Instance::Impl final {
                 return stop;
             };
             auto decode = [&](LocationDescriptor addr, ir::HIRBlock* block,
-                              LocationDescriptor stop) {
+                              LocationDescriptor stop,
+                              DecodeStopKind stop_kind = DecodeStopKind::Internal) {
                 builder.SetCurBlock(block);
                 ir::Assembler assembler{&builder};
                 x86::X64Decoder decoder{
@@ -738,9 +739,10 @@ struct X86Instance::Impl final {
                         address_space->GetConfig().arm64_features,
                         address_space->GetConfig().sse_afp_nan,
                         !address_space->GetConfig().memory_base &&
-                                !address_space->GetConfig().page_table,
+                        !address_space->GetConfig().page_table,
                         features,
-                        stop};
+                        stop,
+                        stop_kind};
                 decoder.Decode();
             };
             while (decoded_count < decode_cap) {
@@ -767,7 +769,10 @@ struct X86Instance::Impl final {
                         replayed_split = true;
                         break;
                     }
-                    decode(owner_start, owner, target);
+                    decode(owner_start, owner, target,
+                           split->provenance->external_root
+                                   ? DecodeStopKind::External
+                                   : DecodeStopKind::Internal);
                     if (FunctionDecodeFrontier::DecodedEnd(owner->GetBlock()) == target) {
                         decode_frontier.Accept(target);
                     } else {
@@ -808,6 +813,16 @@ struct X86Instance::Impl final {
                     }
                 }
                 if (to_decode.empty()) {
+                    constexpr u32 kExternalRootMinimumSources = 3;
+                    const auto external_roots =
+                            decode_frontier.DiscoverExternalRoots(
+                                    kExternalRootMinimumSources);
+                    for (const auto target : external_roots) {
+                        hir_func->CreateOrGetBlock(ir::Location{target});
+                    }
+                    if (!external_roots.empty()) {
+                        continue;
+                    }
                     break;
                 }
                 for (auto addr : to_decode) {

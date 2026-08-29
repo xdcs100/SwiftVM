@@ -26,6 +26,21 @@ HIRBlock* Assembler::LinkBlock(const terminal::LinkBlock& block) {
     }
 }
 
+void Assembler::ExternalLinkBlock(const terminal::ExternalLinkBlock& link) {
+    end_decode = true;
+    if (hir_builder) {
+        hir_builder->ExternalLinkBlock(link);
+    } else {
+        ir_block->SetTerminal(terminal::Terminal{link});
+    }
+}
+
+void Assembler::RegisterExternalDirectLink(Location target) {
+    if (hir_builder) {
+        hir_builder->RegisterExternalDirectLink(target);
+    }
+}
+
 void Assembler::ReturnToDispatcher() {
     end_decode = true;
     if (hir_builder) {

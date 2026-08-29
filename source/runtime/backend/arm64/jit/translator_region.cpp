@@ -226,6 +226,19 @@ Label* JitTranslator::GetDirectCycleExit(ir::Location target) {
     return label.get();
 }
 
+Label* JitTranslator::GetExternalCycleExit(ir::Location target) {
+    if (!direct_cycle_latch || !cur_block ||
+        target.Value() >= cur_block->GetStartLocation().Value()) {
+        return nullptr;
+    }
+    auto& label = direct_cycle_exits[target.Value()];
+    if (!label) {
+        label = std::make_unique<Label>();
+        ++direct_cycle_cut_edges;
+    }
+    return label.get();
+}
+
 bool JitTranslator::CanUseRegionSuccessorLayout(ir::Location target) const {
     return next_region_block && *next_region_block == target.Value() &&
            !backedge_exit_label && !backedge_flags_plan &&

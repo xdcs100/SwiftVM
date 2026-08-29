@@ -1330,6 +1330,86 @@ TEST_CASE("static forwards register their flags bypass",
 #endif
 }
 
+TEST_CASE("canonical external roots stay inside one code object",
+          "[function-entry][direct-link][production]") {
+#if defined(__aarch64__)
+    ScopedEnvironment disk_cache{"SVM_JIT_CACHE", ""};
+    ScopedEnvironment flags_regs{"SVM_FLAGS_REGS", "1"};
+
+    const size_t page_size = static_cast<size_t>(getpagesize());
+    const size_t guest_size = 4 * page_size;
+    void* guest_memory = mmap(nullptr,
+                              guest_size,
+                              PROT_READ | PROT_WRITE,
+                              MAP_PRIVATE | MAP_ANON,
+                              -1,
+                              0);
+    REQUIRE(guest_memory != MAP_FAILED);
+    {
+        const VAddr source_guest = page_size + 0x100;
+        const VAddr target_guest = 2 * page_size + 0x100;
+        constexpr u64 kFingerprint = 0x63a4'51b2'97d8'e0full;
+        Config config{
+                .loc_start = 0,
+                .loc_end = guest_size,
+                .enable_jit = true,
+                .enable_asm_interp = false,
+                .has_local_operation = false,
+                .backend_isa = kArm64,
+                .uniform_buffer_size = 64,
+                .global_opts = Optimizations::BlockLink,
+                .region_edges = true,
+                .memory_base = guest_memory,
+                .guest_addr_mask = guest_size - 1,
+        };
+        AddressSpace space{config};
+        auto module = space.GetDefaultModule();
+
+        HIRBuilder builder{2, true};
+        auto* function = builder.AppendFunction(
+                Location{source_guest}, Location{target_guest + 1});
+        builder.AdvancePC(Imm{u64{1}});
+        builder.ExternalLinkBlock(
+                terminal::ExternalLinkBlock{Location{target_guest}});
+        auto* target = function->CreateOrGetBlock(Location{target_guest});
+        function->RegisterExternalEntryRoot(target);
+        builder.SetCurBlock(target);
+        const auto value = function
+                                   ->LoadImm(Imm{kFingerprint})
+                                   .SetType(ValueType::U64);
+        function->StoreUniform(Uniform{0, ValueType::U64}, value);
+        builder.AdvancePC(Imm{u64{1}});
+        function->EndBlock(terminal::ReturnToHost{});
+        function->EndFunction();
+
+        auto* source_code = static_cast<u8*>(TranslateIR(module, function));
+        REQUIRE(source_code != nullptr);
+        const auto source = space.GetLinkManager().QueryTarget(source_guest);
+        const auto published_target =
+                space.GetLinkManager().QueryTarget(target_guest);
+        REQUIRE(source);
+        REQUIRE(published_target);
+        REQUIRE(source->target_owner == published_target->target_owner);
+        REQUIRE(source->region_id == published_target->region_id);
+        const auto region = module->GetCodeRegion(source_code);
+        REQUIRE(region);
+        REQUIRE(FindProductionSites(space, *region, source_code).empty());
+
+        Runtime runtime{&space};
+        runtime.SetLocation(source_guest);
+        REQUIRE(runtime.Run() == HaltReason::CallHost);
+        u64 observed{};
+        const auto uniform = runtime.GetUniformBuffer();
+        REQUIRE(uniform.size() >= sizeof(observed));
+        std::memcpy(&observed, uniform.data(), sizeof(observed));
+        REQUIRE(observed == kFingerprint);
+    }
+    REQUIRE(munmap(guest_memory, guest_size) == 0);
+#else
+    SUCCEED("canonical external root execution requires an AArch64 host");
+#endif
+}
+
 TEST_CASE("fault-backed continuation rejects empty and mismatched frames",
           "[direct-link][continuation][fault]") {
 #if defined(__aarch64__)

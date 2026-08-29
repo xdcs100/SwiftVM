@@ -28,6 +28,12 @@ struct LinkBlockFast {
     Location next;
 };
 
+struct ExternalLinkBlock {
+    explicit ExternalLinkBlock(const Location& next_)
+            : next(next_) {}
+    Location next;
+};
+
 struct PopRSBHint {};
 
 struct If;
@@ -41,6 +47,7 @@ using Terminal = boost::variant<
         ReturnToHost,
         LinkBlock,
         LinkBlockFast,
+        ExternalLinkBlock,
         PopRSBHint,
         boost::recursive_wrapper<If>,
         boost::recursive_wrapper<Condition>,

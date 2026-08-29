@@ -2113,13 +2113,27 @@ TEST_CASE("function decoder links an unconditional jump only to an existing bloc
                     }
                     return false;
                 });
-        return std::pair{has_set_location, links_target};
+        const bool links_external = VisitVariant<bool>(
+                entry->GetBlock()->GetTerminal(), [&](const auto& value) {
+                    using T = std::decay_t<decltype(value)>;
+                    if constexpr (std::is_same_v<T,
+                                                 terminal::ExternalLinkBlock>) {
+                        return value.next == target;
+                    }
+                    return false;
+                });
+        const bool records_external =
+                function->GetExternalDirectLinks().size() == 1 &&
+                function->GetExternalDirectLinks().front().source == entry &&
+                function->GetExternalDirectLinks().front().target == target;
+        return std::tuple{has_set_location, links_target, links_external,
+                          records_external};
     };
 
     const auto external = decode(false);
     const auto internal = decode(true);
-    REQUIRE(external == std::make_pair(true, false));
-    REQUIRE(internal == std::make_pair(false, true));
+    REQUIRE(external == std::tuple{true, false, false, true});
+    REQUIRE(internal == std::tuple{false, true, false, false});
 }
 
 TEST_CASE("structured V128 address wraps inside the 4GB guest window") {
