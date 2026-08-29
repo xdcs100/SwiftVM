@@ -22,6 +22,8 @@ enum class PinnedWidthShape {
     PublishedLow32,
     PublishedLow32MultiUse,
     PublishedZero8,
+    PublishedZero8Compare,
+    PublishedZero8Store,
     PublishedSign8,
     SelectPublication,
     SelectPublicationFault,
@@ -69,7 +71,9 @@ std::vector<std::string> EmitWidthFact(PinnedWidthShape shape, bool overwrite_ta
             auto sum = block->Add(low, Operand{Imm{3u}}).SetType(ValueType::U32);
             block->StoreUniform(Uniform{72, ValueType::U32}, sum);
         }
-    } else if (shape == PinnedWidthShape::PublishedZero8) {
+    } else if (shape == PinnedWidthShape::PublishedZero8 ||
+               shape == PinnedWidthShape::PublishedZero8Compare ||
+               shape == PinnedWidthShape::PublishedZero8Store) {
         auto address = block->LoadImm(Imm{swift::u64{0x1000}}).SetType(ValueType::U64);
         auto narrow = block->LoadMemory(Operand{address}).SetType(ValueType::U8);
         auto widened = block->ZeroExtend32(narrow).SetType(ValueType::U32);
@@ -80,8 +84,18 @@ std::vector<std::string> EmitWidthFact(PinnedWidthShape shape, bool overwrite_ta
                                        .SetType(ValueType::U64);
             block->SetHostGPR(replacement, HostRegIndex(22), Imm{0u});
         }
-        auto reused = block->ZeroExtend32(narrow).SetType(ValueType::U32);
-        block->StoreUniform(Uniform{80, ValueType::U32}, reused);
+        if (shape == PinnedWidthShape::PublishedZero8Compare) {
+            auto compare = block->Sub(narrow, Operand{Imm{swift::u8{5}}})
+                                   .SetType(ValueType::U8);
+            block->SaveFlags(compare, Flags::Carry);
+        } else if (shape == PinnedWidthShape::PublishedZero8Store) {
+            auto output = block->LoadImm(Imm{swift::u64{0x2000}})
+                                  .SetType(ValueType::U64);
+            block->StoreMemory(Operand{output}, narrow);
+        } else {
+            auto reused = block->ZeroExtend32(narrow).SetType(ValueType::U32);
+            block->StoreUniform(Uniform{80, ValueType::U32}, reused);
+        }
     } else if (shape == PinnedWidthShape::PublishedSign8) {
         auto address = block->LoadImm(Imm{swift::u64{0x1000}}).SetType(ValueType::U64);
         auto narrow = block->LoadMemory(Operand{address}).SetType(ValueType::S8);
@@ -195,6 +209,14 @@ TEST_CASE("a published S8 sign extension serves a later extension from its pinne
     const auto lines = EmitWidthFact(PinnedWidthShape::PublishedSign8, false);
     REQUIRE(Count(lines, "sxtb") == 1);
     REQUIRE(Count(lines, "mov x", ", x22") == 1);
+}
+
+TEST_CASE("published narrow facts feed compare and memory consumers") {
+    const auto compare = EmitWidthFact(
+            PinnedWidthShape::PublishedZero8Compare, false);
+    const auto store = EmitWidthFact(PinnedWidthShape::PublishedZero8Store, false);
+    REQUIRE(Count(compare, "cmp w22", "#0x5") == 1);
+    REQUIRE(Count(store, "strb w22") == 1);
 }
 
 TEST_CASE("overwriting narrow extension facts rejects the pinned home") {

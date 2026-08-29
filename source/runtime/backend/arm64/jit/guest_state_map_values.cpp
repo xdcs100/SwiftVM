@@ -16,11 +16,14 @@ bool ReadsFixedHomeValue(const ir::Inst& consumer, u32 width) {
         case ir::OpCode::Add:
         case ir::OpCode::Select:
             return width >= sizeof(u32);
+        case ir::OpCode::StoreMemory:
+            return true;
         case ir::OpCode::ZeroExtend32:
         case ir::OpCode::ZeroExtend32To64:
         case ir::OpCode::SignExtend:
             return true;
         case ir::OpCode::Sub:
+            return width <= sizeof(u32);
         case ir::OpCode::And:
         case ir::OpCode::Or:
         case ir::OpCode::Xor:
@@ -276,6 +279,12 @@ void GuestStateMap::BuildValueVersions(
                 }
             }
             if (newest) {
+                const bool narrow_compare = inst.GetOp() == ir::OpCode::Sub &&
+                        width < sizeof(u32);
+                if (narrow_compare &&
+                    !newest->location.extension.KnownZeroAbove(width * 8)) {
+                    continue;
+                }
                 fixed_home_uses.insert_or_assign(
                         std::make_pair(value.Def(), &inst), newest->location);
                 if (SupportsResidentDefinitionElision(inst)) {

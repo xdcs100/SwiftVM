@@ -1816,9 +1816,13 @@ void JitTranslator::EmitStoreMemory(ir::Inst* inst) {
         return;
     }
     const bool zero_gpr = CanUseZeroStoreRegister(value);
+    const auto residence = guest_state_map.FixedHomeForUse(value, inst);
     const auto store_w = [&]() -> WRegister {
         if (zero_gpr) {
             return wzr;
+        }
+        if (residence && residence->width == ir::GetValueSizeByte(type)) {
+            return WRegister(residence->home);
         }
         if (value.Def()) {
             if (auto it = pinned_memory_values.find(value.Def());
