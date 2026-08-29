@@ -1050,6 +1050,7 @@ private:
     [[nodiscard]] bool CanUseCallContinuation() const;
     [[nodiscard]] bool CanUseIndirectCallContinuation() const;
     bool EmitIndirectCallForward(bool pending_flags = false);
+    void EmitIndirectCallContinuationStubs(Label* shared_miss);
     void EmitIndirectExitColdPaths();
     std::unique_ptr<Label> backedge_exit_label{};
     bool backedge_exit_referenced{};
@@ -1074,8 +1075,14 @@ private:
         u64 guest_start{};
         bool reset_return_stack{};
     };
+    struct IndirectCallContinuationSite {
+        std::unique_ptr<Label> miss{};
+        std::unique_ptr<Label> resume{};
+        Label* shared_miss{};
+    };
     std::array<IndirectExitMissSite, 32> indirect_exit_miss_sites{};
     std::array<IndirectExitMissSite, 32> pending_call_miss_sites{};
+    std::vector<IndirectCallContinuationSite> indirect_call_continuation_sites{};
     std::vector<std::unique_ptr<VecNaNColdSite>> vec_nan_cold_sites{};
     std::vector<BlockColdPathPlan> block_cold_path_plans{};
     struct DeferredNZCVMergeStub {

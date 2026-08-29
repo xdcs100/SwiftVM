@@ -125,6 +125,23 @@ void* TranslateIndirectCallSource(const std::shared_ptr<Module>& module,
     return TranslateIR(module, function);
 }
 
+void* TranslateStaticCallSource(const std::shared_ptr<Module>& module,
+                                VAddr guest,
+                                VAddr target_guest,
+                                VAddr return_guest) {
+    HIRBuilder builder{1, true};
+    auto* function = builder.AppendFunction(Location{guest}, Location{return_guest + 1});
+    const auto return_value = function->LoadImm(Imm{return_guest}).SetType(ValueType::U64);
+    function->CallReturn(return_value, Imm{return_guest}, Lambda{Imm{target_guest}});
+    function->SetLocation(Lambda{Imm{target_guest}});
+    builder.RegisterCallReturn(Location{return_guest});
+    function->EndBlock(terminal::ReturnToDispatch{});
+    builder.SetCurBlock(Location{return_guest});
+    function->EndBlock(terminal::ReturnToHost{});
+    function->EndFunction();
+    return TranslateIR(module, function);
+}
+
 void* TranslateCallTarget(const std::shared_ptr<Module>& module,
                           VAddr guest,
                           u64 fingerprint) {
@@ -135,6 +152,22 @@ void* TranslateCallTarget(const std::shared_ptr<Module>& module,
                                .SetType(ValueType::U64);
     function->StoreUniform(Uniform{0, ValueType::U64}, value);
     function->EndBlock(terminal::ReturnToHost{});
+    function->EndFunction();
+    return TranslateIR(module, function);
+}
+
+void* TranslateReturningCallTarget(const std::shared_ptr<Module>& module,
+                                   VAddr guest,
+                                   u64 fingerprint) {
+    HIRBuilder builder{1, true};
+    auto* function = builder.AppendFunction(Location{guest}, Location{guest + 1});
+    const auto value = function->LoadImm(Imm{fingerprint}).SetType(ValueType::U64);
+    function->StoreUniform(Uniform{0, ValueType::U64}, value);
+    const auto return_target =
+            function->LoadUniform<TypedValue<ValueType::U64>>(Uniform{16, ValueType::U64})
+                    .SetType(ValueType::U64);
+    function->SetLocation(Lambda{return_target});
+    function->EndBlock(terminal::PopRSBHint{});
     function->EndFunction();
     return TranslateIR(module, function);
 }
@@ -1370,7 +1403,73 @@ TEST_CASE("fault-backed continuation rejects empty and mismatched frames",
 #endif
 }
 
-TEST_CASE("fault-backed indirect call rejects an invalidated host target",
+TEST_CASE("call misses preserve host continuation across dispatch",
+          "[direct-link][continuation][call-miss]") {
+#if defined(__aarch64__)
+    ScopedEnvironment disk_cache{"SVM_JIT_CACHE", ""};
+    ScopedEnvironment flags_regs{"SVM_FLAGS_REGS", "1"};
+
+    const bool static_call = GENERATE(false, true);
+    CAPTURE(static_call);
+    const size_t page_size = static_cast<size_t>(getpagesize());
+    const size_t guest_size = 8 * page_size;
+    void* guest_memory =
+            mmap(nullptr, guest_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    REQUIRE(guest_memory != MAP_FAILED);
+    {
+        const VAddr source_guest = page_size + 0x140;
+        const VAddr return_guest = source_guest + 1;
+        const VAddr target_guest = 5 * page_size + 0x140;
+        constexpr u64 kFingerprint = 0x3141'5926'5358'9793ull;
+        Config config{
+                .loc_start = 0,
+                .loc_end = guest_size,
+                .enable_jit = true,
+                .enable_asm_interp = false,
+                .has_local_operation = false,
+                .backend_isa = kArm64,
+                .uniform_buffer_size = 64,
+                .global_opts = Optimizations::BlockLink | Optimizations::ReturnStackBuffer,
+                .region_edges = true,
+                .memory_base = guest_memory,
+                .guest_addr_mask = guest_size - 1,
+        };
+        AddressSpace space{config};
+        auto module = space.GetDefaultModule();
+
+        auto* source_code =
+                static_call ? TranslateStaticCallSource(
+                                      module, source_guest, target_guest, return_guest)
+                            : TranslateIndirectCallSource(module, source_guest, return_guest);
+        REQUIRE(source_code != nullptr);
+
+        Runtime runtime{&space};
+        auto* empty = runtime.GetState()->rsb_pointer;
+        REQUIRE(empty != nullptr);
+        std::memcpy(runtime.GetUniformBuffer().data() + 8, &target_guest, sizeof(target_guest));
+        std::memcpy(runtime.GetUniformBuffer().data() + 16, &return_guest, sizeof(return_guest));
+        runtime.SetLocation(source_guest);
+        REQUIRE(runtime.Run() == HaltReason::CodeMiss);
+        REQUIRE(runtime.GetLocation() == target_guest);
+        REQUIRE(runtime.GetState()->rsb_pointer == empty - 1);
+        REQUIRE((empty - 1)->guest_location == return_guest);
+        REQUIRE((empty - 1)->dispatch_index != 0);
+
+        auto* target_code = TranslateReturningCallTarget(module, target_guest, kFingerprint);
+        REQUIRE(target_code != nullptr);
+        REQUIRE(runtime.Run() == HaltReason::CallHost);
+        REQUIRE(runtime.GetState()->rsb_pointer == empty);
+        u64 result{};
+        std::memcpy(&result, runtime.GetUniformBuffer().data(), sizeof(result));
+        REQUIRE(result == kFingerprint);
+    }
+    REQUIRE(munmap(guest_memory, guest_size) == 0);
+#else
+    SUCCEED("call-miss continuation requires an AArch64 host");
+#endif
+}
+
+TEST_CASE("fault-backed indirect call preserves an invalidated target frame",
           "[direct-link][continuation][indirect-l1][fault]") {
 #if defined(__aarch64__)
     ScopedEnvironment disk_cache{"SVM_JIT_CACHE", ""};
@@ -1422,7 +1521,9 @@ TEST_CASE("fault-backed indirect call rejects an invalidated host target",
                     sizeof(target_guest));
         runtime.SetLocation(source_guest);
         REQUIRE(runtime.Run() == HaltReason::CallHost);
-        REQUIRE(runtime.GetState()->rsb_pointer == empty);
+        REQUIRE(runtime.GetState()->rsb_pointer == empty - 1);
+        REQUIRE((empty - 1)->guest_location == return_guest);
+        REQUIRE((empty - 1)->dispatch_index != 0);
         u64 result{};
         std::memcpy(&result, runtime.GetUniformBuffer().data(), sizeof(result));
         REQUIRE(result == kFingerprint);

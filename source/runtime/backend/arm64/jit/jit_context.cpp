@@ -10,11 +10,11 @@
 #include <iterator>
 #include <string_view>
 
+#include "runtime/backend/arm64/continuation_contract.h"
 #include "runtime/backend/arm64/defines.h"
 #include "runtime/backend/context.h"
 #include "runtime/common/backedge_control.h"
 #include "runtime/common/svm_config.h"
-
 
 namespace swift::runtime::backend::arm64 {
 
@@ -910,7 +910,7 @@ JitContext::ForwardContinuation(const Register& location, Label* miss) {
     ReserveTmpX(XRegister{location.GetCode()});
     const auto predicted = GetTmpX();
     const auto continuation = GetTmpX();
-    __ Ldp(predicted, continuation, MemOperand(rsb_ptr, 16, PostIndex));
+    ContinuationContract::ConsumeFrame(masm, predicted, continuation);
     __ Cmp(predicted, location);
     __ B(miss, ne);
     const u32 fault_begin = CurrentBufferSize();
@@ -918,11 +918,11 @@ JitContext::ForwardContinuation(const Register& location, Label* miss) {
     return {fault_begin, CurrentBufferSize()};
 }
 
-JitContext::IndirectCallForwardResult
-JitContext::ForwardIndirectCall(const Register& location,
-                                Label* miss,
-                                bool pending_flags) {
-    ASSERT(miss);
+JitContext::IndirectCallForwardResult JitContext::ForwardIndirectCall(const Register& location,
+                                                                      Label* miss,
+                                                                      Label* resume,
+                                                                      bool pending_flags) {
+    ASSERT(miss && resume);
     ReserveTmpX(XRegister{location.GetCode()});
     const auto index = GetTmpX();
     const auto entry = GetTmpX();
@@ -941,6 +941,7 @@ JitContext::ForwardIndirectCall(const Register& location,
     __ B(miss, ne);
     const u32 target_fault_begin = CurrentBufferSize();
     __ Blr(entry);
+    __ Bind(resume);
     return {
             .lookup_fault = {fault_begin, fault_end},
             .target_fault = {target_fault_begin, CurrentBufferSize()},
@@ -1406,7 +1407,7 @@ void JitContext::EmitPendingFlagsCallEntry(LocationDescriptor location) {
         return;
     }
     call_pending_flags_entry_offsets.emplace(location, CurrentBufferSize());
-    __ Stp(x14, x30, MemOperand(rsb_ptr, -16, PreIndex));
+    ContinuationContract::PublishFrame(masm);
     __ B(GetCountedEntryLabel(location));
 }
 
@@ -1498,7 +1499,7 @@ void JitContext::SetCurrent(ir::Function* function) {
     if (ContinuationActive()) {
         call_entry_offsets.emplace(function->GetStartLocation().Value(),
                                    CurrentBufferSize());
-        __ Stp(x14, x30, MemOperand(rsb_ptr, -16, PreIndex));
+        ContinuationContract::PublishFrame(masm);
     }
 }
 

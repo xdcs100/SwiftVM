@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstring>
 #include "aarch64/macro-assembler-aarch64.h"
+#include "runtime/backend/arm64/continuation_contract.h"
 #include "runtime/backend/arm64/fpcr_mode.h"
 #include "runtime/common/alignment.h"
 #include "runtime/common/svm_config.h"
@@ -28,13 +29,10 @@ namespace {
     if (state && site) {
         state->current_loc = ir::Location{site->guest_target};
     }
-    return context.dispatcher;
-}
-
-[[nodiscard]] void* TraversalTarget(void* target, bool call) {
-    const auto value = reinterpret_cast<uintptr_t>(target);
-    ASSERT((value & 1u) == 0);
-    return reinterpret_cast<void*>(value | static_cast<uintptr_t>(call));
+    const auto traversal = site && site->kind == LinkSiteKind::Call
+                                   ? ContinuationTraversal::CallMiss
+                                   : ContinuationTraversal::Branch;
+    return ContinuationContract::EncodeTraversal(context.dispatcher, traversal);
 }
 
 }  // namespace
@@ -76,13 +74,17 @@ extern "C" void* RegionLinkTrampolineSlow(RegionLinkContext* context,
 
         if (site->state == LinkSiteState::Linked) {
             if (site->target_generation == target->generation) {
-                return TraversalTarget(traversal_host_pc, call);
+                return ContinuationContract::EncodeTraversal(
+                        traversal_host_pc,
+                        call ? ContinuationTraversal::Call : ContinuationTraversal::Branch);
             }
             continue;
         }
         if (site->state == LinkSiteState::Far) {
             if (site->target_generation == target->generation) {
-                return TraversalTarget(traversal_host_pc, call);
+                return ContinuationContract::EncodeTraversal(
+                        traversal_host_pc,
+                        call ? ContinuationTraversal::Call : ContinuationTraversal::Branch);
             }
             continue;
         }
@@ -91,7 +93,9 @@ extern "C" void* RegionLinkTrampolineSlow(RegionLinkContext* context,
                                  context->region->ContainsRx(direct_host_pc);
         if (!same_region || !Imm26Reachable(rx_site, direct_host_pc)) {
             if (context->manager->MarkFar(key, target->generation)) {
-                return TraversalTarget(traversal_host_pc, call);
+                return ContinuationContract::EncodeTraversal(
+                        traversal_host_pc,
+                        call ? ContinuationTraversal::Call : ContinuationTraversal::Branch);
             }
             continue;
         }
@@ -112,7 +116,9 @@ extern "C" void* RegionLinkTrampolineSlow(RegionLinkContext* context,
                                               *branch);
                 });
         if (linked) {
-            return TraversalTarget(traversal_host_pc, call);
+            return ContinuationContract::EncodeTraversal(
+                    traversal_host_pc,
+                    call ? ContinuationTraversal::Call : ContinuationTraversal::Branch);
         }
     }
     return ReturnToDispatcher(*context, state, context->manager->QuerySite(key));
@@ -250,11 +256,15 @@ RegionLinkTrampolineCode BuildRegionLinkTrampoline(
     masm.Ldp(x29, x30, MemOperand(sp, 0));
     masm.Ldr(x16, MemOperand(sp, 16));
     masm.Add(sp, sp, frame_size);
+    Label continuation_published;
+    masm.Tbz(x16, ContinuationContract::kPublishFrameBit, &continuation_published);
+    ContinuationContract::PublishFrame(masm);
+    masm.Bind(&continuation_published);
     Label call_target;
-    masm.Tbnz(x16, 0, &call_target);
+    masm.Tbnz(x16, ContinuationContract::kCallTraversalBit, &call_target);
     masm.Mov(x30, reinterpret_cast<uintptr_t>(context->return_host));
     masm.Bind(&call_target);
-    masm.Bic(x16, x16, 1);
+    masm.Bic(x16, x16, ContinuationContract::kTraversalTagMask);
     // A branch-instruction patch is not guaranteed to be observed merely by
     // cache maintenance performed on another core. The first slow traversal
     // performs context synchronization before entering the selected target.

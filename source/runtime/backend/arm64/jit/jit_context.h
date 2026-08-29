@@ -192,10 +192,10 @@ public:
     ForwardIndirectL1(const Register& location, Label* miss = nullptr);
     [[nodiscard]] FaultRange
     ForwardContinuation(const Register& location, Label* miss);
-    [[nodiscard]] IndirectCallForwardResult
-    ForwardIndirectCall(const Register& location,
-                        Label* miss,
-                        bool pending_flags = false);
+    [[nodiscard]] IndirectCallForwardResult ForwardIndirectCall(const Register& location,
+                                                                Label* miss,
+                                                                Label* resume,
+                                                                bool pending_flags = false);
     void ReturnToDispatcher(const Register& location);
     void ReturnHost();
     [[nodiscard]] bool ContinuationActive() const {
