@@ -931,3 +931,28 @@ published 分组 37 条断言。Release 同源 A/B 的 smallpt `4 8 6` 两侧均
 下一阶段需要在同一对象上加入 guest slot/value version、width facts 和 fault snapshot，随后才允许
 事实跨 diamond/backedge join 或扩展到 memory/XMM consumer。本阶段没有新增 env 开关、probe、
 诊断日志、临时源路径、运行时分支或旧机制兜底，也没有运行压力测试或长基准。
+
+### 16.20 non-fallthrough EdgeFlags canonical tail
+
+提交 `6871978` 将 mixed region join 扩展到 canonical arm 不是布局 fallthrough 的情况。
+当 source 携带 full NZCV、恰好一个 successor 接受 pending state、compatible arm 会在观察前
+覆盖 incoming flags，且两条边都不是 cycle/cut 时，`RegionFlagsJoinPlan` 选择新的
+`CanonicalTail`。compatible arm 保留布局 fallthrough 或普通本地分支；canonical arm 进入函数冷区
+的 canonicalizing stub。
+
+stub 按 `{target, mask, polarity, version, token}` 建键，相同状态和目标的多条边共用一个入口。
+每个入口只生成 `ADR x17,target` 和到既有 region merge trampoline 的分支；full NZCV merge 体不在
+代码对象中复制，PF/AF token 路径在 source 分支前物化到既有 token register。相比 source 内先做
+三条 full-NZCV merge 再选择 successor，单个来源也不会增加静态指令，多来源会继续摊薄同一 stub。
+cycle/cut 仍走原有 fault/poll 路径，不从冷 stub 绕过恢复协议。
+
+生产用例新增 compatible-fallthrough 布局，执行验证关闭/开启优化时的 selector、guest flags 和 halt
+结果一致，条件分支位于 merge 之前，并且新 tail 与原 canonical-fallthrough split 的总代码对象大小
+相同。Mac Debug 通过 60 条 region-flags、929 条 production direct-link、105 条 continuation 和
+788 条非压力 SMC 断言。
+
+Release 同源短账保持 smallpt `4 8 6` 的 279 roots / 49,265 条和 canonical PPM SHA-256；
+SQLite `--size 1 --testset main :memory:` 保持 2,188 roots / 356,545 条且正常完成。这两个 workload
+没有命中新 tail，因此本阶段只声明机制覆盖和零回退，不声明宏观收益。没有运行长基准或压力测试，
+也没有新增 env 开关、probe、日志、临时源路径或兼容兜底。EdgeFlags 后续只剩需要 exact-mask merge
+trampoline 的 partial-mask shared tail，以及非零 packed-flags version 的真实 producer。

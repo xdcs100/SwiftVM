@@ -3525,6 +3525,20 @@ peepholes.
   facts, fault snapshots, CFG joins and memory/XMM consumers remain. No stress run, long benchmark,
   env switch, probe, diagnostic path, temporary source path or fallback remains.
 
+- `6871978` adds a non-fallthrough canonical tail to mixed region flags joins. A full-NZCV source
+  with exactly one compatible successor can branch its canonical arm to a cold stub when neither
+  edge is a cycle/cut and the canonical arm is not the layout fallthrough. Stubs are shared by
+  `{target, mask, polarity, version, token}` and contain only `ADR x17,target` plus a branch to the
+  existing region merge trampoline; the merge body is not duplicated in the code object, and live
+  PF/AF tokens use the existing x12 contract. A compatible-fallthrough production case proves the
+  same guest flags, selector and halt result as FLAGS=0, places the branch before canonicalization,
+  and has the same total code size as the existing canonical-fallthrough split. Mac Debug passes 60
+  region-flags, 929 production direct-link, 105 continuation and 788 non-stress SMC assertions.
+  Release smallpt remains 279 roots / 49,265 instructions with canonical PPM, and SQLite main/size1
+  remains 2,188 roots / 356,545 instructions. Neither short workload hits the new tail, so no macro
+  shrinkage is claimed. Partial-mask tails still require an exact-mask merge trampoline; no stress
+  run, long benchmark, env switch, probe, diagnostic path, temporary source path or fallback remains.
+
 ## Orb loop
 
 ```
