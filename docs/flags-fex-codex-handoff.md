@@ -3471,6 +3471,19 @@ peepholes.
   unverified. No stress run, long benchmark, probe, env switch, diagnostic path or late-resolution
   fallback remains.
 
+- `8e0927d` removes the emitter's contiguous-only pending-PSTATE gate. Any well-formed NZCV mask can
+  now use the existing reversible direct/static-link bypass when the target contract overwrites every
+  incoming bit before observation or fault and commits at `AdvancePC`; version checks and full-only
+  pending-call publication are unchanged. The obsolete `HasContiguousPendingPState` predicate is
+  deleted. Production coverage adds a non-contiguous `N|C` source/target, verifies the linked branch
+  skips the complete variable-length merge, and restores the original merge on target invalidation.
+  Mac passes 165 direct-link flags, 821 production direct-link, 42 production region-edge and 704
+  non-stress SMC assertions. Release A/B stays identical at 279 roots / 49,265 instructions and the
+  canonical PPM SHA for smallpt, and 2,187 roots / 356,265 instructions for SQLite main/size1. No
+  stress run, long benchmark, probe, env switch, diagnostic path or fallback remains. Next replace
+  the separate region-successor proof with the shared target contract, then handle inverted/mixed
+  carry joins.
+
 ## Orb loop
 
 ```

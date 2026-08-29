@@ -828,3 +828,26 @@ probe、env 开关和迟绑定原型均未保留。
 
 P0 的 `freeSpace` Release 收益门禁已闭合。terminal-only 且含非 canonical RA/live-in 的 return
 entry 仍未开放；它与本阶段“从函数内部精确边界重放完整 call”的条件不同。
+
+### 16.16 非连续 partial-NZCV edge contract
+
+提交 `8e0927d` 去掉 emitter 中仅允许连续 NZCV mask 进入 flags bypass 的阶段门槛。
+`EdgeFlagsState` 和 `EdgeFlagsTargetContract` 原本已能表示任意合法 mask；现在只要 source
+是 well-formed pending PSTATE，target 在任何 observer/fault 之前覆盖全部 incoming 位、在
+`AdvancePC` 提交且 packed-flags version 一致，LinkManager 就可以使用原有可撤销
+patch 跳过整段 merge。过时的 `HasContiguousPendingPState` 表示和其唯一生产 gate 已删除。
+
+生产定向用例新增 `N|C` 非连续 source/target，验证 direct/static link 后分支跨过完整
+可变长 merge，target invalidation 后恢复原始 merge 首指令；partial target 仍不发布无目标
+contract 的 pending-call entry。Mac 通过 165 条 direct-link flags、821 条 production direct-link、
+42 条 production region-edge 和 704 条非压力 SMC 断言。
+
+Release 同源 A/B 短账保持 smallpt `4 8 6` 的 279 roots / 49,265 条 host 指令和
+canonical PPM SHA-256；SQLite `--size 1 --testset main :memory:` 两侧均为 2,187 roots /
+356,265 条且正常完成。这符合本阶段不删除 incompatible-target/SMC fallback 字节、只改变
+compatible link 动态执行路径的设计。没有运行长基准或压力测试，也没有保留 probe、
+env 开关、诊断路径或兼容兜底。
+
+EdgeFlags 剩余高优先级项是 inverted carry 的可证明 source provenance、mixed-polarity/
+multi-predecessor join，以及用同一 target contract 取代 region 内独立的
+`SuccessorCoversIncomingNzcv` 判定。
