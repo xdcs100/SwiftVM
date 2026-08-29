@@ -598,9 +598,16 @@ void X64Decoder::DecodeTzcnt(_DInst& insn) {
             }
         }
     }
-    const u64 wmask = width == 64 ? UINT64_MAX : ((u64(1) << width) - 1);
-    auto src = __ And(ToValue(Src(insn, op1)), ir::Operand{ir::Imm(wmask)})
-                       .SetType(GetSize(width));
+    auto src = NormalizeBitCountSource(insn, op1, width);
+    if (width == 32) {
+        auto result = __ CountTrailingZeros32(src);
+        __ SaveFlags(__ Or(result, ir::Operand{ir::Imm(u32(0))}), ir::Flags::Zero);
+        __ SetCarry(__ TestZero(src));
+        carry_ = CarryPolarity::Direct;
+        StorePolarity(false);
+        Dst(insn, op0, result);
+        return;
+    }
     auto src64 = __ ZeroExtend64(src);
     auto result = __ CallLambda(ir::Lambda{ir::Imm{reinterpret_cast<VAddr>(&BmiTzcnt64)}},
                                 src64,
@@ -650,9 +657,16 @@ void X64Decoder::DecodeLzcntBmi(_DInst& insn) {
             }
         }
     }
-    const u64 wmask = width == 64 ? UINT64_MAX : ((u64(1) << width) - 1);
-    auto src = __ And(ToValue(Src(insn, op1)), ir::Operand{ir::Imm(wmask)})
-                       .SetType(GetSize(width));
+    auto src = NormalizeBitCountSource(insn, op1, width);
+    if (width == 32) {
+        auto result = __ CountLeadingZeros32(src);
+        __ SaveFlags(__ Or(result, ir::Operand{ir::Imm(u32(0))}), ir::Flags::Zero);
+        __ SetCarry(__ TestZero(src));
+        carry_ = CarryPolarity::Direct;
+        StorePolarity(false);
+        Dst(insn, op0, result);
+        return;
+    }
     auto src64 = __ ZeroExtend64(src);
     auto result = __ CallLambda(ir::Lambda{ir::Imm{reinterpret_cast<VAddr>(&BmiLzcnt64)}},
                                 src64,

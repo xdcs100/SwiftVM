@@ -1066,9 +1066,13 @@ void X64Decoder::DecodeLzcnt(_DInst& insn) {
             }
         }
     }
-    const u64 wmask = width == 64 ? UINT64_MAX : ((u64(1) << width) - 1);
-    auto src = __ And(ToValue(Src(insn, op1)), ir::Operand{ir::Imm(wmask)})
-                       .SetType(GetSize(width));
+    auto src = NormalizeBitCountSource(insn, op1, width);
+    if (width == 32) {
+        auto result = __ CountLeadingZeros32(src);
+        __ SaveFlags(__ Or(result, ir::Operand{ir::Imm(u32(0))}), ir::Flags::Zero);
+        Dst(insn, op0, result);
+        return;
+    }
     auto src64 = __ ZeroExtend64(src);
     auto result = __ CallLambda(ir::Lambda{ir::Imm{reinterpret_cast<VAddr>(&Lzcnt64)}},
                                 src64, __ LoadImm(ir::Imm(u64(width))))
@@ -1179,6 +1183,17 @@ void X64Decoder::DecodeCmpxchg16b(_DInst& insn) {
     __ SaveFlags(diff, ir::Flags::Zero);
 }
 
+ir::Value X64Decoder::NormalizeBitCountSource(_DInst& insn,
+                                              _Operand& operand,
+                                              u32 width) {
+    auto source = ToValue(Src(insn, operand));
+    if (width != 16) {
+        return source.SetType(GetSize(width));
+    }
+    return __ And(source, ir::Operand{ir::Imm(u64(0xffff))})
+            .SetType(ir::ValueType::U16);
+}
+
 void X64Decoder::DecodeBitScan(_DInst& insn, bool reverse) {
     swift::runtime::PerfLoweringHandlerBegin();
     auto& op0 = insn.ops[0];
@@ -1198,11 +1213,19 @@ void X64Decoder::DecodeBitScan(_DInst& insn, bool reverse) {
             }
         }
     }
-    const u64 wmask = width == 64 ? UINT64_MAX : ((u64(1) << width) - 1);
-    // The source load may have used distorm's (wrong) 32-bit size for the
-    // 66-prefixed form; mask down to the architectural width.
-    auto src = __ And(ToValue(Src(insn, op1)), ir::Operand{ir::Imm(wmask)})
-                       .SetType(GetSize(width));
+    auto src = NormalizeBitCountSource(insn, op1, width);
+    if (width == 32) {
+        auto flagged = __ Or(src, ir::Operand{ir::Imm(u32(0))});
+        __ SaveFlags(flagged, ir::Flags::Zero);
+        auto scan = reverse
+                ? __ Xor(__ CountLeadingZeros32(src),
+                         ir::Operand{ir::Imm(u32(31))})
+                : __ CountTrailingZeros32(src);
+        auto dst_old = ToValue(Src(insn, op0));
+        auto result = __ SelectZero(src, dst_old, scan).SetType(ir::ValueType::U32);
+        Dst(insn, op0, result);
+        return;
+    }
     auto src64 = __ ZeroExtend64(src);
     // ZF = (src == 0); the remaining flags are architecturally undefined.
     auto flagged = __ Or(src64, ir::Operand{ir::Imm(u64(0))});

@@ -727,6 +727,7 @@ private:
     void DecodeUcomisd(_DInst& insn);
     // bsf / bsr (and tzcnt aliased to bsf with BMI1 hidden).
     void DecodeBitScan(_DInst& insn, bool reverse);
+    ir::Value NormalizeBitCountSource(_DInst& insn, _Operand& operand, u32 width);
     // lock cmpxchg (single-threaded model: plain load/compare/store).
     void DecodeCmpxchg(_DInst& insn);
     // rol / ror (value-exact; CF/OF left unchanged, see implementation).

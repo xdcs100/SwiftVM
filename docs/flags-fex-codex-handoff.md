@@ -3196,6 +3196,30 @@ peepholes.
   `272,049 -> 272,533` (`+0.177909%`). No diagnostic source, environment switch or stress path
   remains.
 
+- Unconditional direct-jump discovery was audited and fully removed. Exposing every constant jump
+  as a function `LinkBlock` first caused an early deterministic SQLite host fault; restricting it to
+  backward or unique-owner targets moved the failure to heap corruption and made the bounded
+  smallpt image uniformly red. Keeping the direct source external did not repair the contract:
+  retaining the split target in the same HIR CFG still produced wild-PC smallpt exits, a SQLite
+  guest halt and zero CoreMark CRCs. The restored tree reproduces the exact accepted baseline:
+  SQLite `2,164 / 269,373`, smallpt `263 / 37,998` with SHA-256
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`, and CoreMark
+  `294 / 37,979` with `crcfinal=0x382f`. Closing the remaining `freeSpace` direct entries therefore
+  needs an explicit external-edge or multiple-CFG-root state ABI; no probe, edge flag, target
+  registry or address gate remains.
+
+- 32-bit bit scans and counts now retain their architectural width through dedicated
+  `CountLeadingZeros32` / `CountTrailingZeros32` IR operations. A shared frontend normalizer masks
+  only the misreported 16-bit form; 32/64-bit BSF, BSR, LZCNT and TZCNT no longer create identity
+  all-ones masks, and 32-bit counts use native AArch64 `CLZ W` or `RBIT W + CLZ W` instead of the
+  64-bit scan/helper path. The same-input formal SQLite diff has 100% host and entry coverage, keeps
+  all 2,164 roots and moves `269,373 -> 269,235` (`-138`, `-0.051230%`) with no growth.
+  `__strrchr_sse2` moves `583 -> 535` versus FEX at 527, and `__memcmp_sse2` moves `592 -> 558`
+  versus FEX at 547. Two final SQLite shapes and timing-normalized outputs are identical. Bounded
+  smallpt moves `37,998 -> 37,920` with the same PPM SHA; CoreMark moves `37,979 -> 37,908` and
+  retains `crcfinal=0x382f`. Mac and Orb pass the BMI-enabled 27-assertion width/encoding matrix.
+  No stress run, diagnostic path or environment switch remains.
+
 ## Orb loop
 
 ```

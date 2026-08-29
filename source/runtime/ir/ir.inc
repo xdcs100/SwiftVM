@@ -151,6 +151,8 @@ INST(RorValue, Value, Value, Value)
 INST(ByteSwap, Value, Value, Imm)
 INST(CountLeadingZeros64, U64, Value)
 INST(CountTrailingZeros64, U64, Value)
+INST(CountLeadingZeros32, U32, Value)
+INST(CountTrailingZeros32, U32, Value)
 // Bit
 INST(BitExtract, Value, Value, Imm, Imm)
 INST(BitInsert, Value, Value, Value, Imm, Imm)
