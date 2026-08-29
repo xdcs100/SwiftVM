@@ -3617,6 +3617,18 @@ peepholes.
   temporary source/build path or fallback remains. Next route narrow memory/compare and XMM scalar
   consumers through this lattice instead of adding more producer matchers.
 
+- `b69d594` routes narrow compare and ordinary memory-store operands through the same resident
+  version lattice. U8/U16 compare requires an exact version plus `KnownZeroAbove(width)` before it
+  can read the W home; narrow StoreMemory requires exact version/home/width and otherwise falls
+  through to the existing canonical allocator path. Focused codegen emits `cmp w22,#5` and
+  `strb w22` directly. Mac Debug passes the 2 consumer assertions plus 120 pinned, 56 fault-snapshot,
+  4 SelectZero, 86 helper and 60 region-flags assertions. Exact Release A/B against `f4ca978` keeps
+  every root/top-20 with no growth: smallpt `49,095 -> 49,065` (`-30`) plus canonical PPM, and SQLite
+  `354,800 -> 354,519` (`-281`) with rc=0. Candidate codegen is 315.6 ms and TOTAL 1.483 s in one
+  consistency profile. No stress run, long benchmark, env switch, probe, log, temporary path or
+  fallback remains. The section-7 GPR lattice now has ALU-extension, compare and memory consumers;
+  audit XMM scalar reuse before broadening it further.
+
 ## Orb loop
 
 ```

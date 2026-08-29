@@ -1095,3 +1095,25 @@ overwrite、external root、diamond 和 backedge；fault-snapshot、SelectZero�
 明显 wall-time 回退的一致性检查，不声明性能结论。没有运行压力测试或长基准，也没有保留 env
 开关、probe、日志、临时源路径或兼容兜底。第 7 节下一步只扩展到能由同一事实格证明的 narrow
 memory/compare consumer 和 XMM scalar lane，不再增加 producer 形态白名单。
+
+### 16.26 narrow compare 与 memory consumer
+
+提交 `b69d594` 让 narrow compare 和普通 `StoreMemory` 直接消费 `GuestStateMap` 的 resident version。
+U8/U16 `Sub` 只有在相同 home 的相同版本仍存活，且 `ExtensionFacts` 证明
+`KnownZeroAbove(width)` 时才获得 fixed-home operand，避免用带脏高位的 W compare 改变 carry。
+窄 store 只需要版本、home 和宽度完全匹配，`EmitStoreMemory` 在旧的专用
+`pinned_memory_values/fused_pin_gpr_reads` 之前消费这一统一事实；overwrite、helper clobber 和 fault
+边界继续由同一 active-state invalidation 处理。
+
+定向 codegen 用例验证已发布 U8 版本直接生成 `cmp w22,#5` 和 `strb w22`，不再物化额外低位副本。
+Mac Debug 的该分组通过 2 条断言，pinned、fault-snapshot、SelectZero、helper 和 region-flags 分别通过
+120、56、4、86 和 60 条断言。
+
+Release 以 `f4ca978` 为同源基线。smallpt 保持 275 roots、100% root/top-20 覆盖和 canonical PPM，
+`49,095 -> 49,065`（`-30`，`-0.061106%`）；SQLite 保持 2,114 roots 和 100% root/top-20 覆盖，
+`354,800 -> 354,519`（`-281`，`-0.079200%`），无增长 root 且正常完成。单次 SQLite profile 的
+codegen 为 315.6 ms、TOTAL 为 1.483 s，与上一阶段同量级，只作为无明显回退检查。
+
+没有运行压力测试或长基准，也没有保留 env 开关、probe、日志、临时源路径或兼容兜底。GPR
+fault/CFG/extension 格的生产 consumer 已覆盖 ALU extension、narrow compare 和 narrow memory store；
+第 7 节下一步只剩 XMM scalar lane 是否能复用该模型的收益审计，不为低权重形态强行扩展。
