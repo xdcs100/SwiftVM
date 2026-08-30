@@ -1476,3 +1476,23 @@ publication 虽使前 295 个公共 root 减少 319 条，但 guest 在第 301 �
 
 本阶段没有运行长基准或压力测试，也没有保留临时 planner probe、日志、env 开关、硬编码 guest PC、
 临时源码路径或兼容兜底。剩余字符串大头已经从 packed result 搬运收窄为真实 helper frame 与循环控制流。
+
+### 16.41 SSE4.2 helper frame 的 writeback folding
+
+提交 `35de4f0` 将 helper frame 的独立 `sub sp`/`add sp` 融入首个保存和最后一个恢复。存在 GPR
+live-through 时，offset 0 的首个 `stp` 使用 pre-index，最终对应 `ldp` 使用 post-index；没有 GPR
+保存时由 x30 的 `str/ldr` 承担同一职责。其余 GPR、result slot 和 Q register 继续按既有对齐布局访问，
+不改变 clobber、参数或返回 ABI。
+
+短门禁结果：
+
+- helper-effects、SSE4.2 scratch、Rosetta/SDM 差分和 CallLambda 分别通过 29、512、16,255 和
+  67 条断言；定向 helper 用例覆盖无 GPR 保存、generic caller-clobber GPR 和 live-through FPR frame。
+- SQLite `main/size1` 保持 2,114 roots、100% root/top-30 覆盖和零增长，
+  `333,692 -> 333,630`（`-62`，`-0.018580%`），15 个 root 缩小；去除 timing 后 stdout 逐行一致。
+  `__strcmp_sse42@0x505120` 从 `318 -> 314`，EqualAny 主组从 `192 -> 188`。
+- smallpt `4 8 6` 保持 275 roots、`46,258` 条 host 指令和 canonical PPM，严格零变化。
+
+本阶段没有运行长基准或压力测试，也没有保留 probe、日志、env 开关、硬编码 guest PC、临时源码
+路径或兼容兜底。helper 现场剩余的栈指令均对应真实 live-through 值；下一步只评估能否由新的 leaf
+return ABI 消除 x30 frame，而不把保存序列转移到共享 thunk 后增加动态 call/return。
