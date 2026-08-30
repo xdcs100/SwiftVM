@@ -1546,35 +1546,6 @@ EqualAny 不再保存和恢复 x30。frame planner 在仍有 live-through GPR �
 本阶段没有运行长基准或压力测试，也没有保留调试路径、probe、日志、env 开关、硬编码 guest PC、
 临时源码路径或兼容兜底。
 
-### 16.45 memory-base 精确常量地址复用
-
-常量地址 RA 原本已把同一 basic block、同一页且通过 scratch 复核的 `GetOperand` 链绑定到一个
-page-base owner；identity 映射可由 memory operand 直接消费 page offset，但 Linux memory-base 模式仍在
-每个候选处重新物化完整 guest 地址。新的 emitter consumer 在同一 anchor、同一物理 GPR 且前一个
-缓存候选的完整地址与当前值严格相等时保留寄存器内容；同页不同地址仍重新物化，因此不会把 page-base
-等价误当成 exact-address 等价。
-
-常量地址提取、RA 元数据复核、page-offset 解析和 exact reuse 发码从
-`translator_control.cpp` 拆到独立的 `translator_const_address.cpp`。实现没有新增 RA metadata、运行时分支
-或第二套 cache 协议，identity 映射的 page-base 路径保持原样。
-
-短门禁结果：
-
-- 本地 Release 的常量地址定向用例通过 19 条断言，覆盖 identity 同页复用、memory-base 同地址复用、
-  同页不同地址重新物化、scratch 不足回退和 publication coalescing 并存。
-- 同一二进制的 smallpt `4 8 6` static-only A/B 保持 275 roots、100% root/top-30 coverage 和 canonical
-  PPM，`46,258 -> 46,188`（`-70`，`-0.151325%`）；17 个 root 缩小、零增长。
-  `main@0x402497` 与相邻 `0x40248e` 均减少 4 条完整地址物化指令。
-- SQLite `main/size1` 使用固定 8 秒上限，两侧均按门限退出；candidate 覆盖全部 821 个 baseline root 和
-  top-30，公共集 `146,169 -> 146,115`（`-54`，`-0.036944%`），15 个 root 缩小、零增长。该截断账
-  只用于确认生产命中与无共同 root 回退，不冒充完整 SQLite 结果。
-- Orb 的 `swift_runtime` 与 `svm_translator_linux` GCC 构建通过，`main_case.cpp.o` 定向编译通过。完整
-  `swift_test` 链接前被既有 `direct_link_production_test.cpp:1320` designated-initializer 顺序错误阻断，
-  本阶段不宣称 Orb 测试可执行文件门禁通过。
-
-CoreMark 20k 在 12 秒硬上限内未完成后立即终止，没有延长或改跑压力测试。用于同二进制归因的临时
-开关已删除；最终树没有新增 env、日志、probe、临时路径、硬编码 guest PC 或兼容兜底。
-
 ### 16.44 EqualEach 精确 clobber 与专用 return ABI
 
 提交 `a2aec22` 将 native `0x1a EqualEach` helper 的长度计算收敛到与 EqualAny 相同的
@@ -1606,3 +1577,68 @@ smashing，smallpt root 集也从 275 变为 265；该 CFG/RPO 改动没有保�
 
 本阶段没有运行长基准或压力测试，也没有保留调试路径、probe、日志、env 开关、硬编码 guest PC、
 临时源码路径或兼容兜底。
+
+### 16.45 memory-base 精确常量地址复用
+
+常量地址 RA 原本已把同一 basic block、同一页且通过 scratch 复核的 `GetOperand` 链绑定到一个
+page-base owner；identity 映射可由 memory operand 直接消费 page offset，但 Linux memory-base 模式仍在
+每个候选处重新物化完整 guest 地址。新的 emitter consumer 在同一 anchor、同一物理 GPR 且前一个
+缓存候选的完整地址与当前值严格相等时保留寄存器内容；同页不同地址仍重新物化，因此不会把 page-base
+等价误当成 exact-address 等价。
+
+常量地址提取、RA 元数据复核、page-offset 解析和 exact reuse 发码从
+`translator_control.cpp` 拆到独立的 `translator_const_address.cpp`。实现没有新增 RA metadata、运行时分支
+或第二套 cache 协议，identity 映射的 page-base 路径保持原样。
+
+短门禁结果：
+
+- 本地 Release 的常量地址定向用例通过 19 条断言，覆盖 identity 同页复用、memory-base 同地址复用、
+  同页不同地址重新物化、scratch 不足回退和 publication coalescing 并存。
+- 同一二进制的 smallpt `4 8 6` static-only A/B 保持 275 roots、100% root/top-30 coverage 和 canonical
+  PPM，`46,258 -> 46,188`（`-70`，`-0.151325%`）；17 个 root 缩小、零增长。
+  `main@0x402497` 与相邻 `0x40248e` 均减少 4 条完整地址物化指令。
+- SQLite `main/size1` 使用固定 8 秒上限，两侧均按门限退出；candidate 覆盖全部 821 个 baseline root 和
+  top-30，公共集 `146,169 -> 146,115`（`-54`，`-0.036944%`），15 个 root 缩小、零增长。该截断账
+  只用于确认生产命中与无共同 root 回退，不冒充完整 SQLite 结果。
+- Orb 的 `swift_runtime` 与 `svm_translator_linux` GCC 构建通过，`main_case.cpp.o` 定向编译通过。完整
+  `swift_test` 链接前被既有 `direct_link_production_test.cpp:1320` designated-initializer 顺序错误阻断，
+  本阶段不宣称 Orb 测试可执行文件门禁通过。
+
+CoreMark 20k 在 12 秒硬上限内未完成后立即终止，没有延长或改跑压力测试。用于同二进制归因的临时
+开关已删除；最终树没有新增 env、日志、probe、临时路径、硬编码 guest PC 或兼容兜底。
+
+### 16.46 flags-only consumer 的 dead spill result
+
+`SaveFlags` 和 `BranchOnlyFlags` 的 value operand 只建立 producer 与 guest-flags publication 的依赖；
+ARM64 emitter 消费的是 producer 留在 PSTATE 的 NZCV，不读取 scalar SSA。此前 scalar result 被分配为
+MEM 时，`TickIR` 仍把 pending result 写入 spill slot，即使该 flags marker 是它的全部 use，形成没有任何
+对应 reload 的死 `STR`。
+
+`JitContext::FlushSpillWrites` 现在先解析 pending write 在当前 consumer 中的直接 use。当 consumer 是
+上述 flags-only marker，且 direct-use 计数覆盖 definition 的全部非 pseudo use 时，直接丢弃 pending
+write；不建立 forwarded register、不改变 PSTATE，也不延长 scratch 生命周期。普通 scalar consumer、
+多 use、FPR、memory/helper/CFG barrier 和现有 width-ownership 路径保持原协议。
+
+短门禁结果：
+
+- 本地 Release 构建通过；spill 分组通过 16 个 case / 23,104 条断言，`BranchOnlyFlags` 与 `SaveFlags`
+  均覆盖 dead result，既有 width ownership 负向用例继续观察 canonical store/reload；branch-only flags
+  分组通过 4 个 case / 23 条断言。
+- 同源 smallpt `4 8 6` static-only A/B 保持 275 roots、100% root/top-30 coverage 和 canonical PPM，
+  `46,188 -> 46,091`（`-97`，`-0.210011%`）；23 个 root 缩小、零增长，mnemonic delta 严格为
+  `STR -97`。
+- SQLite `--help` 保持 225 roots、100% coverage 和逐字节一致 stdout，
+  `38,641 -> 38,572`（`-69`，`-0.178567%`）；14 个 root 缩小、零增长，mnemonic delta 为
+  `STR -69`。`__strcmp_sse42@0x505120` `312 -> 311`，因此该 root 的确认大头仍是其他 spill/CFG
+  生命周期，而不是 flags-only store。
+- SQLite `main/size1` 使用固定 8 秒上限，两侧均按门限退出；candidate 覆盖全部 695 个 baseline root
+  和 top-30，公共集 `126,570 -> 126,372`（`-198`，`-0.156435%`），44 个 root 缩小、零增长，
+  mnemonic delta 严格为 `STR -198`。candidate 额外完成 71 个 root，不计入收益。
+- Orb 的 `swift_runtime`、`svm_translator_linux` 构建和 `spill_forwarding_test.cpp.o` GCC 定向编译通过。
+  完整 `swift_test` 仍受既有 `direct_link_production_test.cpp:1320` designated-initializer 顺序错误阻断，
+  本阶段不宣称 Orb 测试可执行文件门禁通过。
+
+一个把 `ZeroExtend32/64`、`SignExtend` 和 `BranchOnlyFlags` 统一当作普通 forwarded consumer 的原型使
+smallpt 稳定 root 集从 275 变为 260；宽度 ownership 部分已完整删除。最终实现只表达 flags-only
+observer 的 dead-result 语义，没有保留诊断日志、env 开关、probe、临时路径、硬编码 guest PC 或兼容
+兜底，也没有运行长基准或压力测试。
