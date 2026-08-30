@@ -1749,3 +1749,48 @@ rc=139 退出，也已删除；最终合同不保留该路径或任何兼容兜�
 本阶段没有保留 probe、日志、env 开关、临时路径、硬编码 guest PC 或过时 fallback，也没有运行长
 基准或压力测试。final-use width spill 已从剩余组中闭合；后续 RA 大项只保留有加权规模证据的跨 CFG
 split interval，以及需要完整 fault/observer contract 的多 use memory consumer。
+
+### 16.50 pending definition 到 complete reload region 的所有权交接
+
+第 16.35 节的 reload region 从第一个 use 才开始，因此一个 spilled producer 紧邻 region 的首个 use
+时，旧路径仍在 `TickIR` 先写 canonical slot，首个真实 reader 随后再加载该 slot。第 16.36 节只能在
+所有 consumer 都属于静态 definition-transfer 集时从 producer 开始持有 region；含 `SetHostGPR` 的
+多 use value 因 publication emitter 可能提前返回，不能直接放入该集合。
+
+`SpillReload` 现在携带 `owns_all_uses`。planner 只有在 region 覆盖该 definition 的全部非 pseudo use、
+没有 terminal use、且全部 consumer 属于可交接集合时才设置该位。runtime 还必须看到 producer 已经
+真实生成的 pending scratch，并由 translator 确认当前 consumer 会读取 allocated source，才把 scratch
+交给 region：物理寄存器相同时零指令激活，不同时用一条 `mov` 转交；随后不再写回或首次 reload。
+
+`SetHostGPR` 的许可与 emitter 共用同一组 prepared contract。pinned Select/publication、direct spilled
+publication、dead write、pinned value transfer/copy、load update、biased/pre-index update、host-write
+coalescing、fused zero extension 和 fixed-home residence 都拒绝交接。其他 consumer 仍受既有
+definition-consumer 列表、完整 use closure、dirty/fixed clobber、scratch headroom 和 segment 边界保护。
+多 use width source 等不完整合同继续使用 canonical backing。
+
+一个仅依赖 planner use 的中间版本在 smallpt 与 SQLite `--help` 都于 96 个 root 后提前 halt。最小化
+证明不安全事件的代码差只有被删除的 `STR`，没有对应 `LDR`：该 `SetHostGPR` 已由 emitter 早退，IR
+use 并不等于物理 reader。该版本、定位用 PC 过滤和日志均已删除；最终版本由 translator reader
+contract 排除该路径。
+
+短门禁结果：
+
+- 本地 Debug 的 `swift_runtime`、`svm_translator_linux` 和 `swift_test` 构建通过；spill 分组通过
+  22 个 case / 23,145 条断言。新增正向 case 覆盖 pending scratch 到完整 region 的交接，
+  负向 case 验证 elided publication 保留 canonical backing；既有 multi-use width、fault-visible pinned
+  version 和 helper-preserved version case 继续通过。
+- 严格同源 smallpt `4 8 6` static-only A/B 保持 275 roots、100% root/top-30 coverage 和 canonical
+  PPM，`45,561 -> 45,479`（`-82`，`-0.179978%`）；20 个 root 缩小、零增长，mnemonic delta 为
+  `STR -51 / LDR -51 / MOV +20`。
+- SQLite `--help` 保持 225 roots、100% root/top-30 coverage 和逐字节一致 stdout，
+  `38,314 -> 38,283`（`-31`，`-0.080910%`）；9 个 root 缩小、零增长，mnemonic delta 为
+  `STR -16 / LDR -16 / MOV +1`。
+- SQLite main/size1 固定 8 秒配对两侧均按门限 rc=124 退出；candidate 覆盖 794/802 个 baseline root、
+  98.791479% host code 和全部 top-30。公共集 `141,175 -> 140,934`（`-241`，`-0.170710%`），
+  45 个 root 缩小、零增长，mnemonic delta 为 `STR -137 / LDR -137 / MOV +33`；缺失 root 不外推。
+- Orb clean GCC 构建通过 `swift_runtime`、`svm_translator_linux`，并完成
+  `spill_forwarding_test.cpp.o` 定向编译。
+
+本阶段没有重启第 16.38 节已证明严格零收益的跨 local-CFG preload，也没有保留 probe、日志、env
+开关、临时路径、硬编码 guest PC 或兼容 fallback，没有运行长基准或压力测试。剩余 spill residual 的
+主体已经进一步收窄为真实 fault/observer-aware memory lifetime，而不是 publication 首 use 的机械往返。
