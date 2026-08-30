@@ -2084,3 +2084,28 @@ TOTAL 中位数为 `2.374s -> 2.433s`（`+2.485%`）。该机制只省一次 sna
 因此实现、测试、共享 consumer 表和所有 census/捕获均已删除，不保留默认关闭分支或局部 fallback。
 剩余 zero32 read 不能再解释为“GPR 未 pin”；下一次只有跨 CFG 宽度事实能证明同版本 X 高位已清零，
 或新的 consumer 能在不延长 architectural-home 依赖链的情况下接管 W view 时才重开。
+
+### 16.60 external CFG component hot/cold island 的回退裁定
+
+按第 16.55 节要求实现了首类 RPO component 身份：`HIRFunction` 在主 CFG 和每个 canonical external
+root 的 DFS 结果旁记录 component id；后端只允许同 component 的物理 fallthrough，并在 component
+边界发出该 component 已积累的 block cold plans。external edge 仍通过同一 code object 的 published
+entry，未改变入口 contract、SMC owner 或 generation/invalidation 协议。
+
+该基础层与双来源门槛组合后，SQLite roots `2,079 -> 2,051`，host 指令
+`252,544 -> 252,053`（`-491`）；28 个独立 root 被并入，36 个公共 root 缩小、14 个增长。
+smallpt `263 -> 261 / 36,749 -> 36,727`，CoreMark `293 -> 288 / 36,574 -> 36,506`，PPM、
+归一化 SQLite stdout 和 `crcfinal=0x4983` 均保持一致。`balance_nonroot` 仍只从 29 roots / 3,448 条
+收敛到 28 roots / 3,432 条，说明 hot/cold island 没有改变该目标的主要 source-fan-in 结构。
+
+双来源组合的 SQLite 三对短跑波动较大，但中位数仍为负向：wall-time `3.191s -> 3.451s`
+（`+8.165%`），guest TOTAL `2.802s -> 3.117s`（`+11.242%`）。恢复三来源门槛、只保留 component
+island 后，三语料 root 数和每 root 指令数逐项相同，但 SQLite/smallpt/CoreMark 分别有
+177/28/29 个 code hash 因布局改变；SQLite 反向顺序三对中位数为 wall-time
+`2.536s -> 2.573s`（`+1.439%`），guest TOTAL `2.280s -> 2.308s`（`+1.228%`）。
+
+因此 component id、island emission、定向测试和双来源门槛改动均已删除。该结果排除了“只把现有
+disconnected RPO 分段并提前发 cold stubs”作为多 root 合并前置条件；下一次重开必须让 component
+拥有独立 allocation/scheduling 成本模型，或由动态权重决定 code-object membership，不能继续在单一
+buffer 中改排列顺序。没有保留 env 开关、probe、日志、临时路径或兼容兜底，也没有运行长基准或压力
+测试。
