@@ -179,4 +179,28 @@ TEST_CASE("function decode frontier promotes shared external targets",
     REQUIRE(provenance->owner_end == Location{kEnd});
 }
 
+TEST_CASE("function decode frontier admits singleton interior targets",
+          "[function-entry][frontier]") {
+    constexpr LocationDescriptor kStart = 0x5000;
+    constexpr LocationDescriptor kOwner = 0x5010;
+    constexpr LocationDescriptor kTarget = 0x5014;
+    constexpr LocationDescriptor kEnd = 0x5018;
+
+    HIRBuilder builder{4, true, false, FeatureSet{}};
+    auto* function = builder.AppendFunction(Location{kStart});
+    auto* owner = builder.LinkBlock(terminal::LinkBlock{Location{kOwner}});
+    builder.SetCurBlock(owner);
+    builder.AdvancePC(Imm{kEnd - kOwner});
+    builder.SetCurBlock(function->CreateOrGetBlock(Location{0x5100}));
+    builder.RegisterExternalDirectLink(Location{kTarget});
+
+    FunctionDecodeFrontier frontier{function};
+    REQUIRE(frontier.DiscoverExternalRoots(
+                    1, FunctionDecodeFrontier::OwnerPolicy::Interior) ==
+            std::vector<LocationDescriptor>{kTarget});
+    const auto* provenance = frontier.FindProvenance(kTarget);
+    REQUIRE(provenance != nullptr);
+    REQUIRE(provenance->owner_start == Location{kOwner});
+}
+
 }  // namespace

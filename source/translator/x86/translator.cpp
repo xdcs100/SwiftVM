@@ -817,7 +817,7 @@ struct X86Instance::Impl final {
                             decode_frontier.DiscoverExternalRoots(3);
                     for (const auto target :
                          decode_frontier.DiscoverExternalRoots(
-                                 2, FunctionDecodeFrontier::OwnerPolicy::Interior)) {
+                                 1, FunctionDecodeFrontier::OwnerPolicy::Interior)) {
                         if (std::find(external_roots.begin(),
                                       external_roots.end(), target) !=
                             external_roots.end()) {
