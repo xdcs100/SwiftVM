@@ -1201,3 +1201,35 @@ Mac Debug 的 SSE4.2 Rosetta/SDM 差分通过 16,255 条断言，16-byte memory 
 `__strcmp_sse42`；也没有重试已经回退的 per-unit EqualAny outline。没有保留 probe、日志、env 开关、
 临时构建路径或兼容兜底。后续字符串收益必须从共享 helper 边界或循环/EA 布局获得，不能继续堆叠
 只对未命中 imm 形态生效的局部 mask 白名单。
+
+### 16.31 spilled pinned-base EA 延迟物化
+
+提交 `ea4fd15` 将复杂 EA 的首个生产 consumer 落到实际 spill 大户。对 `setupLookaside`
+的 ARM64 代码重新分类后，原先归入 state publication 的 `x28+0xb0..0xd0` 访问实际是
+`State::spill_area`：576 条 host 指令中有 176 条 GPR spill load/store。主要残差不是未 pin 的
+R15，而是默认 level 2 只有七个动态 value/scratch register 后产生的短生命周期地址中间值。
+
+既有 `MatchPinnedMemoryAddress` 只能证明 identity `GetOperand(base)`。本阶段把同一 proof 扩展为
+`base + immediate`：地址必须只有一个普通 `LoadMemory/StoreMemory` consumer，base 必须已映射到
+静态 fixed home，且从 fixed-home publication 到 memory consumer 之间没有同 home 写入或
+caller-saved helper clobber。只有地址结果已经被 RA spill 时才延迟物化；identity 路径继续复用原
+fixed alias。memory-base 模式通过 `BiasMem(base, offset)` 保留 guest wrap/mask 语义，identity 模式
+只接受可直接编码的 load/store displacement；`INT64_MIN` 等不能安全取反的偏移继续走原路径。
+
+短门禁结果：
+
+- 新增定向用例强制 `GetOperand(base + 24)` 落入 `RegAlloc::MEM`，分别验证 identity
+  `[x6,#24]` 与 biased `add x10,x6,#24; [x10,x24]`，通过 5 条断言。相关 Debug 六个
+  address/GetOperand case 共通过 29 条断言。
+- SQLite `--size 1 --testset main :memory:` 保持 2,114 roots 与 100% 公共 root 覆盖，
+  `354,486 -> 350,451`（`-4,035`，`-1.138%`）；363 个 root 缩小、零增长，
+  `setupLookaside` 从 `576 -> 558`，正好删除九组 EA spill 的 18 条存取。
+- smallpt `4 8 6` 保持 275 roots，`49,055 -> 48,601`（`-454`，`-0.925%`），PPM SHA-256
+  保持 `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`。
+
+同时删除了两条不满足正确性/零增长门禁的原型。把普通 spill scratch 跨指令保留会在 SQLite
+第 24 个 root 触发 PageFatal；限制到 last-use 或 VIXL x16/x17 仍失败。把旧 full-pin
+fixed-class 直接放宽到 level 2 则产生大量增长 root，width-only 变体总量还增长 2,106 条。
+这些原型均未保留。后续 RA 工作需要首类 interval split/relocation，不能用隐式 scratch 生存期或
+宽泛 fixed-class 代替。该阶段没有新增 env 开关、日志、probe、临时路径或兼容兜底，也没有运行
+压力测试或长基准。
