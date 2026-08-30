@@ -75,6 +75,7 @@ bool IsPortableSpillForwardConsumer(ir::OpCode op) {
         case O::LslValue:
         case O::LsrValue:
         case O::AsrValue:
+        case O::GetOperand:
             return true;
         default:
             return false;
