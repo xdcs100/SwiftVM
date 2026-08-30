@@ -1545,3 +1545,35 @@ EqualAny 不再保存和恢复 x30。frame planner 在仍有 live-through GPR �
 
 本阶段没有运行长基准或压力测试，也没有保留调试路径、probe、日志、env 开关、硬编码 guest PC、
 临时源码路径或兼容兜底。
+
+### 16.44 EqualEach 精确 clobber 与专用 return ABI
+
+提交 `a2aec22` 将 native `0x1a EqualEach` helper 的长度计算收敛到与 EqualAny 相同的
+`FMOV + RBIT + CLZ + LSR` 形态。零 compare mask 经 64-bit `CLZ` 后自然得到长度 16，因此删除了
+额外保留原始 mask、两次 compare 和两次 CSEL 的路径。长度直接形成在 x13/x14，packed index 和
+flags 复用 x11/x16；helper 不再破坏 x10/x12，精确 GPR clobber 收敛为
+`x11/x13/x14/x15/x16/x17`。
+
+移除真实 live-through x10 clobber 后，EqualEach caller 不再需要 GPR snapshot。该 helper 与
+EqualAny 共享局部 x17 return ABI：caller 使用 `ADR + B/BR`，helper 使用 `BR x17`；只有 FPR
+live-through 时由首个 Q register 承担 frame 调整，不保存 x30。
+
+短门禁结果：
+
+- helper-effects、SSE4.2 scratch、Rosetta/SDM 差分、16-byte memory boundary 和 alias/REX 用例分别
+  通过 26、512、16,255、4 和 27 条断言。
+- fresh same-path SQLite `main/size1` 保持 2,207 roots、100% root/top-30 覆盖和零增长，
+  `343,736 -> 343,707`（`-29`，`-0.008437%`）。14 个字符串比较 root 全部缩小：
+  `__strcmp_sse42@0x505120` `314 -> 312`，12 个同构 root `188 -> 186`，另一个 root
+  `251 -> 248`。去除 timing 后 stdout 完全一致。
+- smallpt `4 8 6` 保持 275 roots、`46,258` 条 host 指令和 canonical PPM，严格零变化。
+- 两组反向 SQLite 短配对为 candidate/base `2.288s/2.250s` 与 base/candidate
+  `2.280s/2.261s`，方向交叉，没有方向一致的明显回退。
+
+两个不合格原型已完整删除：只把 EqualEach 改成 x17 return 时，奇数 GPR frame 原本可与 x30
+免费配对，13 个 root 各增长两条；仅把内部 x10 临时换成 x12 时，x12 同样 live-through，结果仍为
+`+29`。全函数 fallthrough-first RPO 原型则改变 RA 线性顺序，SQLite 在 1,296 个 root 后触发 stack
+smashing，smallpt root 集也从 275 变为 265；该 CFG/RPO 改动没有保留。
+
+本阶段没有运行长基准或压力测试，也没有保留调试路径、probe、日志、env 开关、硬编码 guest PC、
+临时源码路径或兼容兜底。
