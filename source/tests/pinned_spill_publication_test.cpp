@@ -46,6 +46,46 @@ SpillPublicationBlock MakeSpillPublicationBlock() {
     return {std::move(block), result};
 }
 
+enum class AdjacentProducer {
+    Immediate,
+    Memory,
+    Add,
+};
+
+SpillPublicationBlock MakeAdjacentSpillPublicationBlock(
+        AdjacentProducer producer) {
+    IntrusivePtr<Block> block{new Block(0, Location{0x8b60})};
+    std::vector<Value> retained;
+    for (swift::u64 value = 1; value <= 6; ++value) {
+        retained.push_back(block->LoadImm(Imm{value}).SetType(ValueType::U64));
+    }
+    const auto result = [&] {
+        switch (producer) {
+            case AdjacentProducer::Memory: {
+                const auto address = block->GetHostGPR(HostRegIndex(6), Imm{0u})
+                                             .SetType(ValueType::U64);
+                return block->LoadMemory(Operand{address}).SetType(ValueType::U64);
+            }
+            case AdjacentProducer::Add: {
+                const auto source = block->LoadImm(Imm{7u}).SetType(ValueType::U32);
+                return block->Add(source, Operand{Imm{1u}}).SetType(ValueType::U32);
+            }
+            case AdjacentProducer::Immediate:
+                return block->LoadImm(Imm{9u}).SetType(ValueType::U32);
+        }
+        PANIC();
+    }();
+    block->SetHostGPR(result, HostRegIndex(22), Imm{0u});
+    auto total = retained.front();
+    for (std::size_t i = 1; i < retained.size(); ++i) {
+        total = block->Add(total, Operand{retained[i]}).SetType(ValueType::U64);
+    }
+    block->StoreUniform(Uniform{0, ValueType::U64}, total);
+    block->SetTerminal(terminal::ReturnToDispatch{});
+    block->ReIdInstr();
+    return {std::move(block), result};
+}
+
 std::vector<std::string> Emit(SpillPublicationBlock input) {
     GPRSMask gprs{~((1u << 6) - 1u)};
     FPRSMask fprs{~((1u << 8) - 1u)};
@@ -97,4 +137,16 @@ TEST_CASE("spilled U32 additions publish directly to pinned GPRs") {
     REQUIRE(Contains(instructions, "add w22"));
     REQUIRE(Contains(instructions, "sub w"));
     REQUIRE_FALSE(Contains(instructions, "mov w22, w18"));
+}
+
+TEST_CASE("adjacent spilled values publish in their pinned GPR") {
+    const auto immediate = Emit(MakeAdjacentSpillPublicationBlock(
+            AdjacentProducer::Immediate));
+    const auto memory = Emit(MakeAdjacentSpillPublicationBlock(
+            AdjacentProducer::Memory));
+    const auto add = Emit(MakeAdjacentSpillPublicationBlock(
+            AdjacentProducer::Add));
+    REQUIRE(Contains(immediate, "mov w22, #0x9"));
+    REQUIRE(Contains(memory, "ldr x22, [x6]"));
+    REQUIRE(Contains(add, "add w22"));
 }

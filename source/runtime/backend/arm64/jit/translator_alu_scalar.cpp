@@ -825,7 +825,12 @@ void JitTranslator::EmitLoadImm(ir::Inst* inst) {
     if (CanUseZeroStoreRegister(ir::Value{inst})) {
         return;
     }
-    auto result = context.R(ir::Value{inst});
+    const auto pinned = ResolvePinnedGPRValue(ir::Value{inst});
+    auto result = pinned
+            ? (ir::GetValueSizeByte(inst->ReturnType()) > sizeof(u32)
+                       ? Register{*pinned}
+                       : Register{pinned->W()})
+            : context.R(ir::Value{inst});
     __ Mov(result, value.Get());
 }
 
