@@ -277,6 +277,11 @@ ir::Uniform ToReg(const X86RegInfo& info);
 
 ir::Uniform ToVReg(const X86RegInfo& info);
 
+enum class DecodeStopKind : u8 {
+    Internal,
+    CallReturn,
+};
+
 class X64Decoder {
 public:
     X64Decoder(VAddr start,
@@ -287,7 +292,8 @@ public:
                bool sse_afp_nan = false,
                bool identity_addressing = false,
                const runtime::FeatureSet& features = runtime::FeatureSet{},
-               VAddr decode_stop = 0);
+               VAddr decode_stop = 0,
+               DecodeStopKind decode_stop_kind = DecodeStopKind::Internal);
 
     void Decode();
 
@@ -1123,6 +1129,7 @@ private:
     VAddr start;
     VAddr pc;
     VAddr decode_stop;
+    DecodeStopKind decode_stop_kind;
     // First byte of the instruction currently in DecodeSwitch. Handlers that
     // must inspect the raw encoding (VEX prefix fields, see DecodeVex) read
     // through this; _DInst alone does not carry them.

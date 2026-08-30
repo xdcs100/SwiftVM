@@ -64,8 +64,11 @@ std::optional<FunctionDecodeFrontier::Split> FunctionDecodeFrontier::FindSplit(
         record.owner = candidate;
         record.provenance.owner_start = block->GetStartLocation();
         record.provenance.owner_end = runtime::ir::Location{DecodedEnd(block)};
-        record.provenance.call_return_owned =
-                candidate->GetCallReturnBlock() != nullptr;
+        auto* call_return = candidate->GetCallReturnBlock();
+        record.provenance.call_return_owned = call_return != nullptr;
+        record.provenance.call_return_boundary =
+                call_return &&
+                call_return->GetBlock()->GetStartLocation().Value() == target;
         record.provenance.dependencies.reserve(
                 block->GetGuestCodeDependencies().size());
         for (const auto& dependency : block->GetGuestCodeDependencies()) {

@@ -67,6 +67,7 @@ TEST_CASE("function decode frontier transfers call return ownership",
     const auto split = frontier.FindExternalSplit(kSplit);
     REQUIRE(split);
     REQUIRE(split->provenance->call_return_owned);
+    REQUIRE_FALSE(split->provenance->call_return_boundary);
     REQUIRE(builder.ResetDecodedBlock(owner));
     REQUIRE(owner->GetCallReturnBlock() == nullptr);
     REQUIRE_FALSE(return_block->IsCallReturnBlock());
@@ -75,6 +76,8 @@ TEST_CASE("function decode frontier transfers call return ownership",
     builder.ExternalLinkBlock(
             terminal::ExternalLinkBlock{Location{kSplit}});
     auto* root = function->CreateOrGetBlock(Location{kSplit});
+    REQUIRE(owner->GetSuccessors().empty());
+    REQUIRE(root->GetPredecessors().empty());
     builder.SetCurBlock(root);
     builder.AdvancePC(Imm{kEnd - kSplit});
     builder.RegisterCallReturn(Location{kReturn});
@@ -88,6 +91,24 @@ TEST_CASE("function decode frontier transfers call return ownership",
     REQUIRE(missing != nullptr);
     REQUIRE(missing->rejection == FunctionEntryRejection::NoOwner);
     REQUIRE_FALSE(frontier.FindSplit(kMissing));
+}
+
+TEST_CASE("function decode frontier identifies call return boundaries",
+          "[function-entry][frontier]") {
+    constexpr LocationDescriptor kStart = 0x2800;
+    constexpr LocationDescriptor kReturn = kStart + 4;
+    constexpr LocationDescriptor kEnd = kStart + 8;
+
+    HIRBuilder builder{4, true, false, FeatureSet{}};
+    auto* function = builder.AppendFunction(Location{kStart});
+    builder.AdvancePC(Imm{kEnd - kStart});
+    builder.RegisterCallReturn(Location{kReturn});
+
+    FunctionDecodeFrontier frontier{function};
+    const auto split = frontier.FindExternalSplit(kReturn);
+    REQUIRE(split);
+    REQUIRE(split->provenance->call_return_owned);
+    REQUIRE(split->provenance->call_return_boundary);
 }
 
 TEST_CASE("function decode frontier keeps an internal predecessor for external roots",
