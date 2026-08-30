@@ -60,7 +60,7 @@ CopyAllocation AllocateCopyChain(bool separate_nodes,
 
 }  // namespace
 
-TEST_CASE("live low32 copies support separated and repeated wrapper uses") {
+TEST_CASE("low32 copies support separated and repeated wrapper uses") {
     auto accepted = AllocateCopyChain(false, false, true);
     REQUIRE(accepted.alloc->IsLow32CopyCoalesced(accepted.bridge.Id()));
     REQUIRE(accepted.alloc->Low32CopySource(accepted.bridge.Id()) ==
@@ -77,10 +77,10 @@ TEST_CASE("live low32 copies support separated and repeated wrapper uses") {
     REQUIRE(reused.alloc->IsLow32CopyCoalesced(reused.bridge.Id()));
 
     auto dead_source = AllocateCopyChain(false, false, false);
-    REQUIRE_FALSE(dead_source.alloc->IsLow32CopyCoalesced(dead_source.bridge.Id()));
+    REQUIRE(dead_source.alloc->IsLow32CopyCoalesced(dead_source.bridge.Id()));
 }
 
-TEST_CASE("live low32 views reuse the source across read-only consumers") {
+TEST_CASE("low32 views reuse compatible source and result ownership") {
     auto allocate = [](bool keep_source_live) {
         IntrusivePtr<Block> block{new Block(0, Location{0x8690})};
         auto source = block->LoadUniform<TypedValue<ValueType::U64>>(
@@ -116,10 +116,10 @@ TEST_CASE("live low32 views reuse the source across read-only consumers") {
             accepted.alloc->ValueGPR(accepted.source).id);
 
     auto dead_source = allocate(false);
-    REQUIRE_FALSE(dead_source.alloc->IsLow32CopyCoalesced(dead_source.bridge.Id()));
+    REQUIRE(dead_source.alloc->IsLow32CopyCoalesced(dead_source.bridge.Id()));
 }
 
-TEST_CASE("final-use low32 views transfer source ownership") {
+TEST_CASE("final-use low32 views transfer or recolor ownership") {
     IntrusivePtr<Block> block{new Block(0, Location{0x86a0})};
     auto source = block->LoadUniform<TypedValue<ValueType::U64>>(
             Uniform{0, ValueType::U64});
@@ -140,6 +140,30 @@ TEST_CASE("final-use low32 views transfer source ownership") {
     REQUIRE(alloc.Low32CopySource(bridge.Id()) == source.Id());
     REQUIRE(alloc.ValueGPR(bridge).id == alloc.ValueGPR(source).id);
 
+    IntrusivePtr<Block> recolor_block{new Block(0, Location{0x86a8})};
+    auto recolor_source = recolor_block->LoadUniform<TypedValue<ValueType::U64>>(
+            Uniform{0, ValueType::U64});
+    auto recolor_bridge = recolor_block->BitExtract(
+            recolor_source, Imm{0u}, Imm{32u}).SetType(ValueType::U32);
+    auto reused_home = recolor_block->LoadImm(Imm{7u}).SetType(ValueType::U64);
+    recolor_block->StoreUniform(
+            Uniform{8, ValueType::U64}, reused_home);
+    recolor_block->StoreUniform(
+            Uniform{16, ValueType::U32}, recolor_bridge);
+    recolor_block->SetTerminal(terminal::ReturnToDispatch{});
+    recolor_block->ReIdInstr();
+
+    RegAlloc recolor_alloc{recolor_block->MaxInstrId(), CopyTestGPRs(),
+                           FPRSMask{~((1u << 8) - 1u)}, features};
+    RegisterAllocPass::Run(
+            recolor_block.get(), &recolor_alloc, false, features);
+    REQUIRE(recolor_alloc.IsLow32CopyCoalesced(recolor_bridge.Id()));
+    REQUIRE(recolor_alloc.AllocationId(recolor_source) == recolor_bridge.Id());
+    REQUIRE(recolor_alloc.ValueGPR(recolor_bridge).id ==
+            recolor_alloc.ValueGPR(recolor_source).id);
+    REQUIRE(recolor_alloc.ValueGPR(reused_home).id !=
+            recolor_alloc.ValueGPR(recolor_bridge).id);
+
     IntrusivePtr<Block> atomic_block{new Block(0, Location{0x86b0})};
     auto address = atomic_block->LoadUniform<TypedValue<ValueType::U64>>(
             Uniform{0, ValueType::U64});
@@ -157,5 +181,22 @@ TEST_CASE("final-use low32 views transfer source ownership") {
                           FPRSMask{~((1u << 8) - 1u)}, features};
     RegisterAllocPass::Run(
             atomic_block.get(), &atomic_alloc, false, features);
-    REQUIRE_FALSE(atomic_alloc.IsLow32CopyCoalesced(atomic_bridge.Id()));
+    REQUIRE(atomic_alloc.IsLow32CopyCoalesced(atomic_bridge.Id()));
+    REQUIRE(atomic_alloc.AllocationId(atomic_source) == atomic_bridge.Id());
+
+    IntrusivePtr<Block> host_block{new Block(0, Location{0x86b8})};
+    auto host_source = host_block->GetHostGPR(HostRegIndex(6), Imm{0u})
+                               .SetType(ValueType::U64);
+    auto host_bridge = host_block->BitExtract(
+            host_source, Imm{0u}, Imm{32u}).SetType(ValueType::U32);
+    auto host_reuse = host_block->LoadImm(Imm{7u}).SetType(ValueType::U64);
+    host_block->StoreUniform(Uniform{8, ValueType::U64}, host_reuse);
+    host_block->StoreUniform(Uniform{16, ValueType::U32}, host_bridge);
+    host_block->SetTerminal(terminal::ReturnToDispatch{});
+    host_block->ReIdInstr();
+
+    RegAlloc host_alloc{host_block->MaxInstrId(), CopyTestGPRs(),
+                        FPRSMask{~((1u << 8) - 1u)}, features};
+    RegisterAllocPass::Run(host_block.get(), &host_alloc, false, features);
+    REQUIRE_FALSE(host_alloc.IsLow32CopyCoalesced(host_bridge.Id()));
 }
