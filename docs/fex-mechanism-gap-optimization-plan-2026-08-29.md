@@ -2343,3 +2343,29 @@ SQLite 八次反向短配对为 wall `2.5128s -> 2.5075s`（`-0.209%`）、guest
 这说明当前 code object 内部的 fan-in 门槛已不再是主体；剩余 24 个 root 属于不同 64-block publication
 component，必须依靠重编译/运行时热度或发布前独立与合并成本计划，不能继续降低本地 source threshold。
 本阶段没有新增 env 开关、probe、日志、临时路径、PC 白名单或兼容兜底，也没有运行长基准或压力测试。
+
+### 16.69 width-chain 跨块所有权与 128-block 全局扩窗裁定
+
+第 16.67 节建立的 value-to-block ownership 原先只约束 GPR read/write、pinned W view 和 low32 copy；
+长 width chain 及其 bridge 仍可使用块内 use-end 证明重映射带跨块 consumer 的值。函数级 allocator 现在把
+同一 `value_uses_stay_in_block` 合同传给 `CoalesceWidthChains` 与 `CoalesceWidthChainBridges`，独立 block
+allocator 保持原行为。定向用例在 external root 中构造 32 级 Add/Xor width chain，并让 chain 与 bridge
+结果都跨块存活，确认两条 coalescer 路径均 fail-closed。函数 decode budget 上方“函数模式没有跨块 SSA”
+的过时说明同时删除，改为与当前 ownership/entry contract 一致的边界。
+
+在该正确性边界上重新审核全局 `SVM_FUNC_LAZY=128`。一个为匹配 key、空 host continuation 增加热路径
+`CBZ` 的临时版本可以完成 SQLite，但同二进制 64/128 static-only 对比违反零增长门禁：smallpt
+`249 / 36,723 -> 228 / 39,349`，SQLite `1,921 / 250,728 -> 1,718 / 262,013`，CoreMark 2k
+`270 / 36,456 -> 258 / 39,456`；baseline top-20 分别有 14、13、15 个 root 增长。SQLite 的
+`balance_nonroot` 虽从 `25 / 3,374` 收敛到 `14 / 3,283`，但总量增加 11,285 条，说明全局扩窗主要把
+冷 CFG 拉进已有代码对象，不能代替 component membership 成本模型。共享 runtime continuation、代码对象内
+continuation 和 tagged external frame 的零热税原型在 128-block SQLite 上仍出现 `rc=134/139`，均已删除；
+不以布局变化掩盖未闭合的更大 region 边界，也不把默认窗口从 64 提升到 128。
+
+最终生产 diff 只保留 width-chain ownership 与说明修正。默认 64-block static-only 逐项保持第 16.68 节
+结果：smallpt `249 / 36,448` 与 canonical PPM，SQLite `1,923 / 249,687` 且正常完成，CoreMark 2k
+`270 / 36,172`、`crcfinal=0x4983`。Mac 的跨块定向、`[function-entry]`、
+`[direct-link][production]`、`[continuation]` 和非压力 `[smc]` 分别通过 5、103、878、117 和 729 条
+断言；Orb GCC 13.2 分别通过 5、103、550、117 和 400 条。没有保留 continuation 原型、env 开关、
+probe、日志、临时运行路径或兼容兜底，也没有运行长基准或压力测试。下一步只重开带独立成本账或运行时
+热度反馈的跨 publication-component 二级合并，不再重试全局 block budget 扩张。
