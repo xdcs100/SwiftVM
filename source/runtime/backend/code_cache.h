@@ -3,6 +3,7 @@
 //
 #pragma once
 
+#include <array>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -83,6 +84,8 @@ public:
     [[nodiscard]] void* GetPendingFlagsRegionTrampoline() const;
     [[nodiscard]] void* GetFlagsMergeRegionTrampoline() const;
     [[nodiscard]] void* GetFlagsMergeTokenRegionTrampoline() const;
+    [[nodiscard]] void* GetFlagsMaskMergeRegionTrampoline(u8 mask) const;
+    [[nodiscard]] void* GetFlagsMaskMergeTokenRegionTrampoline(u8 mask) const;
     [[nodiscard]] void* GetReturnFlagsMergeRegionTrampoline() const;
     [[nodiscard]] void* GetReturnFlagsMergeTokenRegionTrampoline() const;
     [[nodiscard]] void* GetCycleFlagsMergeRegionTrampoline() const;
@@ -107,6 +110,8 @@ private:
     u8* code_mem_mapped{};
     u8* code_cursor{};
     CodeRegion region{};
+    std::array<u32, 16> flags_mask_trampoline_offsets{};
+    std::array<u32, 16> flags_mask_token_trampoline_offsets{};
     std::unique_ptr<arm64::RegionLinkContext> region_link_context_{};
 };
 

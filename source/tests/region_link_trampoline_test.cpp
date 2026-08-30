@@ -243,6 +243,70 @@ TEST_CASE("region exit trampolines merge flags before returning",
 #endif
 }
 
+TEST_CASE("region masked flags trampolines preserve unrequested bits",
+          "[direct-link][trampoline][flags]") {
+#if defined(__aarch64__)
+    std::vector<UniformMapDesc> descriptors;
+    auto config = TestConfig(descriptors);
+    TrampolinesArm64 runtime_trampolines{config, FeatureSet{}};
+    LinkManager manager;
+    CodeCache cache{config, 1u << 20, FeatureSet{}};
+    auto* return_host = reinterpret_cast<void*>(runtime_trampolines.GetReturnHost());
+    REQUIRE(cache.InitializeRegionTrampoline(manager, return_host, return_host));
+
+    constexpr u64 initial_nzcv = 0x9000'0000u;
+    constexpr u64 packed_af = u64{1} << 26;
+    constexpr u64 old_parity = 0xa5;
+    constexpr u64 token_parity = 0x3c;
+    const std::array masks{
+            std::pair{u64{0xC000'0000u}, u64{0x5000'0000u}},
+            std::pair{u64{0xA000'0000u}, u64{0x3000'0000u}},
+    };
+    for (const auto& [mask, expected_nzcv] : masks) {
+        for (const bool token : {false, true}) {
+            auto code = cache.AllocCode(128);
+            REQUIRE(code);
+            MacroAssembler masm;
+            Label resume;
+            masm.Mov(x26, initial_nzcv | packed_af | old_parity);
+            masm.Mov(x12, token_parity);
+            masm.Mov(x0, 1);
+            masm.Cmp(x0, x0);
+            masm.Adr(x17, &resume);
+            const u32 branch_offset =
+                    static_cast<u32>(masm.GetBuffer()->GetSizeInBytes());
+            masm.dc32(*EncodeB(0));
+            masm.Bind(&resume);
+            masm.Mov(w11, static_cast<u32>(HaltReason::PageFatal));
+            masm.Str(w11, MemOperand(x28, state_offset_halt_reason));
+            masm.Ret();
+            CopyAssembler(*code, 0, masm);
+
+            const auto mask_index = static_cast<u8>(mask >> 28);
+            auto* trampoline = static_cast<u8*>(
+                    token ? cache.GetFlagsMaskMergeTokenRegionTrampoline(mask_index)
+                          : cache.GetFlagsMaskMergeRegionTrampoline(mask_index));
+            REQUIRE(trampoline);
+            const auto branch = EncodeB(
+                    trampoline - (code->exec_data + branch_offset));
+            REQUIRE(branch);
+            std::memcpy(code->rw_data + branch_offset, &*branch, sizeof(*branch));
+            code->Flush();
+
+            TestState test_state{config.uniform_buffer_size};
+            REQUIRE(runtime_trampolines.GetRuntimeEntry()(test_state.state,
+                                                           code->exec_data) ==
+                    HaltReason::PageFatal);
+            const u64 parity = token ? token_parity : old_parity;
+            REQUIRE(test_state.state->host_cpu_flags ==
+                    (expected_nzcv | packed_af | parity));
+        }
+    }
+#else
+    SUCCEED("region trampoline execution requires an AArch64 host");
+#endif
+}
+
 TEST_CASE("region trampoline preserves x30 and every static-pin configuration",
           "[direct-link][trampoline][x30]") {
 #if defined(__aarch64__)

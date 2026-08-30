@@ -124,6 +124,12 @@ bool CodeCache::InitializeRegionTrampoline(LinkManager& manager,
     region.pending_flags_trampoline_offset =
             buffer->offset + trampoline.pending_flags_offset;
     region.return_trampoline_offset = buffer->offset + trampoline.return_offset;
+    for (u32 mask = 1; mask < 15; ++mask) {
+        flags_mask_trampoline_offsets[mask] =
+                buffer->offset + trampoline.flags_mask_offsets[mask];
+        flags_mask_token_trampoline_offsets[mask] =
+                buffer->offset + trampoline.flags_mask_token_offsets[mask];
+    }
     region_link_context_ = std::move(context);
     return true;
 }
@@ -158,7 +164,23 @@ void* CodeCache::GetFlagsMergeTokenRegionTrampoline() const {
         return nullptr;
     }
     return region.rx_base + region.pending_flags_trampoline_offset +
-            arm64::kFlagsMergeTokenOffsetFromPending;
+           arm64::kFlagsMergeTokenOffsetFromPending;
+}
+
+void* CodeCache::GetFlagsMaskMergeRegionTrampoline(u8 mask) const {
+    if (mask == 0 || mask >= 15 ||
+        region.trampoline_offset == CodeRegion::kInvalidTrampolineOffset) {
+        return nullptr;
+    }
+    return region.rx_base + flags_mask_trampoline_offsets[mask];
+}
+
+void* CodeCache::GetFlagsMaskMergeTokenRegionTrampoline(u8 mask) const {
+    if (mask == 0 || mask >= 15 ||
+        region.trampoline_offset == CodeRegion::kInvalidTrampolineOffset) {
+        return nullptr;
+    }
+    return region.rx_base + flags_mask_token_trampoline_offsets[mask];
 }
 
 void* CodeCache::GetReturnFlagsMergeRegionTrampoline() const {

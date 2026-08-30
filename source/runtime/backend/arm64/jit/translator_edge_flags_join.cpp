@@ -99,8 +99,7 @@ JitTranslator::RegionFlagsJoinPlan JitTranslator::PlanRegionFlagsJoin(
                                      : RegionFlagsJoinMode::Canonical,
         };
     }
-    if (incoming.valid_nzcv_mask != kEdgeNZCVMask ||
-        !context.CanUseRegionTrampoline()) {
+    if (!context.CanUseRegionTrampoline()) {
         return {};
     }
 
@@ -119,8 +118,9 @@ JitTranslator::RegionFlagsJoinPlan JitTranslator::PlanRegionFlagsJoin(
     const bool canonical_fallthrough = allow_fallthrough &&
             CanUseRegionSuccessorLayout(canonical) &&
             !compatible_fallthrough;
+    const bool full_nzcv = incoming.valid_nzcv_mask == kEdgeNZCVMask;
     return {
-            .mode = canonical_fallthrough
+            .mode = full_nzcv && canonical_fallthrough
                     ? RegionFlagsJoinMode::Split
                     : RegionFlagsJoinMode::CanonicalTail,
             .incoming = incoming,
@@ -128,7 +128,7 @@ JitTranslator::RegionFlagsJoinPlan JitTranslator::PlanRegionFlagsJoin(
             .canonical_target = canonical,
             .compatible_on_true = then_accepts,
             .compatible_fallthrough = compatible_fallthrough,
-            .canonical_fallthrough = canonical_fallthrough,
+            .canonical_fallthrough = full_nzcv && canonical_fallthrough,
             .canonical_merge_token = flags_token_valid,
     };
 }
@@ -153,9 +153,16 @@ void JitTranslator::EmitRegionFlagsCanonicalStubs() {
     for (auto& [key, entry] : region_flags_canonical_stubs) {
         __ Bind(entry.get());
         __ Adr(ip1, LocalBranchTarget(ir::Location{key.target}));
-        context.EmitFlagsMergeBranch(
-                key.token ? FlagsMergeTrampolineKind::NZCVToken
-                          : FlagsMergeTrampolineKind::NZCV);
+        if (key.mask == kEdgeNZCVMask) {
+            context.EmitFlagsMergeBranch(
+                    key.token ? FlagsMergeTrampolineKind::NZCVToken
+                              : FlagsMergeTrampolineKind::NZCV);
+        } else {
+            context.EmitFlagsMergeBranch(
+                    key.token ? FlagsMergeTrampolineKind::NZCVMaskToken
+                              : FlagsMergeTrampolineKind::NZCVMask,
+                    static_cast<u8>(key.mask >> 28));
+        }
     }
     region_flags_canonical_stubs.clear();
 }

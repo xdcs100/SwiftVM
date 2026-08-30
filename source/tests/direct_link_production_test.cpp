@@ -434,7 +434,8 @@ RegionBranchRun RunRegionBranchFunction(bool enabled,
                                         bool observe_before_overwrite = false,
                                         bool helper_after_producer = false,
                                         u8 initial_selector = 1,
-                                        bool compatible_fallthrough = false) {
+                                        bool compatible_fallthrough = false,
+                                        Flags source_flags = Flags::All) {
     constexpr VAddr source_guest = 0x2100;
     constexpr VAddr hot_guest = 0x2180;
     constexpr VAddr cold_guest = 0x2200;
@@ -472,7 +473,7 @@ RegionBranchRun RunRegionBranchFunction(bool enabled,
             Uniform{selector_offset, ValueType::U8}).SetType(ValueType::U8);
     const auto one = function->LoadImm(Imm{u8{1}}).SetType(ValueType::U8);
     const auto result = function->Sub(selector, Operand{one}).SetType(ValueType::U8);
-    function->SaveFlags(result, Flags::All);
+    function->SaveFlags(result, source_flags);
     const auto polarity = function->LoadImm(Imm{u8{1}}).SetType(ValueType::U8);
     function->StoreUniform(
             Uniform{offsetof(swift::x86::ThreadContext64, carry_inverted),
@@ -2348,6 +2349,16 @@ TEST_CASE("region branch flags materialize only on the observing exit",
     REQUIRE(tail_on.observed_flags == tail_off.observed_flags);
     REQUIRE(tail_on.branch_precedes_merge);
     REQUIRE(tail_on.code_size == hot_on.code_size);
+
+    const auto partial_off = RunRegionBranchFunction(
+            false, false, false, 2, true, Flags::NZ);
+    const auto partial_on = RunRegionBranchFunction(
+            true, false, false, 2, true, Flags::NZ);
+    REQUIRE(partial_off.halt == HaltReason::CallHost);
+    REQUIRE(partial_on.halt == HaltReason::CallHost);
+    REQUIRE(partial_on.selector == partial_off.selector);
+    REQUIRE(partial_on.observed_flags == partial_off.observed_flags);
+    REQUIRE(partial_on.code_size <= partial_off.code_size);
 
     // Host calls after the final producer are committed-state boundaries.
     // They reject the plan just like a faulting memory operation.

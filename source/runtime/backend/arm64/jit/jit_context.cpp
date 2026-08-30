@@ -761,9 +761,9 @@ bool JitContext::EmitDirectLink(ir::Location location,
     return true;
 }
 
-void JitContext::EmitFlagsMergeBranch(FlagsMergeTrampolineKind kind) {
+void JitContext::EmitFlagsMergeBranch(FlagsMergeTrampolineKind kind, u8 mask) {
     const u32 offset = CurrentBufferSize();
-    flags_merge_sites.push_back({offset, kind});
+    flags_merge_sites.push_back({offset, kind, mask});
     __ dc32(*EncodeB(0));
 }
 
@@ -1185,10 +1185,19 @@ u8* JitContext::Flush(const CodeBuffer& code_cache) {
         const auto& region = cache->GetRegion();
         auto* emitted = masm.GetBuffer()->GetStartAddress<u8*>();
         for (const auto& site : flags_merge_sites) {
-            auto* trampoline = static_cast<u8*>(
-                    site.kind == FlagsMergeTrampolineKind::NZCV
-                            ? cache->GetFlagsMergeRegionTrampoline()
-                            : cache->GetFlagsMergeTokenRegionTrampoline());
+            auto* trampoline = static_cast<u8*>([&] {
+                switch (site.kind) {
+                    case FlagsMergeTrampolineKind::NZCV:
+                        return cache->GetFlagsMergeRegionTrampoline();
+                    case FlagsMergeTrampolineKind::NZCVToken:
+                        return cache->GetFlagsMergeTokenRegionTrampoline();
+                    case FlagsMergeTrampolineKind::NZCVMask:
+                        return cache->GetFlagsMaskMergeRegionTrampoline(site.mask);
+                    case FlagsMergeTrampolineKind::NZCVMaskToken:
+                        return cache->GetFlagsMaskMergeTokenRegionTrampoline(site.mask);
+                }
+                UNREACHABLE();
+            }());
             ASSERT(trampoline && region.ContainsRx(trampoline));
             auto* rx_site = code_cache.exec_data + site.code_offset;
             const auto branch = EncodeB(trampoline - rx_site);

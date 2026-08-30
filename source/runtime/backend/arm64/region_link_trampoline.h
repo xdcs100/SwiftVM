@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <vector>
 #include "runtime/backend/context.h"
 #include "runtime/backend/link_manager.h"
@@ -28,6 +29,8 @@ struct RegionLinkTrampolineCode {
     u32 canonical_offset{};
     u32 pending_flags_offset{};
     u32 return_offset{};
+    std::array<u32, 16> flags_mask_offsets{};
+    std::array<u32, 16> flags_mask_token_offsets{};
 };
 
 constexpr u32 kFlagsMergeOffsetFromPending = 4 * sizeof(u32);

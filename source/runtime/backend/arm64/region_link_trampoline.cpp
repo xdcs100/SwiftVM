@@ -1,6 +1,7 @@
 #include "runtime/backend/arm64/region_link_trampoline.h"
 
 #include <algorithm>
+#include <bit>
 #include <cstddef>
 #include <cstring>
 #include "aarch64/macro-assembler-aarch64.h"
@@ -278,6 +279,36 @@ RegionLinkTrampolineCode BuildRegionLinkTrampoline(
     masm.Bind(&return_host);
     masm.Mov(x16, reinterpret_cast<uintptr_t>(context->return_host));
     masm.Br(x16);
+
+    std::array<u32, 16> flags_mask_offsets{};
+    std::array<u32, 16> flags_mask_token_offsets{};
+    auto emit_mask_merge = [&](u32 mask, bool token) {
+        auto& offsets = token ? flags_mask_token_offsets : flags_mask_offsets;
+        offsets[mask] = static_cast<u32>(masm.GetBuffer()->GetSizeInBytes());
+        const u64 requested = static_cast<u64>(mask) << 28;
+        const u32 lsb = std::countr_zero(requested);
+        const u64 normalized = requested >> lsb;
+        if (!(normalized & (normalized + 1))) {
+            const u32 width = std::bit_width(normalized);
+            masm.Mrs(x16, NZCV);
+            masm.Ubfx(x16, x16, lsb, width);
+            masm.Bfi(x26, x16, lsb, width);
+        } else {
+            masm.Mov(x15, requested);
+            masm.Mrs(x16, NZCV);
+            masm.Bic(x26, x26, x15);
+            masm.And(x16, x16, x15);
+            masm.Orr(x26, x26, x16);
+        }
+        if (token) {
+            masm.Bfi(x26, x12, 0, 8);
+        }
+        masm.Br(x17);
+    };
+    for (u32 mask = 1; mask < 15; ++mask) {
+        emit_mask_merge(mask, false);
+        emit_mask_merge(mask, true);
+    }
     masm.FinalizeCode();
 
     const size_t size = masm.GetBuffer()->GetSizeInBytes();
@@ -286,6 +317,8 @@ RegionLinkTrampolineCode BuildRegionLinkTrampoline(
             .canonical_offset = canonical_offset,
             .pending_flags_offset = pending_flags_offset,
             .return_offset = return_offset,
+            .flags_mask_offsets = flags_mask_offsets,
+            .flags_mask_token_offsets = flags_mask_token_offsets,
     };
     std::memcpy(result.code.data(),
                 masm.GetBuffer()->GetStartAddress<u8*>(),

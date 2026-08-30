@@ -43,6 +43,8 @@ struct DirectLinkFlagsBypass {
 enum class FlagsMergeTrampolineKind : u8 {
     NZCV,
     NZCVToken,
+    NZCVMask,
+    NZCVMaskToken,
 };
 
 enum class CycleReasonTrampolineKind : u8 {
@@ -174,7 +176,7 @@ public:
     [[nodiscard]] const std::vector<DirectLinkSiteInfo>& GetDirectLinkSites() const {
         return pending_direct_link_sites;
     }
-    void EmitFlagsMergeBranch(FlagsMergeTrampolineKind kind);
+    void EmitFlagsMergeBranch(FlagsMergeTrampolineKind kind, u8 mask = 0);
     [[nodiscard]] std::optional<FlagsMergeTrampolineKind>
     TakeFlagsMergeBranch(u32 code_offset);
     void EmitCycleReasonBranch();
@@ -480,6 +482,7 @@ private:
     struct FlagsMergeSiteInfo {
         u32 code_offset{};
         FlagsMergeTrampolineKind kind{};
+        u8 mask{};
     };
     std::vector<FlagsMergeSiteInfo> flags_merge_sites;
     struct CycleReasonSiteInfo {
