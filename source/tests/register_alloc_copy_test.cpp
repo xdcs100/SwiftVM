@@ -119,7 +119,7 @@ TEST_CASE("live low32 views reuse the source across read-only consumers") {
     REQUIRE_FALSE(dead_source.alloc->IsLow32CopyCoalesced(dead_source.bridge.Id()));
 }
 
-TEST_CASE("final-use low32 views transfer source ownership") {
+TEST_CASE("low32 views transfer final and partial tail ownership") {
     IntrusivePtr<Block> block{new Block(0, Location{0x86a0})};
     auto source = block->LoadUniform<TypedValue<ValueType::U64>>(
             Uniform{0, ValueType::U64});
@@ -139,6 +139,28 @@ TEST_CASE("final-use low32 views transfer source ownership") {
     REQUIRE(alloc.IsLow32CopyCoalesced(bridge.Id()));
     REQUIRE(alloc.Low32CopySource(bridge.Id()) == source.Id());
     REQUIRE(alloc.ValueGPR(bridge).id == alloc.ValueGPR(source).id);
+
+    IntrusivePtr<Block> overlap_block{new Block(0, Location{0x86a8})};
+    auto overlap_source = overlap_block->LoadUniform<TypedValue<ValueType::U64>>(
+            Uniform{0, ValueType::U64});
+    auto overlap_bridge = overlap_block->BitExtract(
+            overlap_source, Imm{0u}, Imm{32u}).SetType(ValueType::U32);
+    overlap_block->StoreUniform(
+            Uniform{8, ValueType::U64}, overlap_source);
+    overlap_block->StoreUniform(
+            Uniform{16, ValueType::U32}, overlap_bridge);
+    overlap_block->SetTerminal(terminal::ReturnToDispatch{});
+    overlap_block->ReIdInstr();
+
+    RegAlloc overlap_alloc{overlap_block->MaxInstrId(), CopyTestGPRs(),
+                           FPRSMask{~((1u << 8) - 1u)}, features};
+    RegisterAllocPass::Run(
+            overlap_block.get(), &overlap_alloc, false, features);
+    REQUIRE(overlap_alloc.IsLow32CopyCoalesced(overlap_bridge.Id()));
+    REQUIRE(overlap_alloc.Low32CopySource(overlap_bridge.Id()) ==
+            overlap_source.Id());
+    REQUIRE(overlap_alloc.ValueGPR(overlap_bridge).id ==
+            overlap_alloc.ValueGPR(overlap_source).id);
 
     IntrusivePtr<Block> atomic_block{new Block(0, Location{0x86b0})};
     auto address = atomic_block->LoadUniform<TypedValue<ValueType::U64>>(

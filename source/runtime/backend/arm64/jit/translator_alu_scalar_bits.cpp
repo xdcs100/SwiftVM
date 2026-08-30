@@ -368,13 +368,7 @@ bool JitTranslator::ReproveLow32ViewOwnership(ir::Inst* inst,
     const u32 source_target = context.X(source).GetCode();
     bool has_consumer = false;
     u32 last_use = inst->Id();
-    u32 source_last_use = inst->Id();
     for (auto& scan : cur_block->GetInstList()) {
-        for (auto input : scan.GetValues()) {
-            if (ResolveWidthChainBitCast(input).Def() == source.Def()) {
-                source_last_use = std::max<u32>(source_last_use, scan.Id());
-            }
-        }
         bool uses = false;
         for (auto input : scan.GetValues()) {
             uses |= input.Def() == inst;
@@ -395,8 +389,7 @@ bool JitTranslator::ReproveLow32ViewOwnership(ir::Inst* inst,
             return false;
         }
     }
-    if (!has_consumer ||
-        (source_last_use < last_use && source_last_use != inst->Id())) {
+    if (!has_consumer) {
         return false;
     }
     for (auto& scan : cur_block->GetInstList()) {
