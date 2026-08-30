@@ -1182,3 +1182,22 @@ direct-link trampoline 分组通过；serializer v20 定向分组通过 63 条�
 smallpt `275 / 49,055` 与 SQLite `2,114 / 354,491`，说明该阶段只收缩状态/缓存 ABI，不改变发码。
 源码与测试中已不存在 `packed_flags_version` 或测试专用 nonzero producer，也没有新增日志、env 开关、
 probe、临时路径或兼容读取机制。第 6 节 EdgeFlags ABI 至此没有未实现的状态维度。
+
+### 16.30 inline SSE4.2 result packing
+
+提交 `51c783c` 收敛 inline `Sse42Str` 的 IntRes2/index/flags 打包。NEON movemask 与三种 validity/
+polarity 变换已经保证结果位于 architectural n-bit mask，删除末尾重复 `AND all`；least-significant
+索引在 `RBIT/ORR/CLZ` 前比较 IntRes2，most-significant 索引复用本来就需要的空结果比较，使 CF 在
+index 打包后直接 `CSET`，不再重新 `AND+CMP`。最高位索引同时用 `CLZ+EOR #31` 取代
+`CLZ+MOV 31+SUB`。
+
+Mac Debug 的 SSE4.2 Rosetta/SDM 差分通过 16,255 条断言，16-byte memory boundary 与 alias/REX
+分组分别通过 4 和 27 条。Release 同源 strict A/B 保持 2,114 个 SQLite root 与 100% root/top-20
+覆盖，`354,491 -> 354,486`（`-5`，`-0.001410%`），唯一变化是 `__strspn_sse42`
+`318 -> 313`，无增长；smallpt 保持 `275 / 49,055`。一次 SQLite 短配对为
+`TOTAL 1.485s -> 1.490s`，translation/codegen 两项均略降，只作为总时间无明显回退检查。
+
+该阶段没有改动共享 `0x02/0x1a` vector helper ABI，因此不宣称缩小 `__strcspn_sse42` 或
+`__strcmp_sse42`；也没有重试已经回退的 per-unit EqualAny outline。没有保留 probe、日志、env 开关、
+临时构建路径或兼容兜底。后续字符串收益必须从共享 helper 边界或循环/EA 布局获得，不能继续堆叠
+只对未命中 imm 形态生效的局部 mask 白名单。

@@ -3664,6 +3664,16 @@ peepholes.
   `2,114 / 354,491`. EdgeFlags now has no unimplemented state dimension; next work should be chosen
   from measured string/complex-EA residuals rather than another flags representation layer.
 
+- `51c783c` compacts inline SSE4.2 result packing: the already bounded IntRes2 no longer pays a
+  final mask, CF reuses the zero test made before index packing, and most-significant index uses
+  `CLZ+EOR` instead of `CLZ+MOV+SUB`. The Rosetta/SDM differential passes 16,255 assertions, with
+  memory-boundary and alias/REX groups also green. Strict SQLite keeps 2,114 roots and moves
+  `354,491 -> 354,486` (`-5`) solely in `__strspn_sse42` (`318 -> 313`), with no growth; smallpt
+  stays `275 / 49,055`. A single SQLite pair is `TOTAL 1.485s -> 1.490s` while translation/codegen
+  both decrease slightly. The shared `0x02/0x1a` helper boundary is unchanged, so do not claim a
+  `strcspn`/`strcmp` win or retry per-unit EqualAny outlining. No probe, log, env switch, temporary
+  path or fallback remains.
+
 ## Orb loop
 
 ```
