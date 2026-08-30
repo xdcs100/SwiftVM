@@ -1419,3 +1419,29 @@ publication 不再生成 spill store/reload 和末尾 move。两个 emitter 只�
 - fallthrough-preserving hot-chain stitching 的 smallpt 静态上限只有 33 条额外邻接边；直接在 emitter
   换序会破坏 function RA 的 instruction-id/RPO emission 同序约束，使 smallpt 在第 5 个 root 后提前
   退出。后续只有在 RA live interval 本身支持 layout order 后才可重启，不保留 emitter-only 重排。
+
+### 16.39 live-through 精确的 SSE4.2 shared helper ABI
+
+提交 `0f2c7c1` 将 shared vector helper 的保存合同从“当前指令占用”收敛为“调用后仍存活”。RA 在
+分配区间时记录 value live end，helper emitter 因此可以排除本条 `Sse42Str` 刚定义的 GPR 结果和只在
+本条消费的 FPR 参数；跨调用仍有 use 的参数继续保存。REF alias 通过现有 allocation owner 解析，
+未知区间保持保守，不增加 opcode 形态白名单。
+
+ARM64 native `0x1a` helper 的真实 FPR clobber 是 `q2-q7`，generic `0x02` helper 仍按 `q0-q7`
+处理；`q0/q1` 的参数搬运 clobber 与 helper body clobber 分开建模。参数恰为 `q1/q0` 时使用 helper
+本来就会破坏的 `q2` 完成并行交换。`w16` 结果只在旧 `x16` 确实 live-through 时进入栈槽，否则直接
+移到 RA 结果 home；奇数个 GPR 保存同时与 `x30` 配对，不再分别 `str/ldr`。
+
+短门禁结果：
+
+- helper-effects、SSE4.2 scratch、Rosetta/SDM 差分、CallLambda 和 single-block RA 等价用例分别
+  通过 25、512、16,255、67 和 86 条断言。定向 codegen 同时覆盖 native/generic helper 的死参数与
+  live-through 参数。
+- SQLite `main/size1` 保持 2,114 roots、100% root/top-30 覆盖和零增长，
+  `334,016 -> 333,865`（`-151`，`-0.045207%`），15 个 root 缩小；去除 timing 后 stdout 逐行一致。
+  `__strcmp_sse42@0x505120` 从 `336 -> 328`，EqualAny 字符串 root 的主要一组各减少 10 条。
+- smallpt `4 8 6` 保持 275 roots、`46,258` 条 host 指令和 canonical PPM，严格零变化。
+
+本阶段没有运行长基准或压力测试，也没有保留 probe、日志、env 开关、硬编码 guest PC、临时源码
+路径或兼容兜底。第 9 节已知 SSE4.2 vector helper 的 caller-save 大头至此闭合；后续字符串工作只保留
+循环 fallthrough、共享调用控制流和热冷分支布局，不再用扩大 clobber 集掩盖 live-through 边界。
