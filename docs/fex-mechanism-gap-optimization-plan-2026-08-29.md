@@ -1960,3 +1960,46 @@ emitter 或 RPO 中单独插入布局边。
 `swift_test` 目标构建，function-entry、direct-link production 和 spilled pinned-EA 定向组分别通过
 87、544 和 5 条断言。没有运行完整测试集、长基准或压力测试；归因用二进制、日志、动态计数捕获和
 临时目录已删除，最终树没有新增 env 开关、probe、诊断路径或兼容兜底。
+
+### 16.56 final-use low32 view ownership transfer
+
+提交 `d16f42e` 补齐普通 GPR 值最后一次使用处的低 32 位 view 所有权转移。当前 SQLite 静态账中仍有
+1,372 条 `lsr wN, wM, #0`；它们不是移位，而是 `BitExtract(source, 0, 32)` 在 source 与 result 被分到
+不同寄存器后形成的 identity copy。既有 low32 coalescer 只接受 source 活过 result 的共享 view，或一个
+紧邻 `ZeroExtend32To64` wrapper，没有表达“source 在 bridge 处死亡、result 接管物理寄存器”的区间。
+
+最终实现以 `use_end[source] == bridge.id` 判断最后一次使用，不再用 `source.GetUses() == 1` 错误拒绝
+bridge 之前的历史使用。它只接受非 fixed GPR source/result，证明 result 区间内 source home 没有被新
+SSA 值占用，然后把每条指令的 active GPR mask 从旧 result home 事务性转移到 source home，并逐条重过
+既有 scratch budget；任一 consumer、冲突或预算检查失败都会恢复全部 mask。ARM64 emitter 独立复证
+source 在 bridge 处 final-use 或原 live-through 关系，以及整个 result 区间内 source home 持续 active。
+`AtomicExchange` 明确拒绝：它的 exclusive loop、barrier 和寄存器对 lowering 对 scratch 身份敏感，不能
+按普通只读 consumer 处理。
+
+两个过宽/过窄中间版本均已删除：
+
+- 要求 source 总 use-count 为 1 的版本在 SQLite 严格零变化。临时 census 的 2,090 个拒绝事件全部有
+  历史 multi-use，但其中 1,638 个的精确最后 use 就是 bridge，证明总 use-count 不是正确边界。
+- 允许所有 consumer、包括 `AtomicExchange` 的版本净减 723 条，但两个 root 分别增长 6/5 条，并新增
+  `DMB/LDAXR/STXR` 序列。consumer census 将该变化收敛到 12 个 `AtomicExchange` 命中；按 opcode
+  contract 排除 atomic 后，两个增长 root 转为缩小，且 atomic mnemonic 严格零变化。
+
+最终短门禁结果：
+
+- SQLite `--memdb --size 10 --testset main sqlite.db` 保持 2,079 roots，`253,398 -> 252,669`
+  （`-729`，`-0.287690%`）；352 个 root 缩小、零增长，timing 归一化 stdout 逐行一致。mnemonic
+  主差为 `LSR -736 / MOV +7`。`sqlite3DefaultRowEst` `160 -> 159`，`__strcspn_sse42`
+  `230 -> 229`，两个 `__printf_buffer` fragment 分别 `252 -> 249`、`181 -> 179`。
+- smallpt `4 8 6` 保持 263 roots，`36,827 -> 36,756`（`-71`，`-0.192793%`）；31 个 root 缩小、
+  零增长，PPM SHA-256 保持
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`。
+- CoreMark 2k 保持 293 roots，`36,660 -> 36,585`（`-75`，`-0.204583%`）；40 个 root 缩小、
+  零增长，两侧 `crcfinal=0x4983`。
+- SQLite 三对短 wall-time 中位数 `2.363s -> 2.356s`（`-0.296%`），没有静态缩小而执行回退。
+
+Mac Debug/Release 构建和 low32 三个 case / 16 条断言通过；Debug spill wildcard 通过 23 个 case /
+23,152 条断言。Orb GCC 13.2 完成 `swift_test` 与 `svm_translator_linux` 构建，low32 同样通过 3 个 case /
+16 条断言。Orb spill wildcard 的 deferred-width 与 flags-only 两个代码形态断言在 candidate 和同源 baseline
+上均以相同位置失败，因此不计为本阶段回归，也不宣称该组远端全绿。没有运行完整测试集、正式长基准或
+压力测试；所有 census、日志、临时二进制、源目录和既有 env 取样均已删除，最终树没有新增开关、probe、
+硬编码 guest PC 或兼容兜底。
