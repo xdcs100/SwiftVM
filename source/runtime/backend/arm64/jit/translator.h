@@ -340,17 +340,33 @@ private:
     ResolvePinnedGPRWUse(ir::Value value, const ir::Inst* consumer) const;
     [[nodiscard]] std::optional<Register>
     ResolvePinnedGPRUse(ir::Value value, const ir::Inst* consumer) const;
-    [[nodiscard]] std::optional<u16>
-    MatchPinnedMemoryAddress(ir::Inst* address) const;
     struct PinnedMemorySource {
         u16 target{};
         u32 live_begin{};
     };
+    struct PinnedMemoryAddress {
+        ir::Inst* memory{};
+        u16 target{};
+        s64 offset{};
+    };
+    [[nodiscard]] std::optional<PinnedMemoryAddress>
+    MatchPinnedMemoryAddress(ir::Inst* address) const;
     [[nodiscard]] std::optional<PinnedMemorySource>
     MatchPinnedMemorySource(ir::Value source) const;
     [[nodiscard]] std::optional<u16>
     MatchPinnedMemoryValue(ir::Inst* extract) const;
     void PreparePinnedMemoryValues(ir::Block* block);
+    struct SpilledMemoryOperand {
+        ir::Inst* consumer{};
+        XRegister base{};
+        s64 offset{};
+    };
+    [[nodiscard]] std::optional<MemOperand> TryEmitSpilledMemoryOperand(
+            ir::Inst* address,
+            ir::ValueType type,
+            bool pair,
+            bool atomic,
+            ir::Inst* memory_inst);
 
     enum class BoundarySubsequence : size_t {
         Prologue,
@@ -970,6 +986,7 @@ private:
     // register directly.
     std::map<ir::Inst*, u16> fused_pin_gpr_reads{};
     std::map<ir::Inst*, u16> pinned_memory_values{};
+    std::map<ir::Inst*, SpilledMemoryOperand> spilled_memory_operands{};
     std::map<ir::Inst*, ir::Value> narrow_flags_inputs{};
     std::map<ir::Inst*, NarrowComparePlan> narrow_compares{};
     std::map<ir::Inst*, NarrowCarryFusion> narrow_carry_fusions{};

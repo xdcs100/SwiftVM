@@ -680,9 +680,19 @@ std::optional<u64> JitTranslator::CachedConstAddressOffset(ir::Inst* inst) const
 }
 
 void JitTranslator::EmitGetOperand(ir::Inst* inst) {
-    if (const auto target = MatchPinnedMemoryAddress(inst)) {
-        pinned_gpr_values.emplace(inst, *target);
-        return;
+    if (const auto address = MatchPinnedMemoryAddress(inst)) {
+        if (address->offset == 0) {
+            pinned_gpr_values.emplace(inst, address->target);
+            return;
+        }
+        if (context.IsSpilled(ir::Value{inst})) {
+            spilled_memory_operands.emplace(
+                    inst,
+                    SpilledMemoryOperand{address->memory,
+                                         XRegister(address->target),
+                                         address->offset});
+            return;
+        }
     }
     auto operand = inst->GetArg<ir::Operand>(0);
     auto result = context.R(ir::Value{inst});

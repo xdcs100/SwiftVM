@@ -717,6 +717,7 @@ bool JitTranslator::IsStrictInternalAdvancePC(ir::Block* block,
 JitTranslator::BlockTranslateState
 JitTranslator::PrepareBlockState(ir::Block* block) {
     cur_block = block;
+    spilled_memory_operands.clear();
     const auto& loop_hoist = block->GetLoopHoistMetadata();
     loop_hoist_body_entry = loop_hoist.prefix_end
             ? std::make_unique<Label>()

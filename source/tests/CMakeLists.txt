@@ -25,6 +25,7 @@ add_executable(swift_test
         pinned_gpr_width_fact_test.cpp
         pinned_load_update_test.cpp
         pinned_spill_publication_test.cpp
+        pinned_spilled_ea_test.cpp
         register_alloc_copy_test.cpp
         register_alloc_fpr_test.cpp
         scalar_identity_analysis_test.cpp

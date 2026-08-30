@@ -1,6 +1,10 @@
 #include "translator.h"
 
+#include <limits>
+
 namespace swift::runtime::backend::arm64 {
+
+#define __ masm.
 
 namespace {
 
@@ -78,14 +82,26 @@ JitTranslator::MatchPinnedMemorySource(ir::Value source) const {
     return PinnedMemorySource{static_cast<u16>(target), live_begin};
 }
 
-std::optional<u16> JitTranslator::MatchPinnedMemoryAddress(ir::Inst* address) const {
+std::optional<JitTranslator::PinnedMemoryAddress>
+JitTranslator::MatchPinnedMemoryAddress(ir::Inst* address) const {
     if (!address || address->GetOp() != ir::OpCode::GetOperand ||
         address->GetUses(false) != 1) {
         return std::nullopt;
     }
     const auto operand = address->GetArg<ir::Operand>(0);
-    if (!operand.GetRight().Null() || !operand.GetLeft().IsValue()) {
+    if (!operand.GetLeft().IsValue()) {
         return std::nullopt;
+    }
+    s64 offset{};
+    if (!operand.GetRight().Null()) {
+        if (operand.GetOp() != ir::OperandOp::Plus ||
+            !operand.GetRight().IsImm()) {
+            return std::nullopt;
+        }
+        offset = operand.GetRight().imm.GetSigned();
+        if (offset == std::numeric_limits<s64>::min()) {
+            return std::nullopt;
+        }
     }
     const auto source = MatchPinnedMemorySource(operand.GetLeft().value);
     if (!source) {
@@ -111,6 +127,17 @@ std::optional<u16> JitTranslator::MatchPinnedMemoryAddress(ir::Inst* address) co
         return std::nullopt;
     }
 
+    if (offset != 0 && !use_memory_base) {
+        const auto type = memory->GetOp() == ir::OpCode::LoadMemory
+                ? memory->ReturnType()
+                : memory->GetArg<ir::Value>(1).Type();
+        const u32 access_size = ir::GetValueSizeByte(type);
+        if (!__ IsImmLSUnscaled(offset) &&
+            !__ IsImmLSScaled(offset, access_size)) {
+            return std::nullopt;
+        }
+    }
+
     for (auto& scan : cur_block->GetInstList()) {
         if (scan.Id() <= source->live_begin || scan.Id() >= memory->Id()) {
             continue;
@@ -121,7 +148,7 @@ std::optional<u16> JitTranslator::MatchPinnedMemoryAddress(ir::Inst* address) co
             return std::nullopt;
         }
     }
-    return source->target;
+    return PinnedMemoryAddress{memory, source->target, offset};
 }
 
 std::optional<u16> JitTranslator::MatchPinnedMemoryValue(ir::Inst* extract) const {
@@ -196,5 +223,7 @@ void JitTranslator::PreparePinnedMemoryValues(ir::Block* block) {
         }
     }
 }
+
+#undef __
 
 }  // namespace swift::runtime::backend::arm64

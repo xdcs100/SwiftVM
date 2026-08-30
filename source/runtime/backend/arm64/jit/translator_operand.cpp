@@ -5,6 +5,41 @@ namespace swift::runtime::backend::arm64 {
 
 #define __ masm.
 
+std::optional<MemOperand> JitTranslator::TryEmitSpilledMemoryOperand(
+        ir::Inst* address,
+        ir::ValueType type,
+        bool pair,
+        bool atomic,
+        ir::Inst* memory_inst) {
+    const auto plan = spilled_memory_operands.find(address);
+    if (plan == spilled_memory_operands.end() ||
+        plan->second.consumer != memory_inst) {
+        return std::nullopt;
+    }
+    if (use_memory_base) {
+        return BiasMem(plan->second.base, plan->second.offset, atomic);
+    }
+    const u32 access_size = ir::GetValueSizeByte(type);
+    const bool encodable = pair
+            ? __ IsImmLSPair(plan->second.offset, access_size)
+            : __ IsImmLSUnscaled(plan->second.offset) ||
+                      __ IsImmLSScaled(plan->second.offset, access_size);
+    if (encodable) {
+        return MemOperand{plan->second.base, plan->second.offset};
+    }
+    const auto address_reg = context.GetTmpX();
+    if (plan->second.offset > 0 && __ IsImmAddSub(plan->second.offset)) {
+        __ Add(address_reg, plan->second.base, plan->second.offset);
+    } else if (plan->second.offset < 0 &&
+               __ IsImmAddSub(-plan->second.offset)) {
+        __ Sub(address_reg, plan->second.base, -plan->second.offset);
+    } else {
+        __ Mov(address_reg, plan->second.offset);
+        __ Add(address_reg, plan->second.base, address_reg);
+    }
+    return MemOperand{address_reg};
+}
+
 bool JitTranslator::CanUseZeroStoreRegister(ir::Value value) {
     auto* definition = value.Def();
     if (!context.GetFeatures().zero_store_zr || context.IsSpilled(value) ||
@@ -154,6 +189,12 @@ MemOperand JitTranslator::EmitMemOperand(ir::Operand& ir_op,
         } else {
             // Match Case: load store post/index & push/pop
             auto addr_value = ir_op.GetLeft().value;
+            if (addr_value.Def()) {
+                if (auto rematerialized = TryEmitSpilledMemoryOperand(
+                            addr_value.Def(), type, pair, atomic, memory_inst)) {
+                    return *rematerialized;
+                }
+            }
             if (!use_memory_base &&
                 context.IsConstAddressCached(addr_value.Id())) {
                 const auto offset = CachedConstAddressOffset(addr_value.Def());
