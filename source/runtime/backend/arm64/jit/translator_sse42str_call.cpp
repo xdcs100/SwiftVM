@@ -14,6 +14,7 @@ void JitTranslator::EmitSse42StrVectorCall(ir::Inst* inst,
                                            VAddr target,
                                            u8 imm) {
     using ABI = swift::x86::Sse42StrVectorCallABI;
+    ASSERT(ABI::Supports(imm));
 
     auto live_gprs = context.GetLiveGPRs();
     live_gprs.Clear(result.GetCode());
@@ -50,14 +51,9 @@ void JitTranslator::EmitSse42StrVectorCall(ir::Inst* inst,
     std::array<int, 8> fpr_slots{};
     gpr_slots.fill(-1);
     fpr_slots.fill(-1);
-    const bool preserve_host_link = imm != 0x02 && imm != 0x1a;
     u32 cursor{};
     for (u32 code : save_gprs) {
         gpr_slots[code] = int(cursor);
-        cursor += 8;
-    }
-    const u32 link_slot = cursor;
-    if (preserve_host_link) {
         cursor += 8;
     }
     const bool preserve_helper_result =
@@ -78,21 +74,14 @@ void JitTranslator::EmitSse42StrVectorCall(ir::Inst* inst,
 
     const size_t paired_gprs = save_gprs.size() & ~size_t{1};
     const bool fpr_frame_anchor =
-            save_gprs.empty() && !preserve_host_link && !save_fprs.empty();
+            save_gprs.empty() && !save_fprs.empty();
     if (paired_gprs) {
         __ Stp(XRegister(save_gprs[0]),
                XRegister(save_gprs[1]),
                MemOperand(sp, -static_cast<s64>(save_bytes), PreIndex));
     } else if (!save_gprs.empty()) {
-        if (preserve_host_link) {
-            __ Stp(XRegister(save_gprs.front()), x30,
-                   MemOperand(sp, -static_cast<s64>(save_bytes), PreIndex));
-        } else {
-            __ Str(XRegister(save_gprs.front()),
-                   MemOperand(sp, -static_cast<s64>(save_bytes), PreIndex));
-        }
-    } else if (preserve_host_link) {
-        __ Str(x30, MemOperand(sp, -static_cast<s64>(save_bytes), PreIndex));
+        __ Str(XRegister(save_gprs.front()),
+               MemOperand(sp, -static_cast<s64>(save_bytes), PreIndex));
     } else if (fpr_frame_anchor) {
         __ Str(VRegister::GetQRegFromCode(save_fprs.front()),
                MemOperand(sp, -static_cast<s64>(save_bytes), PreIndex));
@@ -105,15 +94,8 @@ void JitTranslator::EmitSse42StrVectorCall(ir::Inst* inst,
                MemOperand(sp, gpr_slots[save_gprs[i]]));
     }
     if (save_gprs.size() > 1 && (save_gprs.size() & 1u)) {
-        if (preserve_host_link) {
-            __ Stp(XRegister(save_gprs.back()), x30,
-                   MemOperand(sp, gpr_slots[save_gprs.back()]));
-        } else {
-            __ Str(XRegister(save_gprs.back()),
-                   MemOperand(sp, gpr_slots[save_gprs.back()]));
-        }
-    } else if (paired_gprs && preserve_host_link) {
-        __ Str(x30, MemOperand(sp, link_slot));
+        __ Str(XRegister(save_gprs.back()),
+               MemOperand(sp, gpr_slots[save_gprs.back()]));
     }
     size_t fpr_index = fpr_frame_anchor ? 1 : 0;
     for (; fpr_index + 1 < save_fprs.size(); fpr_index += 2) {
@@ -156,20 +138,13 @@ void JitTranslator::EmitSse42StrVectorCall(ir::Inst* inst,
                     .uniform = ir::UniformEffectId::None,
                     .host_fp = ir::HostFpEffect::FPCRTransparent,
             }};
-    if (preserve_host_link) {
-        if (!TryEmitSharedHostCall(lambda)) {
-            MaterializeHostCallTarget(target);
-            __ Blr(ip);
-        }
-    } else {
-        Label resume;
-        __ Adr(x17, &resume);
-        if (!TryEmitSharedHostBranch(lambda)) {
-            MaterializeHostCallTarget(target);
-            __ Br(ip);
-        }
-        __ Bind(&resume);
+    Label resume;
+    __ Adr(x17, &resume);
+    if (!TryEmitSharedHostBranch(lambda)) {
+        MaterializeHostCallTarget(target);
+        __ Br(ip);
     }
+    __ Bind(&resume);
     if (preserve_helper_result) {
         __ Str(WRegister(ABI::ResultGPR), MemOperand(sp, result_slot));
     } else if (result.GetCode() != ABI::ResultGPR) {
@@ -192,15 +167,8 @@ void JitTranslator::EmitSse42StrVectorCall(ir::Inst* inst,
                MemOperand(sp, gpr_slots[save_gprs[i]]));
     }
     if (save_gprs.size() > 1 && (save_gprs.size() & 1u)) {
-        if (preserve_host_link) {
-            __ Ldp(XRegister(save_gprs.back()), x30,
-                   MemOperand(sp, gpr_slots[save_gprs.back()]));
-        } else {
-            __ Ldr(XRegister(save_gprs.back()),
-                   MemOperand(sp, gpr_slots[save_gprs.back()]));
-        }
-    } else if (paired_gprs && preserve_host_link) {
-        __ Ldr(x30, MemOperand(sp, link_slot));
+        __ Ldr(XRegister(save_gprs.back()),
+               MemOperand(sp, gpr_slots[save_gprs.back()]));
     }
     if (preserve_helper_result) {
         __ Ldr(result, MemOperand(sp, result_slot));
@@ -210,15 +178,8 @@ void JitTranslator::EmitSse42StrVectorCall(ir::Inst* inst,
                XRegister(save_gprs[1]),
                MemOperand(sp, static_cast<s64>(save_bytes), PostIndex));
     } else if (!save_gprs.empty()) {
-        if (preserve_host_link) {
-            __ Ldp(XRegister(save_gprs.front()), x30,
-                   MemOperand(sp, static_cast<s64>(save_bytes), PostIndex));
-        } else {
-            __ Ldr(XRegister(save_gprs.front()),
-                   MemOperand(sp, static_cast<s64>(save_bytes), PostIndex));
-        }
-    } else if (preserve_host_link) {
-        __ Ldr(x30, MemOperand(sp, static_cast<s64>(save_bytes), PostIndex));
+        __ Ldr(XRegister(save_gprs.front()),
+               MemOperand(sp, static_cast<s64>(save_bytes), PostIndex));
     } else if (fpr_frame_anchor) {
         __ Ldr(VRegister::GetQRegFromCode(save_fprs.front()),
                MemOperand(sp, static_cast<s64>(save_bytes), PostIndex));

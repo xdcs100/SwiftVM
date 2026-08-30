@@ -125,6 +125,50 @@ std::vector<std::string> EmitHelperTransfer(HostRegisterEffect effect, swift::u3
     return Disassemble(context);
 }
 
+std::vector<std::string> EmitSse42Transfer(swift::u8 imm) {
+    Config config{
+            .loc_start = 0,
+            .loc_end = 1ull << 48,
+            .enable_jit = true,
+            .has_local_operation = false,
+            .backend_isa = kArm64,
+    };
+    AddressSpace address_space{config};
+    auto module = address_space.GetDefaultModule();
+    IntrusivePtr<Block> block{new Block(0, Location{0x9770})};
+
+    auto source = block->GetHostGPR(HostRegIndex(20), Imm{0u})
+                          .SetType(ValueType::U64);
+    block->SetHostGPR(source, HostRegIndex(7), Imm{0u});
+    auto replacement = block->LoadImm(Imm{swift::u64{0x2000}})
+                               .SetType(ValueType::U64);
+    block->SetHostGPR(replacement, HostRegIndex(20), Imm{0u});
+    auto left = block->LoadUniform(Uniform{0, ValueType::V128});
+    auto right = block->LoadUniform(Uniform{16, ValueType::V128});
+    auto result = block->Sse42Str(left, right, Imm{imm})
+                          .SetType(ValueType::U64);
+    block->StoreUniform(Uniform{32, ValueType::U64}, result);
+    auto address = block->BitCast(source).SetType(ValueType::U64);
+    auto loaded = block->LoadMemory(Operand{address, Imm{8u}})
+                          .SetType(ValueType::U64);
+    block->StoreUniform(Uniform{40, ValueType::U64}, loaded);
+    block->SetTerminal(terminal::ReturnToDispatch{});
+    block->ReIdInstr();
+
+    FeatureSet features{};
+    RegAlloc alloc{block->MaxInstrId(),
+                   address_space.GetTrampolines().GetGPRRegs(),
+                   address_space.GetTrampolines().GetFPRRegs(),
+                   features};
+    RegisterAllocPass::Run(block.get(), &alloc, false, features);
+    arm64::JitContext context{module, alloc};
+    arm64::JitTranslator translator{context};
+    translator.Translate(block.get());
+    context.Finish();
+
+    return Disassemble(context);
+}
+
 std::vector<std::string> EmitCrossBlockWidth(bool external_entry) {
     constexpr swift::VAddr first_guest = 0x9780;
     constexpr swift::VAddr second_guest = 0x9790;
@@ -282,6 +326,13 @@ TEST_CASE("resident helper contracts preserve pinned value versions") {
     REQUIRE(Count(conservative, "ldr x", "[x7, #8]") == 0);
     REQUIRE(Count(resident, "ldr x", "[x7, #8]") == 1);
     REQUIRE(Count(clobbered, "ldr x", "[x2, #8]") == 0);
+}
+
+TEST_CASE("SSE4.2 string lowering preserves pinned value versions") {
+    const auto native = EmitSse42Transfer(0x02);
+    const auto inline_ = EmitSse42Transfer(0x00);
+    REQUIRE(Count(native, "ldr x", "[x7, #8]") == 1);
+    REQUIRE(Count(inline_, "ldr x", "[x7, #8]") == 1);
 }
 
 TEST_CASE("pinned CFG width facts stop at external entry roots") {

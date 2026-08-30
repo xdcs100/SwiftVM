@@ -34,6 +34,7 @@ add_library(swift_runtime STATIC
         common/backedge_control.cpp
         common/backedge_control.h
         common/helper_abi.h
+        common/sse42str_call_abi.h
         common/cast_utils.h
         common/lru_cache.h
         common/range_mutex.h

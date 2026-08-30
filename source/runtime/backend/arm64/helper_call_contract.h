@@ -47,6 +47,9 @@ private:
     bool may_reenter{true};
     bool preserves_host_nzcv{};
     ir::UniformEffectId uniform_effects{ir::UniformEffectId::Unknown};
+    bool exact_register_clobbers{};
+    u32 gpr_clobber_mask{};
+    u32 fpr_clobber_mask{};
 };
 
 }  // namespace swift::runtime::backend::arm64

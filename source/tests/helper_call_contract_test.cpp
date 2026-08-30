@@ -90,4 +90,43 @@ TEST_CASE("guest state observation uses exact helper effects", "[helper-contract
     REQUIRE_FALSE(state.MayFaultOrObserve(*exact));
 }
 
+TEST_CASE("SSE4.2 string contracts expose exact lowering effects",
+          "[helper-contract][sse42]") {
+    Block block{0, Location{0x4520}};
+    auto left = block.LoadUniform(Uniform{0, ValueType::V128});
+    auto right = block.LoadUniform(Uniform{16, ValueType::V128});
+    auto* native = block.Sse42Str(left, right, Imm{swift::u64{0x02}}).Def();
+    auto* inline_ = block.Sse42Str(left, right, Imm{swift::u64{0x00}}).Def();
+    FeatureSet features{};
+
+    const auto native_contract = HelperCallContract::Resolve(*native, features);
+    REQUIRE(native_contract.has_value());
+    REQUIRE(native_contract->IsDirect());
+    REQUIRE(native_contract->FPCRTransparent());
+    REQUIRE(native_contract->PreservesPinnedState());
+    REQUIRE_FALSE(native_contract->RequiresGuestStatePublication());
+    REQUIRE_FALSE(native_contract->RetainsPendingNZCV());
+    REQUIRE_FALSE(native_contract->ClobbersGPR(0));
+    REQUIRE_FALSE(native_contract->ClobbersGPR(7));
+    REQUIRE(native_contract->ClobbersGPR(11));
+    REQUIRE(native_contract->ClobbersGPR(16));
+    REQUIRE(native_contract->ClobbersGPR(17));
+    REQUIRE(native_contract->ClobbersFPR(0));
+    REQUIRE(native_contract->ClobbersFPR(1));
+    REQUIRE_FALSE(native_contract->ClobbersFPR(2));
+    REQUIRE(native_contract->ClobbersFPR(3));
+    REQUIRE(native_contract->ClobbersFPR(7));
+
+    const auto inline_contract = HelperCallContract::Resolve(*inline_, features);
+    REQUIRE(inline_contract.has_value());
+    REQUIRE_FALSE(inline_contract->RequiresGuestStatePublication());
+    REQUIRE_FALSE(inline_contract->ClobbersGPR(11));
+    REQUIRE_FALSE(inline_contract->ClobbersFPR(0));
+
+    GuestStateMap state;
+    state.Analyze(&block, features);
+    REQUIRE_FALSE(state.MayFaultOrObserve(*native));
+    REQUIRE_FALSE(state.MayFaultOrObserve(*inline_));
+}
+
 }  // namespace

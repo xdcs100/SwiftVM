@@ -1,6 +1,7 @@
 #include "runtime/backend/arm64/helper_call_contract.h"
 
 #include "runtime/common/helper_abi.h"
+#include "runtime/common/sse42str_call_abi.h"
 
 namespace swift::runtime::backend::arm64 {
 
@@ -61,8 +62,26 @@ std::optional<HelperCallContract> HelperCallContract::Resolve(const ir::Inst& in
         case ir::OpCode::CallLocation:
         case ir::OpCode::CallDynamic:
         case ir::OpCode::X87Op:
-        case ir::OpCode::Sse42Str:
             return OpaqueContract(features);
+        case ir::OpCode::Sse42Str: {
+            HelperCallContract contract{};
+            contract.direct = true;
+            contract.fpcr_transparent = true;
+            contract.preserves_pinned_state = true;
+            contract.guest_state_effect = ir::HelperGuestStateEffect::None;
+            contract.may_fault = false;
+            contract.may_reenter = false;
+            contract.uniform_effects = ir::UniformEffectId::None;
+            contract.exact_register_clobbers = true;
+            const auto imm = static_cast<u8>(inst.GetArg<ir::Imm>(2).Get());
+            using ABI = swift::x86::Sse42StrVectorCallABI;
+            if (ABI::Supports(imm)) {
+                contract.gpr_clobber_mask = ABI::GPRClobbers(imm);
+                contract.fpr_clobber_mask =
+                        ABI::FPRClobbers(imm) | ABI::ArgumentFPRClobbers;
+            }
+            return contract;
+        }
         default:
             return std::nullopt;
     }
@@ -94,6 +113,9 @@ bool HelperCallContract::RetainsPendingNZCV() const {
 }
 
 bool HelperCallContract::ClobbersGPR(u32 code) const {
+    if (exact_register_clobbers) {
+        return code < 32 && (gpr_clobber_mask & (1u << code)) != 0;
+    }
     if (code >= 19) {
         return false;
     }
@@ -108,6 +130,9 @@ bool HelperCallContract::ClobbersGPR(u32 code) const {
 }
 
 bool HelperCallContract::ClobbersFPR(u32 code) const {
+    if (exact_register_clobbers) {
+        return code < 32 && (fpr_clobber_mask & (1u << code)) != 0;
+    }
     if (general_registers_only) {
         return false;
     }
@@ -122,16 +147,25 @@ bool HelperCallContract::ClobbersFPR(u32 code) const {
 }
 
 bool HelperCallContract::ArgumentRequiresSlot(u32 code) const {
+    if (exact_register_clobbers) {
+        return ClobbersGPR(code);
+    }
     return code <= 17 && (!preserves_pinned_state || code <= 2 || code >= 16);
 }
 
 bool HelperCallContract::RequiresGPRSnapshot(u32 code, bool argument_source) const {
+    if (exact_register_clobbers) {
+        return ClobbersGPR(code);
+    }
     return code <= 17 &&
            (ClobbersGPR(code) || (argument_source && (!preserves_pinned_state || code <= 2 ||
                                                       code == 11 || code >= 16)));
 }
 
 bool HelperCallContract::RequiresFPRSnapshot(u32 code) const {
+    if (exact_register_clobbers) {
+        return ClobbersFPR(code);
+    }
     return code < 32 && ClobbersFPR(code);
 }
 
