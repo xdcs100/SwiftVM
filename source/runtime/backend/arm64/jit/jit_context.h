@@ -328,7 +328,9 @@ public:
     // Completes a split block entry after the translator has emitted the
     // published-entry branch and bound the self-only body label.
     void BeginBackedgeBody();
-    void TickIR(ir::Inst* instr, bool forward_spilled_width_input = false);
+    void TickIR(ir::Inst* instr,
+                bool forward_spilled_width_input = false,
+                bool adopt_pending_spill_write = false);
 
     [[nodiscard]] vixl::aarch64::Label *GetLabel(LocationDescriptor loc);
     [[nodiscard]] vixl::aarch64::Label *GetInternalLabel(LocationDescriptor loc);
@@ -393,11 +395,16 @@ private:
     //    block's last instruction is skipped there. Harmless in block mode
     //    (spill slots are block-local); only a function-mode spill at the
     //    final instruction into such a terminal would be affected.
+    struct PendingSpillWrite;
     [[nodiscard]] Register SpillGPR(const ir::Value& value, bool definition = false);
     [[nodiscard]] VRegister SpillFPR(const ir::Value& value);
     void FlushSpillWrites();
     [[nodiscard]] std::optional<u8> FlushSpillWrites(
-            ir::Inst* consumer, bool forward_spilled_width_input = false);
+            ir::Inst* consumer,
+            bool forward_spilled_width_input = false,
+            bool adopt_pending_spill_write = false);
+    [[nodiscard]] bool AdoptPendingSpillWrite(
+            const PendingSpillWrite& write, ir::Inst* consumer);
     [[nodiscard]] static bool IsFloatValue(const ir::Value& value);
 
     // Scratch handed to a spill reload rather than to the emitter. Budgeted

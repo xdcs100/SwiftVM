@@ -17,6 +17,41 @@ bool SupportsDirectPublication(ir::OpCode op) {
 
 }  // namespace
 
+bool JitTranslator::CanAdoptPendingSpillWrite(ir::Inst* inst) {
+    if (!inst) {
+        return false;
+    }
+    if (inst->GetOp() != ir::OpCode::SetHostGPR) {
+        return true;
+    }
+    if (pinned_select_publications.contains(inst) ||
+        spilled_gpr_publications.contains(inst) ||
+        dead_pinned_gpr_writes.contains(inst) ||
+        pinned_gpr_value_transfers.contains(inst) ||
+        pinned_gpr_copies.contains(inst) ||
+        context.IsHostWriteCoalesced(inst->Id())) {
+        return false;
+    }
+    if (auto update = pinned_load_update_instructions.find(inst);
+        update != pinned_load_update_instructions.end() &&
+        inst == update->second.publication) {
+        return false;
+    }
+    const auto published = inst->GetArg<ir::Value>(0);
+    if (auto update = MatchBiasedMemoryUpdate(published.Def());
+        update && update->publication == inst) {
+        return false;
+    }
+    if (auto update = MatchPreIndexMemoryUpdate(published.Def());
+        update && update->publication == inst) {
+        return false;
+    }
+    if (published.Def() && fused_pin_zext32.contains(published.Def())) {
+        return false;
+    }
+    return !guest_state_map.FixedHomeForUse(published, inst).has_value();
+}
+
 std::optional<JitTranslator::SpilledGPRPublication>
 JitTranslator::MatchSpilledGPRPublication(ir::Inst* publication) {
     if (!publication || publication->GetOp() != ir::OpCode::SetHostGPR ||

@@ -79,6 +79,10 @@ bool SupportsDefinitionConsumer(OpCode op) {
     }
 }
 
+bool SupportsPendingWriteHandoff(OpCode op) {
+    return SupportsDefinitionConsumer(op) || op == OpCode::SetHostGPR;
+}
+
 bool TerminalUsesValue(const Terminal& terminal,
                        u32 value_id,
                        const backend::RegAlloc& reg_alloc) {
@@ -195,6 +199,7 @@ void PlanSegment(const Vector<Inst*>& instructions,
     std::map<u32, Vector<size_t>> uses;
     std::map<u32, u32> use_counts;
     std::map<u32, bool> transferable_uses;
+    std::map<u32, bool> handoff_uses;
     for (size_t i = 0; i < instructions.size(); ++i) {
         auto* inst = instructions[i];
         if (inst->IsPseudoOperation()) {
@@ -224,6 +229,8 @@ void PlanSegment(const Vector<Inst*>& instructions,
                 ++use_counts[value_id];
                 auto transferable = transferable_uses.try_emplace(value_id, true).first;
                 transferable->second &= SupportsDefinitionConsumer(inst->GetOp());
+                auto handoff = handoff_uses.try_emplace(value_id, true).first;
+                handoff->second &= SupportsPendingWriteHandoff(inst->GetOp());
             }
         }
     }
@@ -246,7 +253,7 @@ void PlanSegment(const Vector<Inst*>& instructions,
                     reg_alloc->MapSpillReload(value_id,
                                               (*definition)->Id(),
                                               instructions[positions.back()]->Id(),
-                                              HostGPR{*reg});
+                                              HostGPR{*reg}, true);
                     continue;
                 }
             }
@@ -272,10 +279,15 @@ void PlanSegment(const Vector<Inst*>& instructions,
                 ++begin;
                 continue;
             }
+            const bool owns_all_uses =
+                    begin == 0 && best + 1 == positions.size() &&
+                    definition != instructions.end() && handoff_uses[value_id] &&
+                    (*definition)->GetUses(false) == use_counts[value_id] &&
+                    !TerminalUsesValue(terminal, value_id, *reg_alloc);
             reg_alloc->MapSpillReload(value_id,
                                       instructions[positions[begin]]->Id(),
                                       instructions[positions[best]]->Id(),
-                                      HostGPR{*best_reg});
+                                      HostGPR{*best_reg}, owns_all_uses);
             begin = best + 1;
         }
     }

@@ -141,6 +141,27 @@ SpillForwardingBlock MakeRepeatedSpillUseBlock() {
     return {std::move(block), arriving};
 }
 
+SpillForwardingBlock MakeSpillPublicationRegionBlock(
+        bool overwritten = false) {
+    IntrusivePtr<Block> block{new Block(0, Location{0x2448})};
+    const auto longest = block->LoadImm(Imm{swift::u64{1}});
+    const auto middle = block->LoadImm(Imm{swift::u64{2}});
+    const auto shortest = block->LoadImm(Imm{swift::u64{3}});
+    const auto arriving = block->LoadImm(Imm{swift::u64{4}});
+    const auto target = overwritten ? HostRegIndex(22) : HostRegIndex(15);
+    block->SetHostGPR(arriving, target, Imm{0u});
+    if (overwritten) {
+        block->SetHostGPR(shortest, target, Imm{0u});
+    }
+    const auto first = block->Add(arriving, Operand{shortest});
+    const auto second = block->Add(first, Operand{middle});
+    const auto total = block->Add(second, Operand{longest});
+    block->StoreUniform(Uniform{0, ValueType::U64}, total);
+    block->SetTerminal(terminal::ReturnToDispatch{});
+    block->ReIdInstr();
+    return {std::move(block), arriving};
+}
+
 SpillForwardingBlock MakeSpilledPublicationWindowBlock(bool faulting = false) {
     IntrusivePtr<Block> block{new Block(0, Location{0x2480})};
     const auto longest = block->LoadImm(Imm{swift::u64{1}});
@@ -431,6 +452,72 @@ TEST_CASE("spilled scalar definitions transfer into multi-use reload regions") {
         return (line.find("str " + resident + ", [x28") != std::string::npos) ||
                (line.find("ldr " + resident + ", [x28") != std::string::npos);
     }));
+}
+
+TEST_CASE("pending spill definitions hand off to complete reload regions") {
+    const auto emitted = Emit(
+            MakeSpillPublicationRegionBlock(),
+            GPRSMask{~((1u << 5) - 1u) & ~(1u << 18)});
+    const auto definition = std::ranges::find_if(emitted, [](const auto& line) {
+        return line.find("mov x") != std::string::npos &&
+               line.find("#0x4") != std::string::npos;
+    });
+    REQUIRE(definition != emitted.end());
+    const auto delimiter = definition->find(',');
+    REQUIRE(delimiter != std::string::npos);
+    const auto definition_register = definition->substr(4, delimiter - 4);
+    const auto publication = std::find_if(
+            std::next(definition), emitted.end(), [](const auto& line) {
+                return line.find("mov x15, x") != std::string::npos;
+            });
+    REQUIRE(publication != emitted.end());
+    const auto source_delimiter = publication->find(',');
+    REQUIRE(source_delimiter != std::string::npos);
+    const auto resident = publication->substr(source_delimiter + 2);
+    const auto consumer = std::find_if(
+            std::next(publication), emitted.end(), [&](const auto& line) {
+                return line.find("add ") != std::string::npos &&
+                       line.find(resident) != std::string::npos;
+            });
+    REQUIRE(consumer != emitted.end());
+    REQUIRE(std::none_of(
+            std::next(definition), consumer, [&](const auto& line) {
+                return line.find("str " + definition_register + ", [x28") !=
+                               std::string::npos ||
+                       line.find("ldr " + resident + ", [x28") !=
+                               std::string::npos;
+            }));
+}
+
+TEST_CASE("elided publications retain complete-region spill backing") {
+    const auto emitted = Emit(
+            MakeSpillPublicationRegionBlock(true),
+            GPRSMask{~((1u << 5) - 1u) & ~(1u << 18)});
+    const auto definition = std::ranges::find_if(emitted, [](const auto& line) {
+        return line.find("mov x") != std::string::npos &&
+               line.find("#0x4") != std::string::npos;
+    });
+    REQUIRE(definition != emitted.end());
+    const auto delimiter = definition->find(',');
+    REQUIRE(delimiter != std::string::npos);
+    const auto scratch = definition->substr(4, delimiter - 4);
+    const auto store = std::find_if(
+            std::next(definition), emitted.end(), [&](const auto& line) {
+                return line.find("str " + scratch + ", [x28") !=
+                       std::string::npos;
+            });
+    REQUIRE(store != emitted.end());
+    const auto address_begin = store->find("[x28");
+    const auto address_end = store->find(']', address_begin);
+    REQUIRE(address_begin != std::string::npos);
+    REQUIRE(address_end != std::string::npos);
+    const auto address = store->substr(
+            address_begin, address_end - address_begin + 1);
+    REQUIRE(std::any_of(
+            std::next(store), emitted.end(), [&](const auto& line) {
+                return line.find("ldr x") != std::string::npos &&
+                       line.find(address) != std::string::npos;
+            }));
 }
 
 TEST_CASE("spilled fixed publications cross a fault-safe instruction window") {

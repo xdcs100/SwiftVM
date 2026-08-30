@@ -469,8 +469,31 @@ void JitContext::FlushSpillWrites() {
     (void)FlushSpillWrites(nullptr);
 }
 
+bool JitContext::AdoptPendingSpillWrite(
+        const PendingSpillWrite& write, ir::Inst* consumer) {
+    if (!consumer || write.is_fpr) {
+        return false;
+    }
+    const auto* reload = reg_alloc.SpillReloadAt(
+            write.value, consumer->Id());
+    if (!reload || !reload->owns_all_uses) {
+        return false;
+    }
+    if (active_spill_reload_regions.size() <= reload->region) {
+        active_spill_reload_regions.resize(reload->region + 1);
+    }
+    auto resident = XRegister(reload->reg);
+    if (resident.GetCode() != write.reg) {
+        __ Mov(resident, XRegister(write.reg));
+    }
+    active_spill_reload_regions[reload->region] = true;
+    return true;
+}
+
 std::optional<u8> JitContext::FlushSpillWrites(
-        ir::Inst* consumer, bool forward_spilled_width_input) {
+        ir::Inst* consumer,
+        bool forward_spilled_width_input,
+        bool adopt_pending_spill_write) {
     std::optional<u8> forwarded;
     std::optional<PendingSpillWrite> retained;
     const bool scratch_only = consumer &&
@@ -495,6 +518,10 @@ std::optional<u8> JitContext::FlushSpillWrites(
         }
         if (definition && IsFlagsOnlySpillConsumer(consumer->GetOp()) &&
             definition->GetUses(false) == direct_uses) {
+            continue;
+        }
+        if (definition && adopt_pending_spill_write &&
+            AdoptPendingSpillWrite(write, consumer)) {
             continue;
         }
         if (consumer && !forwarded && !write.is_fpr &&
@@ -1595,12 +1622,13 @@ void JitContext::SetCurrent(ir::Function* function) {
 }
 
 void JitContext::TickIR(ir::Inst* instr,
-                        bool forward_spilled_width_input) {
+                        bool forward_spilled_width_input,
+                        bool adopt_pending_spill_write) {
     EndVixlScratch();
     spill_def_scratch.clear();
     spill_use_scratch.clear();
     const auto forwarded_spill = FlushSpillWrites(
-            instr, forward_spilled_width_input);
+            instr, forward_spilled_width_input, adopt_pending_spill_write);
     cur_inst = instr;
     reg_alloc.SetCurrent(instr);
     cur_dirty_gprs = reg_alloc.GetDirtyGPR();
