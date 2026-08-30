@@ -2186,3 +2186,30 @@ resolver 消费同一来源。
 
 本阶段没有新增 env 开关、日志、probe、硬编码 guest PC、临时运行路径或兼容兜底，也没有运行长基准
 或压力测试。第 9 节 helper ABI 至此不再把具有专用 emitter 的 SSE4.2 指令误归类为 opaque host call。
+
+### 16.64 helper-clobber 后的 overwrite-first EdgeFlags consumer
+
+`AnalyzeEdgeFlagsTarget` 原来把所有不保留 pending host NZCV 的 helper 直接视为 entry barrier，导致
+第 16.63 节已经证明无 guest-state observation、fault 或 reentry 的 `Sse42Str` 仍无法进入
+overwrite-first edge contract。现在 target scan 只在 `MayFaultOrObserve` 为真时终止；该判断继续通过
+`HelperCallContract::RequiresGuestStatePublication` 拒绝 opaque、faulting 和 reentrant helper。纯 host
+NZCV clobber 可以继续扫描，但 incoming mask 仍必须在 `AdvancePC` 前被完整覆盖，覆盖前的任何 flags
+observer 仍由原有 `observed_nzcv_mask` 拒绝。因此没有新增状态字段、SSE4.2 白名单或第二套 entry ABI。
+
+生产定向用例在 internal target 开头放置 native `0x02` `Sse42Str`，随后完整
+`PublishSse42StrFlags(All)`：安全形态在分支后才出现 NZCV merge，最终 guest flags 与关闭 EdgeFlags
+时一致；在 helper 与 publication 之间插入 `GetFlags` 后，candidate 与关闭状态保持相同 code size/hash，
+证明 observer 边界仍被拒绝。Mac Debug/Release 与 Orb GCC 13.2 均通过该用例的 94 条断言；Mac 的
+helper contract、pinned continuity、live-through 和 scratch contract 分别通过 59、2、26 和 512 条断言，
+Orb 对应为 57、2、26 和 512。
+
+严格同源 static-only 三语料均为零代码变化和零增长：smallpt 保持 `263 / 36,749` 与 canonical PPM，
+SQLite 保持 `2,065 / 251,669`，CoreMark 显式 2k 保持 `293 / 36,574` 与 `crcfinal=0x4983`。两组反向
+顺序 SQLite 短配对方向一致：wall 分别为 `-0.745%`、`-0.910%`，guest TOTAL 分别为 `-0.105%`、
+`-1.036%`；合并中位数为 wall `1.2085s -> 1.1980s`（`-0.869%`）、guest
+`0.9575s -> 0.9550s`（`-0.261%`）。样本只用于确认动态 bypass 没有方向一致的回退，不声明吞吐收益。
+CoreMark 无参数自校准在 8 秒门限终止后没有延长，改用显式 2k 输入完成门禁。
+
+本阶段没有新增 env 开关、日志、probe、硬编码 guest PC、临时运行路径或兼容兜底，也没有运行长基准
+或压力测试。精确 helper observation contract 现在同时被 GuestStateMap、helper emitter 和 EdgeFlags
+target ABI 消费。
