@@ -118,3 +118,44 @@ TEST_CASE("live low32 views reuse the source across read-only consumers") {
     auto dead_source = allocate(false);
     REQUIRE_FALSE(dead_source.alloc->IsLow32CopyCoalesced(dead_source.bridge.Id()));
 }
+
+TEST_CASE("final-use low32 views transfer source ownership") {
+    IntrusivePtr<Block> block{new Block(0, Location{0x86a0})};
+    auto source = block->LoadUniform<TypedValue<ValueType::U64>>(
+            Uniform{0, ValueType::U64});
+    block->StoreUniform(Uniform{16, ValueType::U64}, source);
+    auto bridge = block->BitExtract(source, Imm{0u}, Imm{32u})
+                          .SetType(ValueType::U32);
+    block->StoreUniform(Uniform{8, ValueType::U32}, bridge);
+    block->StoreUniform(Uniform{12, ValueType::U32}, bridge);
+    block->SetTerminal(terminal::ReturnToDispatch{});
+    block->ReIdInstr();
+
+    auto features = FeatureSet{};
+    RegAlloc alloc{block->MaxInstrId(), CopyTestGPRs(),
+                   FPRSMask{~((1u << 8) - 1u)}, features};
+    RegisterAllocPass::Run(block.get(), &alloc, false, features);
+
+    REQUIRE(alloc.IsLow32CopyCoalesced(bridge.Id()));
+    REQUIRE(alloc.Low32CopySource(bridge.Id()) == source.Id());
+    REQUIRE(alloc.ValueGPR(bridge).id == alloc.ValueGPR(source).id);
+
+    IntrusivePtr<Block> atomic_block{new Block(0, Location{0x86b0})};
+    auto address = atomic_block->LoadUniform<TypedValue<ValueType::U64>>(
+            Uniform{0, ValueType::U64});
+    auto atomic_source = atomic_block->LoadUniform<TypedValue<ValueType::U64>>(
+            Uniform{8, ValueType::U64});
+    auto atomic_bridge = atomic_block->BitExtract(
+            atomic_source, Imm{0u}, Imm{32u}).SetType(ValueType::U32);
+    auto previous = atomic_block->AtomicExchange(address, atomic_bridge)
+                            .SetType(ValueType::U32);
+    atomic_block->StoreUniform(Uniform{16, ValueType::U32}, previous);
+    atomic_block->SetTerminal(terminal::ReturnToDispatch{});
+    atomic_block->ReIdInstr();
+
+    RegAlloc atomic_alloc{atomic_block->MaxInstrId(), CopyTestGPRs(),
+                          FPRSMask{~((1u << 8) - 1u)}, features};
+    RegisterAllocPass::Run(
+            atomic_block.get(), &atomic_alloc, false, features);
+    REQUIRE_FALSE(atomic_alloc.IsLow32CopyCoalesced(atomic_bridge.Id()));
+}

@@ -211,8 +211,8 @@ private:
     [[nodiscard]] std::optional<u8> ReprovePshufdDirectShuffle(
             ir::Inst* inst) const;
     [[nodiscard]] bool ReproveWidthChainBridge(ir::Inst* inst) const;
-    [[nodiscard]] bool ReproveLiveLow32View(ir::Inst* inst,
-                                            ir::Value source) const;
+    [[nodiscard]] bool ReproveLow32ViewOwnership(ir::Inst* inst,
+                                                 ir::Value source) const;
     [[nodiscard]] bool ReproveAdjacentLow32Copy(ir::Inst* inst,
                                                 ir::Value source) const;
     [[nodiscard]] bool ReproveLow32Copy(ir::Inst* inst) const;

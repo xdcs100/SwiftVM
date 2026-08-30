@@ -363,8 +363,8 @@ bool JitTranslator::ReproveWidthChainBridge(ir::Inst* inst) const {
     return true;
 }
 
-bool JitTranslator::ReproveLiveLow32View(ir::Inst* inst,
-                                         ir::Value source) const {
+bool JitTranslator::ReproveLow32ViewOwnership(ir::Inst* inst,
+                                              ir::Value source) const {
     const u32 source_target = context.X(source).GetCode();
     bool has_consumer = false;
     u32 last_use = inst->Id();
@@ -395,7 +395,8 @@ bool JitTranslator::ReproveLiveLow32View(ir::Inst* inst,
             return false;
         }
     }
-    if (!has_consumer || source_last_use < last_use) {
+    if (!has_consumer ||
+        (source_last_use < last_use && source_last_use != inst->Id())) {
         return false;
     }
     for (auto& scan : cur_block->GetInstList()) {
@@ -451,7 +452,7 @@ bool JitTranslator::ReproveLow32Copy(ir::Inst* inst) const {
         !context.SharesGPR(source, ir::Value{inst})) {
         return false;
     }
-    return ReproveLiveLow32View(inst, source) ||
+    return ReproveLow32ViewOwnership(inst, source) ||
            ReproveAdjacentLow32Copy(inst, source);
 }
 
