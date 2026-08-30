@@ -1496,3 +1496,52 @@ live-through 时，offset 0 的首个 `stp` 使用 pre-index，最终对应 `ldp
 本阶段没有运行长基准或压力测试，也没有保留 probe、日志、env 开关、硬编码 guest PC、临时源码
 路径或兼容兜底。helper 现场剩余的栈指令均对应真实 live-through 值；下一步只评估能否由新的 leaf
 return ABI 消除 x30 frame，而不把保存序列转移到共享 thunk 后增加动态 call/return。
+
+### 16.42 native SSE4.2 EqualAny helper
+
+提交 `183def8` 将 ARM64 `PCMPISTRI EqualAny` 的 shared helper 从 C wrapper 调用改为原生汇编实现。
+helper 直接计算两个隐式长度、逐字节 EqualAny mask、最低匹配索引和 packed flags，不再建立第二层
+C ABI frame。参数交换改用 helper 已声明破坏的 `q7`，EqualAny 的 FPR clobber 因此收敛为
+`q3-q7`；GPR/FPR clobber、参数搬运和 packed result 继续由同一 `Sse42StrVectorCallABI` 描述。
+
+短门禁结果：
+
+- helper-effects、SSE4.2 scratch、Rosetta/SDM 差分、16-byte memory boundary 和 alias/REX 用例分别
+  通过 29、512、16,255、4 和 27 条断言。
+- SQLite `main/size1` 保持 2,114 roots、100% root/top-30 覆盖和零增长，
+  `333,630 -> 333,604`（`-26`，`-0.007793%`）；去除 timing 后 stdout 逐行一致。
+  `__strcspn_sse42@0x506d30` 从 `271 -> 245`。
+- smallpt `4 8 6` 保持 275 roots、`46,258` 条 host 指令和 canonical PPM，严格零变化。
+- 两组反向短配对的快慢方向交叉，只证明没有方向一致的明显回退，不声明动态性能收益。
+
+本阶段没有运行长基准或压力测试，也没有保留 wrapper fallback、probe、日志、env 开关、硬编码
+guest PC 或临时源码路径。
+
+### 16.43 EqualAny 专用 host return ABI
+
+提交 `f6b50a3` 为 native EqualAny helper 引入局部的 `x17` return ABI。caller 以 `ADR x17, resume`
+准备返回地址，通过共享 thunk 的 `B` 或远目标的 `BR` 进入 helper；helper 以 `BR x17` 返回。普通
+`0x1a` helper 仍使用标准 `BL`/`RET`，该合同不扩展到通用 helper、guest return 或 continuation ABI。
+
+EqualAny 不再保存和恢复 x30。frame planner 在仍有 live-through GPR 时由首个 GPR save/restore
+承担栈调整，只有 FPR 时由首个 Q register 承担，完全空 frame 不发射栈指令；奇数 GPR、result slot
+和 FPR pair 保持原有对齐及对称恢复。x17 同时进入精确 clobber 集，因此 caller 中原有 live x17
+仍会由现有 live-through 合同保存。
+
+短门禁结果：
+
+- helper-effects、SSE4.2 scratch、Rosetta/SDM 差分、16-byte memory boundary 和 alias/REX 用例分别
+  通过 26、512、16,255、4 和 27 条断言。
+- fresh same-path SQLite `main/size1` 保持 2,207 roots、100% root/top-30 覆盖和零增长，
+  `343,738 -> 343,736`（`-2`，`-0.000582%`）；唯一变化是
+  `__strcspn_sse42@0x506d30` `245 -> 243`。去除 timing 后 stdout 完全一致。
+- smallpt `4 8 6` 保持 275 roots、`46,258` 条 host 指令和 canonical PPM，严格零变化。
+- 两组反向 SQLite 短配对为 candidate/base `2.427s/2.394s` 与 base/candidate
+  `2.445s/2.366s`，方向交叉，没有方向一致的明显回退。
+
+此前评估的通用 leaf-return ABI 原型没有保留：宽泛省略 x29 会触发 guest trap；补齐 source/target
+兼容合同后，省下的 x30 指令与安全 outgoing continuation 指令完全抵消，静态收益为零。当前实现只
+保留由单一 native helper 明确定义、无需改变全局 return/continuation contract 的局部 ABI。
+
+本阶段没有运行长基准或压力测试，也没有保留调试路径、probe、日志、env 开关、硬编码 guest PC、
+临时源码路径或兼容兜底。
