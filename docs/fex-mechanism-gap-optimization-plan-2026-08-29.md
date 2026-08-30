@@ -1794,3 +1794,45 @@ contract 排除该路径。
 本阶段没有重启第 16.38 节已证明严格零收益的跨 local-CFG preload，也没有保留 probe、日志、env
 开关、临时路径、硬编码 guest PC 或兼容 fallback，没有运行长基准或压力测试。剩余 spill residual 的
 主体已经进一步收窄为真实 fault/observer-aware memory lifetime，而不是 publication 首 use 的机械往返。
+
+### 16.51 fault-aware memory reader 的 pending spill 交接
+
+提交 `c42cc83` 将 memory barrier 前的 pending scalar spill 从 opcode 级保守写回收窄为精确物理
+reader contract。`JitContext` 只暴露唯一 pending scalar value id；translator 逐项复证当前
+`LoadMemory`、`StoreMemory` 或 `StoreMemoryTSO` emitter 是否确实读取该 allocation，确认后才允许
+同一 scratch 穿过 fault barrier。flush 仍要求 final-use closure、无 reload region、无 dirty/fixed
+clobber 和足够 scratch headroom；memory adoption 与 final-use forwarding 消费同一 reader 结论。
+
+地址 reader 会排除 spilled-EA rematerialization、biased/pre-index update、pinned address 和
+pinned-load update；store value reader 会排除 zero register、resident scalar FPR、GuestStateMap
+fixed home、pinned memory value 和 fused pinned read。普通 `LoadMemory` 只有结果直接进入正常 GPR 或
+已证明的 pinned destination 时才交接地址 scratch。结果仍由普通 spill scratch 承载的 load 保留
+canonical backing，避免把 faulting input 与同一指令的新 spill definition 当作两个独立生命周期。
+
+曾评估无条件允许 spilled-result load 的更宽版本。smallpt 与 SQLite `--help` 静态门禁继续缩小，
+但 SQLite main 截断运行从 baseline 的 984 roots / `SQL logic error` 提前变为 564 roots /
+`malformed database schema`；该版本已删除。最终 direct-result 边界在同一诊断中恢复为两侧
+984 roots 和相同 baseline 错误。由于该 workload 的 baseline 本身没有正常完成，这组数据只用于
+排除不安全边界，不作为正确性或性能验收。
+
+最终短门禁结果：
+
+- Mac Debug/Release 的 `swift_runtime`、`svm_translator_linux` 和 `swift_test` 构建通过；spill
+  定向集合通过 24 个 case / 23,160 条断言。新增用例分别覆盖 direct-result load address、store
+  address、store value、multi-use backing 和 spilled-result load backing。五个既有真实 guest fault
+  用例通过 41 条断言。
+- 严格同源 smallpt `4 8 6` static-only A/B 保持 275 roots、100% root/top-30 coverage 和 canonical
+  PPM SHA-256 `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`，
+  `45,479 -> 45,235`（`-244`，`-0.536511%`）；22 个 root 缩小、零增长，mnemonic delta 为
+  `STR -122 / LDR -122`。
+- SQLite `--help` 保持 225 roots、100% root/top-30 coverage 和逐字节一致 stdout SHA-256
+  `fbde86bf265e122ad1b27f2d5cb318240fb77aa0c77050c005c17bd60bb25383`，
+  `38,283 -> 38,101`（`-182`，`-0.475407%`）；21 个 root 缩小、零增长，mnemonic delta 为
+  `STR -91 / LDR -91`。
+- Orb clean GCC 构建通过 `swift_runtime`、`svm_translator_linux`，并完成
+  `spill_forwarding_test.cpp.o` 定向编译。
+
+本阶段没有保留 probe、日志、env 开关、临时路径、硬编码 guest PC 或兼容 fallback，也没有运行长
+基准或压力测试。fault-aware memory lifetime 的 store 与 direct-result load 大头已经闭合；普通
+spilled-result load 需要先建立同一 faulting instruction 内 input scratch 与 result definition 的首类
+所有权合同，不能再用 barrier 豁免继续扩大。
