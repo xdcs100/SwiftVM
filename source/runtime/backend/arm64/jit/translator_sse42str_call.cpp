@@ -73,17 +73,26 @@ void JitTranslator::EmitSse42StrVectorCall(ir::Inst* inst,
     }
     const u32 save_bytes = (cursor + 15u) & ~15u;
 
-    __ Sub(sp, sp, save_bytes);
     const size_t paired_gprs = save_gprs.size() & ~size_t{1};
-    for (size_t i = 0; i < paired_gprs; i += 2) {
+    if (paired_gprs) {
+        __ Stp(XRegister(save_gprs[0]),
+               XRegister(save_gprs[1]),
+               MemOperand(sp, -static_cast<s64>(save_bytes), PreIndex));
+    } else if (!save_gprs.empty()) {
+        __ Stp(XRegister(save_gprs.front()), x30,
+               MemOperand(sp, -static_cast<s64>(save_bytes), PreIndex));
+    } else {
+        __ Str(x30, MemOperand(sp, -static_cast<s64>(save_bytes), PreIndex));
+    }
+    for (size_t i = 2; i < paired_gprs; i += 2) {
         __ Stp(XRegister(save_gprs[i]),
                XRegister(save_gprs[i + 1]),
                MemOperand(sp, gpr_slots[save_gprs[i]]));
     }
-    if (save_gprs.size() & 1u) {
+    if (save_gprs.size() > 1 && (save_gprs.size() & 1u)) {
         __ Stp(XRegister(save_gprs.back()), x30,
                MemOperand(sp, gpr_slots[save_gprs.back()]));
-    } else {
+    } else if (paired_gprs) {
         __ Str(x30, MemOperand(sp, link_slot));
     }
     for (size_t i = 0; i + 1 < save_fprs.size(); i += 2) {
@@ -145,21 +154,30 @@ void JitTranslator::EmitSse42StrVectorCall(ir::Inst* inst,
         __ Ldr(VRegister::GetQRegFromCode(save_fprs.back()),
                MemOperand(sp, fpr_slots[save_fprs.back()]));
     }
-    for (size_t i = 0; i < paired_gprs; i += 2) {
+    for (size_t i = 2; i < paired_gprs; i += 2) {
         __ Ldp(XRegister(save_gprs[i]),
                XRegister(save_gprs[i + 1]),
                MemOperand(sp, gpr_slots[save_gprs[i]]));
     }
-    if (save_gprs.size() & 1u) {
+    if (save_gprs.size() > 1 && (save_gprs.size() & 1u)) {
         __ Ldp(XRegister(save_gprs.back()), x30,
                MemOperand(sp, gpr_slots[save_gprs.back()]));
-    } else {
+    } else if (paired_gprs) {
         __ Ldr(x30, MemOperand(sp, link_slot));
     }
     if (preserve_helper_result) {
         __ Ldr(result, MemOperand(sp, result_slot));
     }
-    __ Add(sp, sp, save_bytes);
+    if (paired_gprs) {
+        __ Ldp(XRegister(save_gprs[0]),
+               XRegister(save_gprs[1]),
+               MemOperand(sp, static_cast<s64>(save_bytes), PostIndex));
+    } else if (!save_gprs.empty()) {
+        __ Ldp(XRegister(save_gprs.front()), x30,
+               MemOperand(sp, static_cast<s64>(save_bytes), PostIndex));
+    } else {
+        __ Ldr(x30, MemOperand(sp, static_cast<s64>(save_bytes), PostIndex));
+    }
 
     flags_set = ir::Flags::None;
     flags_clear = ir::Flags::None;

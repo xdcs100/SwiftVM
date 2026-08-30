@@ -122,6 +122,7 @@ Sse42HelperEmission EmitSse42HelperBoundary(swift::u8 imm,
     };
     AddressSpace address_space{config};
     IntrusivePtr<Block> block{new Block(0, Location{0xb160})};
+    auto scalar_carry = block->LoadUniform(Uniform{96, ValueType::U64});
     auto carry = block->LoadUniform(Uniform{0, ValueType::V128});
     auto left = block->LoadUniform(Uniform{16, ValueType::V128});
     auto right = block->LoadUniform(Uniform{32, ValueType::V128});
@@ -129,6 +130,7 @@ Sse42HelperEmission EmitSse42HelperBoundary(swift::u8 imm,
                           .SetType(ValueType::U64);
     block->StoreUniform(Uniform{48, ValueType::U64}, result);
     block->StoreUniform(Uniform{64, ValueType::V128}, carry);
+    block->StoreUniform(Uniform{104, ValueType::U64}, scalar_carry);
     if (keep_left_live) {
         block->StoreUniform(Uniform{80, ValueType::V128}, left);
     }
@@ -234,6 +236,8 @@ TEST_CASE("SSE4.2 helper preserves only live-through vector values",
         REQUIRE(CountStackFPR(dead_arguments, false, dead_arguments.left) == 0);
         REQUIRE(CountStackFPR(dead_arguments, false, dead_arguments.right) == 0);
         REQUIRE(Count(dead_arguments.instructions, "str w16, [sp") == 0);
+        REQUIRE(Count(dead_arguments.instructions, "sub sp, sp") == 0);
+        REQUIRE(Count(dead_arguments.instructions, "add sp, sp") == 0);
 
         const auto live_left = EmitSse42HelperBoundary(imm, true);
         REQUIRE(CountStackFPR(live_left, true, live_left.left) == 1);
