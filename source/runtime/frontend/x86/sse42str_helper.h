@@ -13,7 +13,12 @@ struct Sse42StrVectorCallABI {
     static constexpr u32 GPRClobbers(u8 imm) {
         return imm == 0x1a ? NativeGPRClobbers : GenericGPRClobbers;
     }
-    static constexpr u32 FPRClobbers = 0xffu;
+    static constexpr u32 NativeFPRClobbers = 0xfcu;
+    static constexpr u32 GenericFPRClobbers = 0xffu;
+    static constexpr u32 ArgumentFPRClobbers = 0x3u;
+    static constexpr u32 FPRClobbers(u8 imm) {
+        return imm == 0x1a ? NativeFPRClobbers : GenericFPRClobbers;
+    }
 };
 
 VAddr Sse42StrVectorHelperAddress(u8 imm);

@@ -315,6 +315,7 @@ public:
             }
         };
         for (auto& interval : live_interval) {
+            reg_alloc->SetLiveEnd(interval.inst->Id(), interval.end);
             fill_gap(interval.start);
 
             ExpireOldIntervals(interval);

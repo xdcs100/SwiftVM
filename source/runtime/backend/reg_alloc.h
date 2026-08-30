@@ -303,6 +303,9 @@ public:
     [[nodiscard]] u16 AesChainTarget(u32 id) const;
     [[nodiscard]] bool IsPshufdDirect(u32 id) const;
     [[nodiscard]] bool IsFixedGPR(u32 id) const;
+    void SetLiveEnd(u32 id, u32 end);
+    [[nodiscard]] bool ValueLiveAfter(const ir::Value& value,
+                                      u32 instruction_id) const;
     void SetActiveRegs(u32 id, GPRSMask &gprs, FPRSMask &fprs);
     // Experimental placement probe: rename only the symmetric dynamic homes
     // after allocation and verification, so allocation/coalescing decisions
@@ -351,6 +354,7 @@ private:
     [[nodiscard]] const Vector<SpillReload>* SpillReloadsAt(u32 instruction_id) const;
 
     Vector<Map> alloc_result;
+    Vector<u32> live_ends;
     Vector<Vector<SpillReload>> spill_reloads{};
     u32 spill_reload_region_count{};
     Vector<bool> coalesced_host_writes{};

@@ -128,6 +128,9 @@ public:
     // EmitHostCall save a subset instead of everything.
     [[nodiscard]] const GPRSMask& GetLiveGPRs() const { return cur_dirty_gprs; }
     [[nodiscard]] const FPRSMask& GetLiveFPRs() const { return cur_dirty_fprs; }
+    [[nodiscard]] bool ValueLiveAfter(const ir::Value& value) const {
+        return cur_inst && reg_alloc.ValueLiveAfter(value, cur_inst->Id());
+    }
     // Exclude a register from GetTmpX for the current IR instruction only.
     void ReserveTmpX(const XRegister& reg);
     // Reusable helper scratch for short, non-overlapping backend bookkeeping

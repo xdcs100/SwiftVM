@@ -7,29 +7,41 @@ namespace swift::runtime::backend::arm64 {
 
 #define __ masm.
 
-void JitTranslator::EmitSse42StrVectorCall(const VRegister& left,
+void JitTranslator::EmitSse42StrVectorCall(ir::Inst* inst,
+                                           const VRegister& left,
                                            const VRegister& right,
                                            const WRegister& result,
                                            VAddr target,
-                                           u32 gpr_clobbers) {
+                                           u8 imm) {
     using ABI = swift::x86::Sse42StrVectorCallABI;
 
-    const auto live_gprs = context.GetLiveGPRs();
+    auto live_gprs = context.GetLiveGPRs();
+    live_gprs.Clear(result.GetCode());
     boost::container::small_vector<u32, 8> save_gprs;
     for (u32 code = 0; code < 32; ++code) {
-        if ((gpr_clobbers & (1u << code)) && live_gprs.Get(code)) {
+        if ((ABI::GPRClobbers(imm) & (1u << code)) && live_gprs.Get(code)) {
             save_gprs.push_back(code);
         }
     }
 
     auto live_fprs = context.GetLiveFPRs();
-    live_fprs.Mark(left.GetCode());
-    live_fprs.Mark(right.GetCode());
-    live_fprs.Mark(0);
-    live_fprs.Mark(1);
+    const bool left_live_after =
+            context.ValueLiveAfter(inst->GetArg<ir::Value>(0));
+    const bool right_live_after =
+            context.ValueLiveAfter(inst->GetArg<ir::Value>(1));
+    if (!left_live_after &&
+        (left.GetCode() != right.GetCode() || !right_live_after)) {
+        live_fprs.Clear(left.GetCode());
+    }
+    if (!right_live_after &&
+        (right.GetCode() != left.GetCode() || !left_live_after)) {
+        live_fprs.Clear(right.GetCode());
+    }
+    const u32 fpr_clobbers =
+            ABI::FPRClobbers(imm) | ABI::ArgumentFPRClobbers;
     boost::container::small_vector<u32, 8> save_fprs;
     for (u32 code = 0; code < 8; ++code) {
-        if ((ABI::FPRClobbers & (1u << code)) && live_fprs.Get(code)) {
+        if ((fpr_clobbers & (1u << code)) && live_fprs.Get(code)) {
             save_fprs.push_back(code);
         }
     }
@@ -45,8 +57,14 @@ void JitTranslator::EmitSse42StrVectorCall(const VRegister& left,
     }
     const u32 link_slot = cursor;
     cursor += 8;
-    const u32 result_slot = cursor;
-    cursor += 8;
+    const bool preserve_helper_result =
+            std::find(save_gprs.begin(), save_gprs.end(), ABI::ResultGPR) !=
+            save_gprs.end();
+    int result_slot = -1;
+    if (preserve_helper_result) {
+        result_slot = int(cursor);
+        cursor += 8;
+    }
     const u32 simd_offset = (cursor + 15u) & ~15u;
     cursor = simd_offset;
     for (u32 code : save_fprs) {
@@ -56,16 +74,18 @@ void JitTranslator::EmitSse42StrVectorCall(const VRegister& left,
     const u32 save_bytes = (cursor + 15u) & ~15u;
 
     __ Sub(sp, sp, save_bytes);
-    for (size_t i = 0; i + 1 < save_gprs.size(); i += 2) {
+    const size_t paired_gprs = save_gprs.size() & ~size_t{1};
+    for (size_t i = 0; i < paired_gprs; i += 2) {
         __ Stp(XRegister(save_gprs[i]),
                XRegister(save_gprs[i + 1]),
                MemOperand(sp, gpr_slots[save_gprs[i]]));
     }
     if (save_gprs.size() & 1u) {
-        __ Str(XRegister(save_gprs.back()),
+        __ Stp(XRegister(save_gprs.back()), x30,
                MemOperand(sp, gpr_slots[save_gprs.back()]));
+    } else {
+        __ Str(x30, MemOperand(sp, link_slot));
     }
-    __ Str(x30, MemOperand(sp, link_slot));
     for (size_t i = 0; i + 1 < save_fprs.size(); i += 2) {
         __ Stp(VRegister::GetQRegFromCode(save_fprs[i]),
                VRegister::GetQRegFromCode(save_fprs[i + 1]),
@@ -78,16 +98,27 @@ void JitTranslator::EmitSse42StrVectorCall(const VRegister& left,
 
     auto load_argument = [&](const VRegister& destination,
                              const VRegister& source) {
-        if (source.GetCode() < 8) {
-            ASSERT(fpr_slots[source.GetCode()] >= 0);
+        if (destination.GetCode() == source.GetCode()) {
+            return;
+        }
+        if (source.GetCode() < 8 && fpr_slots[source.GetCode()] >= 0) {
             __ Ldr(destination,
                    MemOperand(sp, fpr_slots[source.GetCode()]));
-        } else if (destination.GetCode() != source.GetCode()) {
+        } else {
             __ Orr(destination.V16B(), source.V16B(), source.V16B());
         }
     };
-    load_argument(v0.Q(), left);
-    load_argument(v1.Q(), right);
+    if (left.GetCode() == 1 && right.GetCode() == 0) {
+        __ Orr(v2.V16B(), v0.V16B(), v0.V16B());
+        __ Orr(v0.V16B(), v1.V16B(), v1.V16B());
+        __ Orr(v1.V16B(), v2.V16B(), v2.V16B());
+    } else if (right.GetCode() == 0 && left.GetCode() != 0) {
+        load_argument(v1.Q(), right);
+        load_argument(v0.Q(), left);
+    } else {
+        load_argument(v0.Q(), left);
+        load_argument(v1.Q(), right);
+    }
 
     const ir::Lambda lambda{
             ir::DataClass{ir::Imm{target}},
@@ -99,7 +130,11 @@ void JitTranslator::EmitSse42StrVectorCall(const VRegister& left,
         MaterializeHostCallTarget(target);
         __ Blr(ip);
     }
-    __ Str(WRegister(ABI::ResultGPR), MemOperand(sp, result_slot));
+    if (preserve_helper_result) {
+        __ Str(WRegister(ABI::ResultGPR), MemOperand(sp, result_slot));
+    } else if (result.GetCode() != ABI::ResultGPR) {
+        __ Mov(result, WRegister(ABI::ResultGPR));
+    }
 
     for (size_t i = 0; i + 1 < save_fprs.size(); i += 2) {
         __ Ldp(VRegister::GetQRegFromCode(save_fprs[i]),
@@ -110,17 +145,20 @@ void JitTranslator::EmitSse42StrVectorCall(const VRegister& left,
         __ Ldr(VRegister::GetQRegFromCode(save_fprs.back()),
                MemOperand(sp, fpr_slots[save_fprs.back()]));
     }
-    for (size_t i = 0; i + 1 < save_gprs.size(); i += 2) {
+    for (size_t i = 0; i < paired_gprs; i += 2) {
         __ Ldp(XRegister(save_gprs[i]),
                XRegister(save_gprs[i + 1]),
                MemOperand(sp, gpr_slots[save_gprs[i]]));
     }
     if (save_gprs.size() & 1u) {
-        __ Ldr(XRegister(save_gprs.back()),
+        __ Ldp(XRegister(save_gprs.back()), x30,
                MemOperand(sp, gpr_slots[save_gprs.back()]));
+    } else {
+        __ Ldr(x30, MemOperand(sp, link_slot));
     }
-    __ Ldr(x30, MemOperand(sp, link_slot));
-    __ Ldr(result, MemOperand(sp, result_slot));
+    if (preserve_helper_result) {
+        __ Ldr(result, MemOperand(sp, result_slot));
+    }
     __ Add(sp, sp, save_bytes);
 
     flags_set = ir::Flags::None;

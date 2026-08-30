@@ -540,7 +540,8 @@ ScratchNeed ScratchBudget(const ir::Inst& inst, const FeatureSet& features) {
 
 RegAlloc::RegAlloc(u32 instr_size, const GPRSMask& gprs, const FPRSMask& fprs,
                    const FeatureSet& features, bool afp_nan)
-        : alloc_result(instr_size), coalesced_host_writes(instr_size),
+        : alloc_result(instr_size), live_ends(instr_size, UINT32_MAX),
+          coalesced_host_writes(instr_size),
           coalesced_host_reads(instr_size),
           width_chain_anchors(instr_size, UINT32_MAX),
           width_component_owners(instr_size),
@@ -575,6 +576,7 @@ RegAlloc::RegAlloc(u32 instr_size, const GPRSMask& gprs, const FPRSMask& fprs,
 
 void RegAlloc::ResetAllocations() {
     std::fill(alloc_result.begin(), alloc_result.end(), Map{});
+    std::fill(live_ends.begin(), live_ends.end(), UINT32_MAX);
     spill_reloads.clear();
     spill_reload_region_count = 0;
     std::fill(coalesced_host_writes.begin(), coalesced_host_writes.end(), false);
@@ -799,6 +801,21 @@ bool RegAlloc::IsFixedGPR(u32 id) const {
     id = ResolveId(id);
     return id < alloc_result.size() && alloc_result[id].type == GPR &&
            alloc_result[id].fixed_gpr;
+}
+
+void RegAlloc::SetLiveEnd(u32 id, u32 end) {
+    ASSERT(id < live_ends.size());
+    live_ends[id] = end;
+}
+
+bool RegAlloc::ValueLiveAfter(const ir::Value& value,
+                              u32 instruction_id) const {
+    if (!value.Defined()) {
+        return false;
+    }
+    const u32 id = ResolveId(value.Id());
+    return id >= live_ends.size() || live_ends[id] == UINT32_MAX ||
+           live_ends[id] > instruction_id;
 }
 
 void RegAlloc::SetActiveRegs(swift::u32 id, GPRSMask& gprs, FPRSMask& fprs) {

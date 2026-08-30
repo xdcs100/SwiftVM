@@ -19,6 +19,24 @@ using namespace swift::runtime;
 using namespace swift::runtime::backend;
 using namespace swift::runtime::ir;
 
+std::vector<std::string> Disassemble(arm64::JitContext& context) {
+    auto& masm = context.GetMasm();
+    auto* first = masm.GetBuffer()->GetStartAddress<
+            const vixl::aarch64::Instruction*>();
+    auto* last = masm.GetBuffer()->GetEndAddress<
+            const vixl::aarch64::Instruction*>();
+    vixl::aarch64::Decoder decoder;
+    vixl::aarch64::Disassembler disassembler;
+    decoder.AppendVisitor(&disassembler);
+    std::vector<std::string> instructions;
+    for (auto* instruction = first; instruction < last;
+         instruction = instruction->GetNextInstruction()) {
+        decoder.Decode(instruction);
+        instructions.emplace_back(disassembler.GetOutput());
+    }
+    return instructions;
+}
+
 std::vector<std::string> EmitHelperBoundary(bool exact) {
     Config config{
             .loc_start = 0,
@@ -60,22 +78,7 @@ std::vector<std::string> EmitHelperBoundary(bool exact) {
     arm64::JitTranslator translator{context};
     translator.Translate(block.get());
     context.Finish();
-
-    auto& masm = context.GetMasm();
-    auto* first_instruction = masm.GetBuffer()->GetStartAddress<
-            const vixl::aarch64::Instruction*>();
-    auto* last_instruction = masm.GetBuffer()->GetEndAddress<
-            const vixl::aarch64::Instruction*>();
-    vixl::aarch64::Decoder decoder;
-    vixl::aarch64::Disassembler disassembler;
-    decoder.AppendVisitor(&disassembler);
-    std::vector<std::string> instructions;
-    for (auto* instruction = first_instruction; instruction < last_instruction;
-         instruction = instruction->GetNextInstruction()) {
-        decoder.Decode(instruction);
-        instructions.emplace_back(disassembler.GetOutput());
-    }
-    return instructions;
+    return Disassemble(context);
 }
 
 std::size_t Count(const std::vector<std::string>& instructions,
@@ -84,6 +87,69 @@ std::size_t Count(const std::vector<std::string>& instructions,
         return instruction.find(needle) != std::string::npos;
     });
 }
+
+#if defined(__aarch64__)
+struct Sse42HelperEmission {
+    std::vector<std::string> instructions;
+    swift::u16 carry;
+    swift::u16 left;
+    swift::u16 right;
+};
+
+std::size_t CountStackFPR(const Sse42HelperEmission& emission,
+                          bool store, swift::u16 code) {
+    const std::string reg = "q" + std::to_string(code) + ",";
+    const std::string single = store ? "str " : "ldr ";
+    const std::string pair = store ? "stp " : "ldp ";
+    return std::ranges::count_if(
+            emission.instructions, [&](const auto& instruction) {
+                const auto stack = instruction.find("[sp");
+                return stack != std::string::npos &&
+                       (instruction.find(single) != std::string::npos ||
+                        instruction.find(pair) != std::string::npos) &&
+                       instruction.find(reg) < stack;
+            });
+}
+
+Sse42HelperEmission EmitSse42HelperBoundary(swift::u8 imm,
+                                             bool keep_left_live) {
+    Config config{
+            .loc_start = 0,
+            .loc_end = 1ull << 48,
+            .enable_jit = true,
+            .has_local_operation = false,
+            .backend_isa = kArm64,
+    };
+    AddressSpace address_space{config};
+    IntrusivePtr<Block> block{new Block(0, Location{0xb160})};
+    auto carry = block->LoadUniform(Uniform{0, ValueType::V128});
+    auto left = block->LoadUniform(Uniform{16, ValueType::V128});
+    auto right = block->LoadUniform(Uniform{32, ValueType::V128});
+    auto result = block->Sse42Str(left, right, Imm{swift::u64{imm}})
+                          .SetType(ValueType::U64);
+    block->StoreUniform(Uniform{48, ValueType::U64}, result);
+    block->StoreUniform(Uniform{64, ValueType::V128}, carry);
+    if (keep_left_live) {
+        block->StoreUniform(Uniform{80, ValueType::V128}, left);
+    }
+    block->SetTerminal(terminal::ReturnToDispatch{});
+    block->ReIdInstr();
+
+    FeatureSet features{};
+    RegAlloc alloc{block->MaxInstrId(),
+                   address_space.GetTrampolines().GetGPRRegs(),
+                   address_space.GetTrampolines().GetFPRRegs(), features};
+    RegisterAllocPass::Run(block.get(), &alloc, false, features);
+    const auto carry_fpr = alloc.ValueFPR(carry).id;
+    const auto left_fpr = alloc.ValueFPR(left).id;
+    const auto right_fpr = alloc.ValueFPR(right).id;
+    arm64::JitContext context{address_space.GetDefaultModule(), alloc};
+    arm64::JitTranslator translator{context};
+    translator.Translate(block.get());
+    context.Finish();
+    return {Disassemble(context), carry_fpr, left_fpr, right_fpr};
+}
+#endif
 
 #if defined(__aarch64__)
 extern "C" swift::u64 SwiftRepStos1Resident(swift::u64, swift::u64, swift::u64);
@@ -152,5 +218,28 @@ TEST_CASE("resident string helper preserves pending NZCV",
     REQUIRE(RunPendingFlags(true) == RunPendingFlags(false));
 #else
     SUCCEED("resident string helper requires an AArch64 host");
+#endif
+}
+
+TEST_CASE("SSE4.2 helper preserves only live-through vector values",
+          "[helper-effects][sse42]") {
+#if defined(__aarch64__)
+    for (swift::u8 imm : {swift::u8{0x1a}, swift::u8{0x02}}) {
+        CAPTURE(imm);
+        const auto dead_arguments = EmitSse42HelperBoundary(imm, false);
+        REQUIRE(CountStackFPR(dead_arguments, true, dead_arguments.carry) == 1);
+        REQUIRE(CountStackFPR(dead_arguments, true, dead_arguments.left) == 0);
+        REQUIRE(CountStackFPR(dead_arguments, true, dead_arguments.right) == 0);
+        REQUIRE(CountStackFPR(dead_arguments, false, dead_arguments.carry) == 1);
+        REQUIRE(CountStackFPR(dead_arguments, false, dead_arguments.left) == 0);
+        REQUIRE(CountStackFPR(dead_arguments, false, dead_arguments.right) == 0);
+        REQUIRE(Count(dead_arguments.instructions, "str w16, [sp") == 0);
+
+        const auto live_left = EmitSse42HelperBoundary(imm, true);
+        REQUIRE(CountStackFPR(live_left, true, live_left.left) == 1);
+        REQUIRE(CountStackFPR(live_left, false, live_left.left) == 1);
+    }
+#else
+    SUCCEED("SSE4.2 native helper requires an AArch64 host");
 #endif
 }

@@ -30,8 +30,7 @@ void JitTranslator::EmitSse42Str(ir::Inst* inst) {
                 swift::x86::Sse42StrVectorHelperAddress(u8(imm));
         target) {
         EmitSse42StrVectorCall(
-                a, b, result, target,
-                swift::x86::Sse42StrVectorCallABI::GPRClobbers(u8(imm)));
+                inst, a, b, result, target, u8(imm));
         return;
     }
     ir::Flags publish_flags = cur_block ? ir::Flags::None : ir::Flags::All;

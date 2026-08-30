@@ -798,11 +798,12 @@ private:
                       bool has_result,
                       const Register &result,
                       std::optional<Register> secondary_result = std::nullopt);
-    void EmitSse42StrVectorCall(const VRegister& left,
+    void EmitSse42StrVectorCall(ir::Inst* inst,
+                                const VRegister& left,
                                 const VRegister& right,
                                 const WRegister& result,
                                 VAddr target,
-                                u32 gpr_clobbers);
+                                u8 imm);
     void PrepareHostCallThunks(const std::vector<ir::Block*>& blocks);
     void MaterializeHostCallTarget(u64 target);
     bool TryEmitSharedHostCall(const ir::Lambda& lambda);
