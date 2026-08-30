@@ -275,13 +275,15 @@ void JitTranslator::EmitSse42Str(ir::Inst* inst) {
         emit_valid_bits(len2, scalar.W());
         __ Eor(result, result, scalar.W());
     }
-    __ And(result, result, all);
 
     // Index: least/most significant set bit, or n for an empty IntRes2.
+    const bool publish_carry = True(publish_flags & ir::Flags::Carry);
+    if (!most_significant && publish_carry) {
+        __ Cmp(result, 0);
+    }
     if (most_significant) {
         __ Clz(scalar.W(), result);
-        __ Mov(scalar2.W(), 31);
-        __ Sub(scalar.W(), scalar2.W(), scalar.W());
+        __ Eor(scalar.W(), scalar.W(), 31);
     } else {
         // A sentinel at bit n makes the empty result naturally select n.
         __ Rbit(scalar.W(), result);
@@ -295,6 +297,12 @@ void JitTranslator::EmitSse42Str(ir::Inst* inst) {
     }
     __ Orr(result, result, Operand{scalar.W(), LSL, 16});
 
+    if (publish_carry) {
+        __ Cset(scalar.W(), ne);
+        __ Orr(result, result,
+               Operand{scalar.W(), LSL, sse42str::kCarryBit});
+    }
+
     if (True(publish_flags & ir::Flags::Negate)) {
         __ Cmp(len1.W(), n);
         __ Cset(scalar.W(), lt);
@@ -306,13 +314,6 @@ void JitTranslator::EmitSse42Str(ir::Inst* inst) {
         __ Cset(scalar.W(), lt);
         __ Orr(result, result,
                Operand{scalar.W(), LSL, sse42str::kZeroBit});
-    }
-    if (True(publish_flags & ir::Flags::Carry)) {
-        __ And(scalar.W(), result, all);
-        __ Cmp(scalar.W(), 0);
-        __ Cset(scalar.W(), ne);
-        __ Orr(result, result,
-               Operand{scalar.W(), LSL, sse42str::kCarryBit});
     }
     if (True(publish_flags & ir::Flags::Overflow)) {
         __ And(scalar.W(), result, 1);
