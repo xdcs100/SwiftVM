@@ -1708,3 +1708,44 @@ consumer 直接读取，producer scratch 在 consumer 处不得属于 live alloc
 本阶段没有新增 env、日志、probe、临时路径、硬编码 guest PC 或兼容兜底，也没有运行长基准或压力
 测试。剩余 final-use spill 的最大未决组仍是 `ZeroExtend*`/`SignExtend` ownership；第 16.46 节已证明
 不能把它们按普通 consumer 批量放开，后续必须从统一 width-version contract 解决。
+
+### 16.49 translator-owned final-use width spill forwarding
+
+`ZeroExtend32`、`ZeroExtend32To64`、`ZeroExtend64` 和 `SignExtend` 不能直接进入普通 spill consumer
+白名单。它们的 emitter 可能从 pinned fixed home 读取、复用 narrow-extract/width-chain 结果、使用 zero
+store，或把扩展推迟到后续 pinned publication；若只看 opcode 删除 producer backing，后续指令可能读取
+尚未物化的 spill slot。
+
+translator 现在为每条 width IR 复放与 emitter 相同的 ownership 判定，只有 emitter 确实会读取当前
+allocated source 时，才把该事实传给 `TickIR`。`JitContext` 仍要求 producer 的全部非 pseudo use 都是
+当前 consumer，并继续检查 reload region、live allocation、fixed clobber 和 barrier；多 use 仍保留
+canonical backing。zero-store、fixed residence、pinned read、narrow-extract、width-chain、low32 copy 和
+延迟 pinned publication 均拒绝 forwarding。动态 `ZeroExtend32To64 -> SetHostGPR` fusion 的扫描结果按
+block 缓存，predicate 与 emitter 复用同一结论，不重复扫描 IR tail。
+
+曾实现跨多个 spilled width version 的共享 RA region，但同源 smallpt、SQLite `--help` 和 SQLite main
+均为严格零变化；该实现和相关测试已全部删除。一个放宽过度的中间版本在 SQLite main 约 5 秒时以
+rc=139 退出，也已删除；最终合同不保留该路径或任何兼容兜底。
+
+短门禁结果：
+
+- 本地 Debug 的 `swift_runtime`、`svm_translator_linux` 和 `swift_test` 构建通过；spill 分组通过
+  20 个 case / 23,131 条断言。新增边界覆盖 exact final-use、multi-use canonical backing 和 deferred
+  pinned publication backing；既有 pinned U8/S8 facts、fault snapshot 与 CFG diamond/backedge case
+  继续通过。
+- 严格同源 smallpt `4 8 6` static-only A/B 保持 275 roots、100% root/top-30 coverage 和 canonical
+  PPM，`45,819 -> 45,561`（`-258`，`-0.563085%`）；23 个 root 缩小、零增长，mnemonic delta 精确为
+  `STR -129 / LDR -129`。
+- SQLite `--help` 保持 225 roots、100% root/top-30 coverage 和逐字节一致 stdout，
+  `38,396 -> 38,314`（`-82`，`-0.213564%`）；13 个 root 缩小、零增长，mnemonic delta 精确为
+  `STR -41 / LDR -41`。
+- SQLite main/size1 的固定 8 秒补充门禁中，最终 candidate 连续三次均按门限 rc=124 退出且无 fault，
+  覆盖 746–757/760 个 baseline root 并保持 top-30；最大公共集 `133,596 -> 132,972`
+  （`-624`，`-0.467080%`），57 个 root 缩小、零增长，mnemonic delta 为
+  `STR -312 / LDR -312`。该门禁未达到完整 coverage，因此不替代前两项严格结论。
+- Orb clean GCC 构建通过 `swift_runtime`、`svm_translator_linux` 和 `spill_forwarding_test.cpp.o`；Linux
+  较大的可用 GPR pool 下 smallpt 与 SQLite `--help` 均为严格零变化，并保持全部 roots 与输出 oracle。
+
+本阶段没有保留 probe、日志、env 开关、临时路径、硬编码 guest PC 或过时 fallback，也没有运行长
+基准或压力测试。final-use width spill 已从剩余组中闭合；后续 RA 大项只保留有加权规模证据的跨 CFG
+split interval，以及需要完整 fault/observer contract 的多 use memory consumer。
