@@ -23,6 +23,12 @@ struct SpillForwardingBlock {
     Value arriving;
 };
 
+enum class WidthSpillShape {
+    FinalUse,
+    MultiUse,
+    DeferredPublication,
+};
+
 SpillForwardingBlock MakeSpillForwardingBlock() {
     IntrusivePtr<Block> block{new Block(0, Location{0x2400})};
     const auto longest = block->LoadImm(Imm{swift::u64{1}});
@@ -38,7 +44,8 @@ SpillForwardingBlock MakeSpillForwardingBlock() {
     return {std::move(block), arriving};
 }
 
-SpillForwardingBlock MakeSpillWidthTransferBlock() {
+SpillForwardingBlock MakeSpillWidthTransferBlock(
+        WidthSpillShape shape = WidthSpillShape::FinalUse) {
     IntrusivePtr<Block> block{new Block(0, Location{0x2420})};
     const auto longest = block->LoadImm(Imm{swift::u64{1}});
     const auto middle = block->LoadImm(Imm{swift::u64{2}});
@@ -47,9 +54,19 @@ SpillForwardingBlock MakeSpillWidthTransferBlock() {
                                   .SetType(ValueType::U32);
     const auto extended = block->ZeroExtend32To64(arriving)
                                   .SetType(ValueType::U64);
-    const auto first = block->Add(extended, Operand{shortest});
-    const auto second = block->Add(first, Operand{middle});
-    const auto total = block->Add(second, Operand{longest});
+    Value total;
+    if (shape == WidthSpillShape::DeferredPublication) {
+        block->SetHostGPR(extended, HostRegIndex(22), Imm{0u});
+        const auto first = block->Add(shortest, Operand{middle});
+        total = block->Add(first, Operand{longest});
+    } else {
+        if (shape == WidthSpillShape::MultiUse) {
+            block->StoreUniform(Uniform{8, ValueType::U32}, arriving);
+        }
+        const auto first = block->Add(extended, Operand{shortest});
+        const auto second = block->Add(first, Operand{middle});
+        total = block->Add(second, Operand{longest});
+    }
     block->StoreUniform(Uniform{0, ValueType::U64}, total);
     block->SetTerminal(terminal::ReturnToDispatch{});
     block->ReIdInstr();
@@ -199,6 +216,34 @@ std::vector<std::string> Emit(SpillForwardingBlock input, GPRSMask gprs) {
     return lines;
 }
 
+void RequireCanonicalSpillRoundTrip(const std::vector<std::string>& emitted) {
+    const auto definition = std::ranges::find_if(emitted, [](const auto& line) {
+        return line.find("mov w") != std::string::npos &&
+               line.find("#0x4") != std::string::npos;
+    });
+    REQUIRE(definition != emitted.end());
+    const auto delimiter = definition->find(',');
+    REQUIRE(delimiter != std::string::npos);
+    const auto scratch = "x" + definition->substr(5, delimiter - 5);
+    const auto store = std::find_if(
+            std::next(definition), emitted.end(), [&](const auto& line) {
+                return line.find("str " + scratch + ", [x28") !=
+                       std::string::npos;
+            });
+    REQUIRE(store != emitted.end());
+    const auto address_begin = store->find("[x28");
+    const auto address_end = store->find(']', address_begin);
+    REQUIRE(address_begin != std::string::npos);
+    REQUIRE(address_end != std::string::npos);
+    const auto address = store->substr(
+            address_begin, address_end - address_begin + 1);
+    REQUIRE(std::any_of(
+            std::next(store), emitted.end(), [&](const auto& line) {
+                return line.find("ldr x") != std::string::npos &&
+                       line.find(address) != std::string::npos;
+            }));
+}
+
 }  // namespace
 
 TEST_CASE("adjacent spilled scalar def-use retains its free scratch") {
@@ -241,7 +286,7 @@ TEST_CASE("x18 spill forwarding yields to a live allocated value") {
 #endif
 }
 
-TEST_CASE("spill forwarding stops before a width ownership transfer") {
+TEST_CASE("final-use width consumers retain spilled inputs") {
     const auto emitted = Emit(MakeSpillWidthTransferBlock(),
                               GPRSMask{~((1u << 5) - 1u) & ~(1u << 18)});
     const auto definition = std::ranges::find_if(emitted, [](const auto& line) {
@@ -251,21 +296,35 @@ TEST_CASE("spill forwarding stops before a width ownership transfer") {
     REQUIRE(definition != emitted.end());
     const auto delimiter = definition->find(',');
     REQUIRE(delimiter != std::string::npos);
-    const auto scratch = "x" + definition->substr(5, delimiter - 5);
-    const auto store = std::find_if(std::next(definition), emitted.end(), [&](const auto& line) {
-        return line.find("str " + scratch + ", [x28") != std::string::npos;
-    });
-    REQUIRE(store != emitted.end());
-    const auto address_begin = store->find("[x28");
-    const auto address_end = store->find(']', address_begin);
-    REQUIRE(address_begin != std::string::npos);
-    REQUIRE(address_end != std::string::npos);
-    const auto address = store->substr(address_begin, address_end - address_begin + 1);
-    const auto reload = std::find_if(std::next(store), emitted.end(), [&](const auto& line) {
-        return line.find("ldr x") != std::string::npos &&
-               line.find(address) != std::string::npos;
-    });
-    REQUIRE(reload != emitted.end());
+    const auto scratch_code = definition->substr(5, delimiter - 5);
+    const auto scratch = "x" + scratch_code;
+    const auto source_register = "w" + scratch_code;
+    const auto consumer = std::find_if(
+            std::next(definition), emitted.end(), [&](const auto& line) {
+                return line.find("mov w") != std::string::npos &&
+                       line.find(source_register) != std::string::npos;
+            });
+    REQUIRE(consumer != emitted.end());
+    REQUIRE(std::none_of(std::next(definition), consumer,
+                         [&](const auto& line) {
+                             return line.find("str " + scratch + ", [x28") !=
+                                            std::string::npos ||
+                                    line.find("ldr " + scratch + ", [x28") !=
+                                            std::string::npos;
+                         }));
+}
+
+TEST_CASE("multi-use width sources retain canonical spill backing") {
+    RequireCanonicalSpillRoundTrip(Emit(
+            MakeSpillWidthTransferBlock(WidthSpillShape::MultiUse),
+            GPRSMask{~((1u << 5) - 1u) & ~(1u << 18)}));
+}
+
+TEST_CASE("deferred pinned width publication retains spill backing") {
+    RequireCanonicalSpillRoundTrip(Emit(
+            MakeSpillWidthTransferBlock(
+                    WidthSpillShape::DeferredPublication),
+            GPRSMask{~((1u << 5) - 1u) & ~(1u << 18)}));
 }
 
 TEST_CASE("flags-only consumers discard dead spill results") {

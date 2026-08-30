@@ -1438,7 +1438,10 @@ Register JitTranslator::MaterializeOperand(const Operand& operand, ir::ValueType
 
 void JitTranslator::Translate(ir::Inst* inst) {
     ASSERT(inst);
-    context.TickIR(inst);
+    const bool forward_spilled_width_input =
+            context.HasPendingSpillWrites() &&
+            CanConsumeForwardedWidthSpill(inst);
+    context.TickIR(inst, forward_spilled_width_input);
     if (inst->GetOp() != ir::OpCode::SetLocation &&
         inst->GetOp() != ir::OpCode::CallReturn) {
         static_next_loc.reset();

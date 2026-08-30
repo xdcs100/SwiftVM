@@ -145,6 +145,8 @@ private:
                          const VRegister& work,
                          const VRegister& packed);
     [[nodiscard]] bool CanUseZeroStoreRegister(ir::Value value);
+    [[nodiscard]] bool CanConsumeForwardedWidthSpill(ir::Inst* inst);
+    [[nodiscard]] bool CanFusePinnedZeroExtendPublication(ir::Inst* inst);
     [[nodiscard]] bool IsZeroStoreValue(ir::Value value);
     [[nodiscard]] bool HasOnlyZeroStoreUses(ir::Inst* definition);
     [[nodiscard]] bool ReproveCoalescedHostWrite(ir::Inst* inst) const;
@@ -1000,6 +1002,7 @@ private:
     std::unordered_set<ir::Inst*> normalized_bool_selects{};
     std::unordered_map<ir::Inst*, ir::Cond> direct_cond_selects{};
     std::unordered_set<ir::Inst*> fused_pin_zext32{};
+    std::unordered_set<ir::Inst*> checked_pin_zext32_publications{};
     std::unordered_set<ir::Inst*> fused_pin_sign_extends{};
     // Narrow mapped values whose audited consumers can read the pinned W
     // register directly.

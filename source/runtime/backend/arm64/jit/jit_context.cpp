@@ -469,7 +469,8 @@ void JitContext::FlushSpillWrites() {
     (void)FlushSpillWrites(nullptr);
 }
 
-std::optional<u8> JitContext::FlushSpillWrites(ir::Inst* consumer) {
+std::optional<u8> JitContext::FlushSpillWrites(
+        ir::Inst* consumer, bool forward_spilled_width_input) {
     std::optional<u8> forwarded;
     std::optional<PendingSpillWrite> retained;
     const bool scratch_only = consumer &&
@@ -499,7 +500,8 @@ std::optional<u8> JitContext::FlushSpillWrites(ir::Inst* consumer) {
         if (consumer && !forwarded && !write.is_fpr &&
             !reg_alloc.HasSpillReload(write.value, consumer->Id()) &&
             (fixed_forward ||
-             IsPortableSpillForwardConsumer(consumer->GetOp())) &&
+             IsPortableSpillForwardConsumer(consumer->GetOp()) ||
+             forward_spilled_width_input) &&
             !reg_alloc.DirtyGPR(consumer->Id()).Get(write.reg) &&
             !(fixed & (1u << write.reg)) &&
             !IsSpillForwardBarrier(consumer->GetOp())) {
@@ -1592,11 +1594,13 @@ void JitContext::SetCurrent(ir::Function* function) {
     }
 }
 
-void JitContext::TickIR(ir::Inst* instr) {
+void JitContext::TickIR(ir::Inst* instr,
+                        bool forward_spilled_width_input) {
     EndVixlScratch();
     spill_def_scratch.clear();
     spill_use_scratch.clear();
-    const auto forwarded_spill = FlushSpillWrites(instr);
+    const auto forwarded_spill = FlushSpillWrites(
+            instr, forward_spilled_width_input);
     cur_inst = instr;
     reg_alloc.SetCurrent(instr);
     cur_dirty_gprs = reg_alloc.GetDirtyGPR();

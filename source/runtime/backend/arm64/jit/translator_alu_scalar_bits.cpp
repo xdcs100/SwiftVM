@@ -574,6 +574,73 @@ void JitTranslator::EmitSignExtend(ir::Inst* inst) {
     }
 }
 
+bool JitTranslator::CanFusePinnedZeroExtendPublication(ir::Inst* inst) {
+    if (!inst) {
+        return false;
+    }
+    if (fused_pin_zext32.contains(inst)) {
+        return true;
+    }
+    if (!checked_pin_zext32_publications.insert(inst).second ||
+        inst->GetUses() != 1) {
+        return false;
+    }
+    auto& list = cur_block->GetInstList();
+    for (auto it = std::next(list.iterator_to(*inst)); it != list.end(); ++it) {
+        bool names_value = false;
+        for (auto used : it->GetValues()) {
+            names_value |= used.Def() == inst;
+        }
+        if (!names_value) {
+            continue;
+        }
+        if (it->GetOp() != ir::OpCode::SetHostGPR ||
+            it->GetArg<ir::Value>(0).Def() != inst ||
+            it->GetArg<ir::Imm>(2).Get() != 0) {
+            return false;
+        }
+        const u32 target = it->GetArg<ir::Imm>(1).Get();
+        const bool fused = target <= 9 || target == 22 || target == 23 ||
+                           target == 29;
+        if (fused) {
+            fused_pin_zext32.insert(inst);
+        }
+        return fused;
+    }
+    return false;
+}
+
+bool JitTranslator::CanConsumeForwardedWidthSpill(ir::Inst* inst) {
+    if (!inst) {
+        return false;
+    }
+    const auto reads_fixed_home = [&] {
+        const auto source = inst->GetArg<ir::Value>(0);
+        return guest_state_map.FixedHomeForUse(source, inst).has_value() ||
+               (source.Def() && fused_pin_gpr_reads.contains(source.Def()));
+    };
+    switch (inst->GetOp()) {
+        case ir::OpCode::ZeroExtend32:
+            return !CanUseZeroStoreRegister(ir::Value{inst}) &&
+                   !reads_fixed_home() && !fused_pin_zext32.contains(inst) &&
+                   !narrow_extract_extensions.contains(inst);
+        case ir::OpCode::ZeroExtend32To64: {
+            const auto source = inst->GetArg<ir::Value>(0);
+            return !CanUseZeroStoreRegister(ir::Value{inst}) &&
+                   !reads_fixed_home() && !fused_pin_zext32.contains(inst) &&
+                   !context.IsWidthChainCoalesced(inst->Id()) &&
+                   !(source.Def() && context.IsLow32CopyCoalesced(source.Id())) &&
+                   !CanFusePinnedZeroExtendPublication(inst);
+        }
+        case ir::OpCode::ZeroExtend64:
+            return true;
+        case ir::OpCode::SignExtend:
+            return !reads_fixed_home() && !fused_pin_sign_extends.contains(inst);
+        default:
+            return false;
+    }
+}
+
 void JitTranslator::EmitTestNotZero(ir::Inst* inst) {
     if (inst->GetUses() == 1) {
         for (auto& user : cur_block->GetInstList()) {
@@ -721,27 +788,8 @@ void JitTranslator::EmitZeroExtend32To64(ir::Inst* inst) {
         context.SharesGPR(source, ir::Value{inst})) {
         return;
     }
-    if (inst->GetUses() == 1) {
-        auto& list = cur_block->GetInstList();
-        for (auto it = std::next(list.iterator_to(*inst)); it != list.end(); ++it) {
-            bool names_value = false;
-            for (auto used : it->GetValues()) {
-                names_value |= used.Def() == inst;
-            }
-            if (!names_value) {
-                continue;
-            }
-            if (it->GetOp() == ir::OpCode::SetHostGPR &&
-                it->GetArg<ir::Value>(0).Def() == inst &&
-                it->GetArg<ir::Imm>(2).Get() == 0) {
-                const u32 target = it->GetArg<ir::Imm>(1).Get();
-                if (target <= 9 || target == 22 || target == 23 || target == 29) {
-                    fused_pin_zext32.insert(inst);
-                    return;
-                }
-            }
-            break;
-        }
+    if (CanFusePinnedZeroExtendPublication(inst)) {
+        return;
     }
     // The destination remains U64-typed in IR so the following StoreUniform
     // updates the full guest GPR. On arm64, writing W is exactly the required

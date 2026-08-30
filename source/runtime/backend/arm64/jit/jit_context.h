@@ -255,6 +255,9 @@ public:
     [[nodiscard]] bool IsSpilled(const ir::Value& value) {
         return reg_alloc.ValueType(value) == RegAlloc::MEM;
     }
+    [[nodiscard]] bool HasPendingSpillWrites() const {
+        return !pending_spill_writes.empty();
+    }
     u8* Flush(const CodeBuffer& code_cache);
 
     [[nodiscard]] MacroAssembler& GetMasm();
@@ -325,7 +328,7 @@ public:
     // Completes a split block entry after the translator has emitted the
     // published-entry branch and bound the self-only body label.
     void BeginBackedgeBody();
-    void TickIR(ir::Inst* instr);
+    void TickIR(ir::Inst* instr, bool forward_spilled_width_input = false);
 
     [[nodiscard]] vixl::aarch64::Label *GetLabel(LocationDescriptor loc);
     [[nodiscard]] vixl::aarch64::Label *GetInternalLabel(LocationDescriptor loc);
@@ -393,7 +396,8 @@ private:
     [[nodiscard]] Register SpillGPR(const ir::Value& value, bool definition = false);
     [[nodiscard]] VRegister SpillFPR(const ir::Value& value);
     void FlushSpillWrites();
-    [[nodiscard]] std::optional<u8> FlushSpillWrites(ir::Inst* consumer);
+    [[nodiscard]] std::optional<u8> FlushSpillWrites(
+            ir::Inst* consumer, bool forward_spilled_width_input = false);
     [[nodiscard]] static bool IsFloatValue(const ir::Value& value);
 
     // Scratch handed to a spill reload rather than to the emitter. Budgeted

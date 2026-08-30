@@ -418,6 +418,7 @@ std::optional<Register> JitTranslator::ResolvePinnedGPRUse(ir::Value value,
 
 void JitTranslator::PreparePinnedGPRCopies(ir::Block* block) {
     fused_pin_zext32.clear();
+    checked_pin_zext32_publications.clear();
     fused_pin_sign_extends.clear();
     fused_pin_gpr_reads.clear();
     pinned_gpr_values.clear();
