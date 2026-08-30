@@ -13,6 +13,20 @@ void Function::AddBlock(ir::Block* block) {
     blocks.insert(*block);
 }
 
+bool Function::TakeBlocksFrom(Function& region) {
+    for (const auto& node : region.blocks) {
+        if (FindBlock(node.GetStartLocation())) {
+            return false;
+        }
+    }
+    while (!region.blocks.empty()) {
+        auto* block = static_cast<ir::Block*>(&*region.blocks.begin());
+        region.blocks.erase(*block);
+        blocks.insert(*block);
+    }
+    return true;
+}
+
 ir::Block* Function::FindBlock(ir::Location loc, bool block_start) {
     if (block_start) {
         if (auto itr = blocks.find(ir::Block{loc}); itr != blocks.end()) {

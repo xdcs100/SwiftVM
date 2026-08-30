@@ -2391,3 +2391,26 @@ allocation 中顺序发射多个 region，共享 FunctionEntryPublisher、genera
 tail，并把已知 region 间边链接到目标 canonical entry。只有该所有权层完成后才重新评估 128-block 总
 membership；不再把一个 128-block HIRFunction 交给单一 RA，也不先做 trace/layout 排序。本阶段没有保留
 源码原型、env 开关、probe、日志或临时路径，也没有运行长基准或压力测试。
+
+### 16.71 独立 region 发码与共享 code-object emitter
+
+先用两次 sibling code-miss 作为热度门槛复核了把剩余 frontier roots 合入同一个 HIRFunction 的方案。
+该版本虽然避免第一次 miss 就扩大 membership，但仍把未观察 sibling 交给同一套优化和 RA：smallpt 从
+`249 / 36,448` 增长到 `251 / 37,814`，SQLite 从 `1,923 / 249,687` 变为
+`1,866 / 258,768`，CoreMark 2k 从 `270 / 36,172` 增长到 `272 / 37,536`。三语料结果均正确，
+但总发码分别增加 1,366、9,081 和 1,364 条；该 frontend 原型、SMC epoch accessor 和定向状态机测试
+已经删除，不再用观察次数掩盖错误的 region 所有权边界。
+
+新的 `FunctionCodeObjectEmitter` 把 backend 发码边界改为 region 列表。每个 region 持有独立
+`RegAlloc` 和 `JitContext`，多个 context 共享同一个 ARM64 assembler；发码完成后只把 entry labels、
+direct-link sites、pending-flags/call entries 和 region trampoline sites 合并到主 context，再执行一次
+finalize、flush 和 publication。`Function::TakeBlocksFrom` 同时提供把各 region 的 persistent blocks
+转移给唯一 code-object owner 的前置条件，secondary function 不保留重复所有权。
+
+现有单 region 生产路径已切换为该 emitter。Mac 和 Orb 的双 region emitter、cold-path、function-entry、
+continuation、production direct-link 与非压力 SMC 定向门禁全部通过。Orb 静态短门禁保持 smallpt
+`249 / 36,448`、SQLite `1,923 / 249,687`、CoreMark 2k `270 / 36,172`，smallpt PPM SHA-256 仍为
+`a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`，证明该阶段没有改变单 region
+发码。下一步把 frontend 形成的 canonical 64-block regions 作为列表交给该 emitter，并让
+FunctionEntryPublisher、SMC registration、fault metadata 和 disk-cache record 统一以主 function 和同一
+allocation 为 owner；在该事务闭合前不启用多 region membership。

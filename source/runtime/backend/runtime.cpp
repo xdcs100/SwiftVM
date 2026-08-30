@@ -10,12 +10,14 @@
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <span>
 #include <utility>
 #include <unistd.h>
 #include "runtime/backend/address_space.h"
 #include "runtime/backend/arm64/constant.h"
 #include "runtime/backend/arm64/defines.h"
 #include "runtime/backend/arm64/fpcr_mode.h"
+#include "runtime/backend/arm64/jit/function_code_object_emitter.h"
 #include "runtime/backend/arm64/jit/translator.h"
 #include "runtime/backend/atomic_fallback.h"
 #include "runtime/backend/context.h"
@@ -807,7 +809,8 @@ void RecordJitCacheUnit(const std::shared_ptr<backend::Module>& module,
                         const std::vector<SerialBlock>& blocks,
                         const CodeBuffer& buffer,
                         const backend::arm64::JitContext& context,
-                        const backend::arm64::JitTranslator& translator) {
+                        std::span<const backend::arm64::JitTranslator* const>
+                                translators) {
     auto* cache = module->GetAddressSpace().GetJitDiskCache();
     if (!cache) {
         return;
@@ -826,15 +829,19 @@ void RecordJitCacheUnit(const std::shared_ptr<backend::Module>& module,
                               site.flags_bypass.edge_flags});
     }
     std::vector<SerialFaultSite> fault_sites;
-    fault_sites.reserve(translator.GetFaultMetadata().size());
-    for (const auto& fault : translator.GetFaultMetadata()) {
-        fault_sites.push_back({fault.guest_start,
-                               fault.host_begin,
-                               fault.host_end,
-                               fault.recovery_offset == 0
-                                       ? UINT32_MAX
-                                       : fault.recovery_offset,
-                               static_cast<u8>(fault.recovery_kind)});
+    for (const auto* translator : translators) {
+        ASSERT(translator);
+        fault_sites.reserve(fault_sites.size() +
+                            translator->GetFaultMetadata().size());
+        for (const auto& fault : translator->GetFaultMetadata()) {
+            fault_sites.push_back({fault.guest_start,
+                                   fault.host_begin,
+                                   fault.host_end,
+                                   fault.recovery_offset == 0
+                                           ? UINT32_MAX
+                                           : fault.recovery_offset,
+                                   static_cast<u8>(fault.recovery_kind)});
+        }
     }
     cache->RecordUnit(module,
                       guest_start,
@@ -845,6 +852,23 @@ void RecordJitCacheUnit(const std::shared_ptr<backend::Module>& module,
                       blocks,
                       link_sites,
                       fault_sites);
+}
+
+void RecordJitCacheUnit(const std::shared_ptr<backend::Module>& module,
+                        VAddr guest_start,
+                        bool is_function,
+                        const std::vector<SerialBlock>& blocks,
+                        const CodeBuffer& buffer,
+                        const backend::arm64::JitContext& context,
+                        const backend::arm64::JitTranslator& translator) {
+    const backend::arm64::JitTranslator* translators[]{&translator};
+    RecordJitCacheUnit(module,
+                       guest_start,
+                       is_function,
+                       blocks,
+                       buffer,
+                       context,
+                       translators);
 }
 
 void PublishIndirectL1Faults(
@@ -1030,32 +1054,34 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
     if (dump_ir) fmt::print(stderr, "[func-compile] {:#x} regalloc-ready\n", func_start);
     PerfScope perf_cg{GetPerfStats().codegen_ns};
     PerfScope2 perf_cg_detail{GetPerfStats2().codegen_total};
-    backend::arm64::JitContext context{module, *reg_alloc};
-    backend::arm64::JitTranslator translator{context};
-    translator.Translate(function);
+    const backend::arm64::FunctionRegionEmission region{
+            .function = function,
+            .reg_alloc = reg_alloc,
+    };
+    backend::arm64::FunctionCodeObjectEmitter emitter{
+            module, std::span{&region, 1}};
+    emitter.Emit();
     perf_cg_detail.Stop();
     perf_cg.Stop();
     if (dump_ir) fmt::print(stderr, "[func-compile] {:#x} emit-ready\n", func_start);
-    auto buffer_size = context.CurrentBufferSize();
+    auto buffer_size = emitter.CurrentBufferSize();
     if (dump_ir) fmt::print(stderr, "[func-compile] {:#x} size={}\n", func_start, buffer_size);
     PerfScope2 perf_pub_total{GetPerfStats2().publish_total};
     PerfScope2 perf_pub_alloc{GetPerfStats2().publish_alloc};
-    backend::arm64::JitContext* emitted_context = &context;
-    backend::arm64::JitTranslator* emitted_translator = &translator;
-    std::optional<backend::arm64::JitContext> fallback_context;
-    std::optional<backend::arm64::JitTranslator> fallback_translator;
-    auto allocation = module->AllocCodeCache(buffer_size, context.RequiresRegionTrampoline());
-    if (allocation.first == backend::INVALID_CACHE_ID && context.RequiresRegionTrampoline()) {
+    auto* emitted_context = &emitter.Context();
+    auto* emitted_translator = &emitter.Translator(0);
+    auto allocation = module->AllocCodeCache(
+            buffer_size, emitter.RequiresRegionTrampoline());
+    if (allocation.first == backend::INVALID_CACHE_ID &&
+        emitter.RequiresRegionTrampoline()) {
         // A unit too large for a <=128MiB trampoline region must not become a
         // half-direct translation or fail solely because direct linking was selected.
         // Re-emit the entire unit with the legacy slot leaf and allocate it
         // under the existing unrestricted arena policy.
-        fallback_context.emplace(module, *reg_alloc, false);
-        fallback_translator.emplace(*fallback_context);
-        fallback_translator->Translate(function);
-        emitted_context = &*fallback_context;
-        emitted_translator = &*fallback_translator;
-        buffer_size = emitted_context->CurrentBufferSize();
+        emitter.Emit(false);
+        emitted_context = &emitter.Context();
+        emitted_translator = &emitter.Translator(0);
+        buffer_size = emitter.CurrentBufferSize();
         allocation = module->AllocCodeCache(buffer_size, false);
     }
     perf_pub_alloc.Stop();
@@ -1069,7 +1095,7 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
                        function->MaxInstrCount(), buffer_size);
         }
         PerfScope2 perf_pub_flush{GetPerfStats2().publish_flush};
-        emitted_context->Flush(buffer);
+        emitter.Flush(buffer);
         perf_pub_flush.Stop();
         if (dump_ir) fmt::print(stderr, "[func-compile] {:#x} flush-ready\n", func_start);
         jit_state.jit_state = backend::JitState::Cached;

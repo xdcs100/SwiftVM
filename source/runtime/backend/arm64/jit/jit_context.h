@@ -5,6 +5,7 @@
 #pragma once
 
 #include <map>
+#include <memory>
 #include <optional>
 #include <vector>
 #include "aarch64/macro-assembler-aarch64.h"
@@ -89,6 +90,12 @@ public:
     explicit JitContext(const std::shared_ptr<Module> &module,
                         RegAlloc& reg_alloc,
                         bool enable_direct_link = true);
+    JitContext(const std::shared_ptr<Module>& module,
+               RegAlloc& reg_alloc,
+               MacroAssembler& assembler,
+               bool enable_direct_link = true);
+
+    void AbsorbEmissionState(JitContext& region);
 
     [[nodiscard]] CPUReg Get(const ir::Value& value);
     [[nodiscard]] bool HasAllocation(const ir::Value& value);
@@ -369,6 +376,7 @@ public:
     void CommitFlagsRegsAudit();
 
 private:
+    void Initialize(bool enable_direct_link);
     void MaybeDumpHostBytes();
     void FlushLabels(VAddr target);
     void RecordHotCounter(HotCoalesceCounter counter, u32 amount = 1);
@@ -438,7 +446,8 @@ private:
     ir::Block *cur_block{};
     ir::Inst *cur_inst{};
     RegAlloc& reg_alloc;
-    MacroAssembler masm;
+    std::unique_ptr<MacroAssembler> owned_masm;
+    MacroAssembler& masm;
     LocationDescriptor unit_start{};
     bool unit_start_set{};
     bool host_bytes_dumped{};

@@ -94,7 +94,21 @@ JitContext::JitContext(const std::shared_ptr<Module>& module,
                        RegAlloc& reg_alloc,
                        bool enable_direct_link)
         : module(module), features(ResolveFeatureSet(module->GetModuleConfig())),
-          reg_alloc(reg_alloc) {
+          reg_alloc(reg_alloc), owned_masm(std::make_unique<MacroAssembler>()),
+          masm(*owned_masm) {
+    Initialize(enable_direct_link);
+}
+
+JitContext::JitContext(const std::shared_ptr<Module>& module,
+                       RegAlloc& reg_alloc,
+                       MacroAssembler& assembler,
+                       bool enable_direct_link)
+        : module(module), features(ResolveFeatureSet(module->GetModuleConfig())),
+          reg_alloc(reg_alloc), masm(assembler) {
+    Initialize(enable_direct_link);
+}
+
+void JitContext::Initialize(bool enable_direct_link) {
     const auto& svm_config = GetSvmConfig();
     exec_profile_enabled = svm_config.exec_prof;
     execution_trace_enabled = svm_config.exec_trace;
@@ -112,6 +126,42 @@ JitContext::JitContext(const std::shared_ptr<Module>& module,
     density_profile_enabled = density_enabled;
     direct_link_active = enable_direct_link && module->IsDirectLinkConfigured() &&
             module->PrepareDirectLinkRegion();
+}
+
+void JitContext::AbsorbEmissionState(JitContext& region) {
+    ASSERT(module == region.module && &masm == &region.masm);
+    ASSERT(!vixl_scratch_contract_active &&
+           !region.vixl_scratch_contract_active);
+
+    const auto merge_map = [](auto& target, auto& source) {
+        target.merge(source);
+        ASSERT(source.empty());
+    };
+    merge_map(labels, region.labels);
+    merge_map(direct_link_entry_offsets,
+              region.direct_link_entry_offsets);
+    merge_map(pending_flags_entry_offsets,
+              region.pending_flags_entry_offsets);
+    merge_map(pending_flags_target_contracts,
+              region.pending_flags_target_contracts);
+    merge_map(call_entry_offsets, region.call_entry_offsets);
+    merge_map(call_pending_flags_entry_offsets,
+              region.call_pending_flags_entry_offsets);
+    merge_map(internal_labels, region.internal_labels);
+    merge_map(counted_entry_labels, region.counted_entry_labels);
+
+    const auto append = [](auto& target, auto& source) {
+        target.insert(target.end(),
+                      std::make_move_iterator(source.begin()),
+                      std::make_move_iterator(source.end()));
+        source.clear();
+    };
+    append(hot_coalesce_slots, region.hot_coalesce_slots);
+    append(pending_direct_link_sites,
+           region.pending_direct_link_sites);
+    append(pending_return_sites, region.pending_return_sites);
+    append(flags_merge_sites, region.flags_merge_sites);
+    append(cycle_reason_sites, region.cycle_reason_sites);
 }
 
 u64 JitContext::GetPairCallTrampoline() const {

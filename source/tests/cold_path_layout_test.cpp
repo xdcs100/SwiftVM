@@ -1,9 +1,11 @@
+#include <array>
 #include <cstring>
 #include <optional>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include "runtime/backend/address_space.h"
+#include "runtime/backend/arm64/jit/function_code_object_emitter.h"
 #include "runtime/backend/arm64/jit/jit_context.h"
 #include "runtime/backend/arm64/jit/translator.h"
 #include "runtime/ir/hir_builder.h"
@@ -91,5 +93,75 @@ TEST_CASE("function cold paths follow every hot block",
     REQUIRE(*cold_target < context.CurrentBufferSize());
 #else
     SUCCEED("ARM64 cold-path layout requires an AArch64 host");
+#endif
+}
+
+TEST_CASE("function code objects emit independently allocated regions",
+          "[arm64][codegen][function-code-object]") {
+#if defined(__aarch64__)
+    using namespace swift;
+    using namespace swift::runtime;
+    using namespace swift::runtime::backend;
+    using namespace swift::runtime::ir;
+
+    constexpr VAddr first_guest = 0x7400;
+    constexpr VAddr second_guest = 0x7500;
+    Config config{
+            .loc_start = 0,
+            .loc_end = 1ull << 48,
+            .enable_jit = true,
+            .has_local_operation = false,
+            .backend_isa = kArm64,
+            .global_opts = Optimizations::All,
+    };
+    AddressSpace address_space{config};
+    ModuleConfig module_config{};
+    auto module = address_space.MapModule(
+            LocationDescriptor{first_guest},
+            LocationDescriptor{second_guest + 0x10},
+            module_config);
+    const auto features = ResolveFeatureSet(module_config);
+
+    HIRBuilder builder{2, true, features};
+    auto make_region = [&](VAddr guest) {
+        auto* function = builder.AppendFunction(Location{guest},
+                                                Location{guest + 1});
+        function->EndBlock(terminal::ReturnToHost{});
+        function->EndFunction();
+        function->ComputeRPO();
+        function->IdByRPO();
+        return function;
+    };
+    auto* first = make_region(first_guest);
+    auto* second = make_region(second_guest);
+
+    RegAlloc first_alloc{first->MaxInstrCount(),
+                         address_space.GetTrampolines().GetGPRRegs(),
+                         address_space.GetTrampolines().GetFPRRegs(),
+                         features};
+    RegAlloc second_alloc{second->MaxInstrCount(),
+                          address_space.GetTrampolines().GetGPRRegs(),
+                          address_space.GetTrampolines().GetFPRRegs(),
+                          features};
+    RegisterAllocPass::Run(first, &first_alloc, features);
+    RegisterAllocPass::Run(second, &second_alloc, features);
+
+    const std::array<arm64::FunctionRegionEmission, 2> regions{{
+            {.function = first, .reg_alloc = &first_alloc},
+            {.function = second, .reg_alloc = &second_alloc},
+    }};
+    arm64::FunctionCodeObjectEmitter emitter{module, regions};
+    emitter.Emit(false);
+
+    const auto first_offset = emitter.Context().GetCodeOffset(first_guest);
+    const auto second_offset = emitter.Context().GetCodeOffset(second_guest);
+    REQUIRE(first_offset >= 0);
+    REQUIRE(second_offset > first_offset);
+    REQUIRE(static_cast<u32>(second_offset) < emitter.CurrentBufferSize());
+    REQUIRE(first->GetFunction()->TakeBlocksFrom(*second->GetFunction()));
+    REQUIRE(first->GetFunction()->FindBlock(Location{second_guest}) != nullptr);
+    REQUIRE(second->GetFunction()->GetBlocks().empty());
+#else
+    SUCCEED();
 #endif
 }
