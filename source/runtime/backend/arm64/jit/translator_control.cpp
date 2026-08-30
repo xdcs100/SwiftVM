@@ -695,7 +695,9 @@ void JitTranslator::EmitGetOperand(ir::Inst* inst) {
         }
     }
     auto operand = inst->GetArg<ir::Operand>(0);
-    auto result = context.R(ir::Value{inst});
+    const auto pinned_result = ResolvePinnedGPRValue(ir::Value{inst});
+    auto result = pinned_result ? Register{*pinned_result}
+                                : context.R(ir::Value{inst});
     if (context.IsConstAddressCached(inst->Id())) {
         ASSERT_MSG(ReproveCachedConstAddress(inst),
                    "constant-address cache proof failed at IR {}", inst->Id());

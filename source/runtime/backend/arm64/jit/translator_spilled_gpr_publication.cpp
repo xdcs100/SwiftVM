@@ -11,13 +11,14 @@ bool IsPinnedGPR(u32 index) {
 bool SupportsDirectPublication(ir::OpCode op) {
     using O = ir::OpCode;
     return op == O::LoadImm || op == O::LoadMemory || op == O::Add ||
-           op == O::Sub || op == O::And;
+           op == O::Sub || op == O::And || op == O::GetOperand ||
+           op == O::SignExtend;
 }
 
 }  // namespace
 
-std::optional<JitTranslator::AdjacentSpilledGPRPublication>
-JitTranslator::MatchAdjacentSpilledGPRPublication(ir::Inst* publication) {
+std::optional<JitTranslator::SpilledGPRPublication>
+JitTranslator::MatchSpilledGPRPublication(ir::Inst* publication) {
     if (!publication || publication->GetOp() != ir::OpCode::SetHostGPR ||
         publication->GetArg<ir::Imm>(2).Get() != 0 ||
         dead_pinned_gpr_writes.contains(publication) ||
@@ -33,33 +34,53 @@ JitTranslator::MatchAdjacentSpilledGPRPublication(ir::Inst* publication) {
         (width != sizeof(u32) && width != sizeof(u64)) ||
         ir::GetValueSizeByte(producer->ReturnType()) != width ||
         !IsPinnedGPR(target) || !context.IsSpilled(value) ||
-        producer->GetUses(false) != 1 || producer->GetUses() != 1 ||
-        !GetPseudoFlags(producer).Null()) {
+        producer->GetUses(false) != 1) {
         return std::nullopt;
     }
 
     auto& instructions = cur_block->GetInstList();
-    const auto next = std::next(instructions.iterator_to(*producer));
-    if (next == instructions.end() || next.operator->() != publication) {
+    const auto producer_it = instructions.iterator_to(*producer);
+    const auto publication_it = instructions.iterator_to(*publication);
+    if (producer->Id() >= publication->Id() ||
+        !guest_state_map.PublicationWindowSafe(
+                target, value, producer->Id(), publication->Id())) {
         return std::nullopt;
     }
+    for (auto it = std::next(producer_it); it != publication_it; ++it) {
+        if (it == instructions.end() || it->GetOp() == ir::OpCode::Goto ||
+            it->GetOp() == ir::OpCode::NotGoto ||
+            it->GetOp() == ir::OpCode::BindLabel ||
+            (backend::FixedGPRClobbers(*it, context.GetFeatures(), true) &
+             (1u << target))) {
+            return std::nullopt;
+        }
+        for (auto input : it->GetValues()) {
+            if (input.Defined() && context.IsGPRMappedTo(input, target)) {
+                return std::nullopt;
+            }
+        }
+        if (it->HasValue() &&
+            context.IsGPRMappedTo(ir::Value{it.operator->()}, target)) {
+            return std::nullopt;
+        }
+    }
 
-    return AdjacentSpilledGPRPublication{
+    return SpilledGPRPublication{
             .producer = producer,
             .publication = publication,
             .target = static_cast<u16>(target),
     };
 }
 
-void JitTranslator::PrepareAdjacentSpilledGPRPublications(ir::Block* block) {
-    adjacent_spilled_gpr_publications.clear();
+void JitTranslator::PrepareSpilledGPRPublications(ir::Block* block) {
+    spilled_gpr_publications.clear();
     for (auto& inst : block->GetInstList()) {
-        auto plan = MatchAdjacentSpilledGPRPublication(&inst);
+        auto plan = MatchSpilledGPRPublication(&inst);
         if (!plan || pinned_gpr_values.contains(plan->producer)) {
             continue;
         }
         pinned_gpr_values.emplace(plan->producer, plan->target);
-        adjacent_spilled_gpr_publications.emplace(&inst, *plan);
+        spilled_gpr_publications.emplace(&inst, *plan);
     }
 }
 

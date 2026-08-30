@@ -523,7 +523,8 @@ void JitTranslator::EmitSignExtend(ir::Inst* inst) {
         return;
     }
     auto value = inst->GetArg<ir::Value>(0);
-    auto result = context.R(ir::Value{inst});
+    const auto pinned = ResolvePinnedGPRValue(ir::Value{inst});
+    auto result = pinned ? Register{*pinned} : context.R(ir::Value{inst});
     const auto residence = guest_state_map.FixedHomeForUse(value, inst);
     auto fused = value.Def() ? fused_pin_gpr_reads.find(value.Def())
                              : fused_pin_gpr_reads.end();

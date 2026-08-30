@@ -759,7 +759,7 @@ JitTranslator::PrepareBlockState(ir::Block* block) {
     PreparePinnedGPRPublicationViews(block);
     PreparePinnedLoadUpdates(block);
     PreparePinnedMemoryValues(block);
-    PrepareAdjacentSpilledGPRPublications(block);
+    PrepareSpilledGPRPublications(block);
     PrepareDeadEdgeIntegerBranch(block);
     PrepareDeadNarrowImmediateBranch();
     PrepareNarrowFlagsInputs(block);

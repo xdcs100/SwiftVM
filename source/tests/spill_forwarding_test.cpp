@@ -72,6 +72,28 @@ SpillForwardingBlock MakeRepeatedSpillUseBlock() {
     return {std::move(block), arriving};
 }
 
+SpillForwardingBlock MakeSpilledPublicationWindowBlock(bool faulting = false) {
+    IntrusivePtr<Block> block{new Block(0, Location{0x2480})};
+    const auto longest = block->LoadImm(Imm{swift::u64{1}});
+    const auto middle = block->LoadImm(Imm{swift::u64{2}});
+    const auto shortest = block->LoadImm(Imm{swift::u64{3}});
+    const auto published = block->GetOperand(Operand{Imm{swift::u64{0x1234}}})
+                                   .SetType(ValueType::U64);
+    if (faulting) {
+        (void)block->LoadMemory(Operand{Imm{swift::u64{0x1000}}})
+                .SetType(ValueType::U64);
+    } else {
+        block->ClearFlags(Flags::Carry | Flags::Overflow);
+    }
+    block->AppendInst(OpCode::SetHostGPR, published, HostRegIndex(29), Imm{0u});
+    const auto first = block->Add(longest, Operand{middle});
+    const auto total = block->Add(first, Operand{shortest});
+    block->StoreUniform(Uniform{0, ValueType::U64}, total);
+    block->SetTerminal(terminal::ReturnToDispatch{});
+    block->ReIdInstr();
+    return {std::move(block), published};
+}
+
 std::vector<std::string> Emit(SpillForwardingBlock input, GPRSMask gprs) {
     FPRSMask fprs{~((1u << 8) - 1u)};
     RegAlloc alloc{input.block->MaxInstrId(), gprs, fprs, FeatureSet{}};
@@ -195,6 +217,26 @@ TEST_CASE("spilled scalar definitions transfer into multi-use reload regions") {
     REQUIRE(std::none_of(std::next(definition), emitted.end(), [&](const auto& line) {
         return (line.find("str " + resident + ", [x28") != std::string::npos) ||
                (line.find("ldr " + resident + ", [x28") != std::string::npos);
+    }));
+}
+
+TEST_CASE("spilled fixed publications cross a fault-safe instruction window") {
+    const auto emitted = Emit(MakeSpilledPublicationWindowBlock(),
+                              GPRSMask{~((1u << 5) - 1u) & ~(1u << 18)});
+    REQUIRE(std::ranges::any_of(emitted, [](const auto& line) {
+        return line.find("mov x29, #0x1234") != std::string::npos;
+    }));
+    REQUIRE(std::ranges::none_of(emitted, [](const auto& line) {
+        return line.find("str x29, [x28") != std::string::npos ||
+               line.find("ldr x29, [x28") != std::string::npos;
+    }));
+}
+
+TEST_CASE("spilled fixed publications retain canonical state across an untracked fault") {
+    const auto emitted = Emit(MakeSpilledPublicationWindowBlock(true),
+                              GPRSMask{~((1u << 5) - 1u) & ~(1u << 18)});
+    REQUIRE(std::ranges::none_of(emitted, [](const auto& line) {
+        return line.find("mov x29, #0x1234") != std::string::npos;
     }));
 }
 

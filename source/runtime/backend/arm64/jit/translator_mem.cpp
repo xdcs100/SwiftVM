@@ -1321,11 +1321,11 @@ void JitTranslator::EmitSetHostGPR(ir::Inst* inst) {
         ASSERT_MSG(reproved && *reproved == view->second,
                    "pinned GPR publication view proof diverged at IR {}", inst->Id());
     }
-    if (auto direct = adjacent_spilled_gpr_publications.find(inst);
-        direct != adjacent_spilled_gpr_publications.end()) {
-        const auto reproved = MatchAdjacentSpilledGPRPublication(inst);
+    if (auto direct = spilled_gpr_publications.find(inst);
+        direct != spilled_gpr_publications.end()) {
+        const auto reproved = MatchSpilledGPRPublication(inst);
         ASSERT_MSG(reproved && *reproved == direct->second,
-                   "adjacent spilled GPR publication proof diverged at IR {}",
+                   "spilled GPR publication proof diverged at IR {}",
                    inst->Id());
         return;
     }
