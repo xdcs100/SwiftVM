@@ -2213,3 +2213,36 @@ CoreMark 无参数自校准在 8 秒门限终止后没有延长，改用显式 2
 本阶段没有新增 env 开关、日志、probe、硬编码 guest PC、临时运行路径或兼容兜底，也没有运行长基准
 或压力测试。精确 helper observation contract 现在同时被 GuestStateMap、helper emitter 和 EdgeFlags
 target ABI 消费。
+
+### 16.65 external root 的 internal predecessor 双入口合同
+
+第 16.14 节建立 canonical external root 时，被拆开的 owner prefix 会以 `ExternalLinkBlock` 结束，target
+也不作为它的 HIR successor。这样能保证 target 从 canonical frontend 状态独立解码，但 owner 本身明明是
+同一 code object 内的真实顺序前驱，热路径仍被迫提交 dispatcher 状态并跳回 target published entry。
+
+本阶段把两个身份分开：split target 继续注册为 external root，dispatcher、其他 code object 和 direct-link
+source 仍只能进入 canonical published entry；被重放的 owner prefix 则用普通 `LinkBlock` 建立真实 internal
+predecessor，进入 target internal label。external root 继续是 GuestStateMap、width facts 和 entry contract 的
+canonical root，因此内部边不会让外部入口继承未经证明的 resident 状态。RPO 通过真实 CFG edge 保持
+owner/target 邻接，原来只为生成 `ExternalLinkBlock` 服务的 `DecodeStopKind::External` 分支和字段同时删除，
+不保留两套 decoder stop 协议。
+
+门禁结果：
+
+- Mac Debug/Release 和 Orb GCC 13.2 的 `swift_test`、`svm_translator_linux` 构建通过。Mac/Orb
+  `[function-entry]` 均通过 93 条断言 / 8 个 case；`[direct-link][production]` 分别通过 857/546 条断言，
+  `[continuation]` 均通过 117 条，非压力 `[smc]` 分别通过 719/400 条。
+- 严格同源 static-only 保持全部 root 和 oracle，且没有增长 root。SQLite 保持 2,065 roots，
+  `251,669 -> 251,614`（`-55`，19 个 root 缩小）；smallpt 保持 263 roots，
+  `36,749 -> 36,742`（`-7`，2 个 root 缩小）和 canonical PPM；CoreMark 显式 2k 保持 293 roots，
+  `36,574 -> 36,568`（`-6`，2 个 root 缩小）与 `crcfinal=0x4983`。SQLite timing-normalized stdout
+  逐字节一致。
+- 两组四次反向顺序 SQLite 短配对均未显示方向一致的回退：wall 分别为 `-0.614%`、`-0.124%`，
+  guest TOTAL 分别为 `-1.639%`、`0.000%`；合并中位数为 wall `1.2115s -> 1.2100s`
+  （`-0.124%`）、guest `0.9660s -> 0.9605s`（`-0.569%`），不据此声明吞吐收益。
+
+双来源门槛与完整 internal predecessor 组合在第 390 个 SQLite root 后以 `rc=139` 退出，说明部分
+二来源 target 仍缺少可组合的 live-in/dataflow 边界；该门槛改动已删除，生产继续使用经过验证的三来源
+合同。本阶段没有新增 env 开关、日志、probe、硬编码 guest PC、临时运行路径或兼容兜底，也没有运行
+长基准或压力测试。该改进消除了已有 canonical external root 的 owner 重入税，但不把它误报为
+`balance_nonroot` membership 缺口已经闭合；后者仍需要独立 component cost 或运行时权重合同。
