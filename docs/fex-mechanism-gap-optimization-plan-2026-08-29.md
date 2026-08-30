@@ -1836,3 +1836,41 @@ canonical backing，避免把 faulting input 与同一指令的新 spill definit
 基准或压力测试。fault-aware memory lifetime 的 store 与 direct-result load 大头已经闭合；普通
 spilled-result load 需要先建立同一 faulting instruction 内 input scratch 与 result definition 的首类
 所有权合同，不能再用 barrier 豁免继续扩大。
+
+### 16.52 spilled-result load 的 definition-region 所有权边界
+
+提交 `e4e1745` 将第 16.51 节对 ordinary spilled-result `LoadMemory` 的整体拒绝收窄到真实冲突。
+短程逐事件归因显示，宽版本的错误只在 load result 从 definition 当场启动 `SpillReload` region 时出现；
+result 仅使用 instruction-local spill scratch、没有 definition region 的路径保持当前基线行为。
+`JitContext::HasSpillReloadAtDefinition` 现在把这一 RA 所有权事实提供给 memory reader contract：无 region
+结果可以与 pending address 同时持有两个已预算 scratch；region-owned result 继续要求 address canonical
+backing，不把 pending scratch 与 RA region 的生命周期在 emitter 中隐式拼接。
+
+定位过程中只用于归因的 load/result register、slot 和 region 事件日志已删除。无条件宽版本稳定使
+SQLite main 从 984 roots / baseline `SQL logic error` 提前变为 564 roots /
+`malformed database schema`；只禁止 definition-region 组合后恢复为两侧 984 roots 和相同 baseline
+错误。该失败语料仍只作为边界排除证据，不作为正确性门禁。
+
+最终短门禁结果：
+
+- Mac Debug/Release 构建通过；组合 spill/memory 集合通过 28 个 case / 23,183 条断言，region-owned
+  负向 case 保留 canonical round trip，新增 local-spill-result 正向 case 直接使用 pending address。
+  五个既有真实 guest fault 用例继续通过 41 条断言。
+- 相对 `c42cc83` 的严格同源 smallpt `4 8 6` static-only A/B 保持 275 roots、100% root/top-30
+  coverage 和 canonical PPM，`45,235 -> 45,173`（`-62`，`-0.137062%`）；12 个 root 缩小、
+  零增长，mnemonic delta 为 `STR -29 / LDR -29 / MOV -4`。
+- SQLite `--help` 保持 225 roots、100% root/top-30 coverage 和逐字节一致 stdout，
+  `38,101 -> 38,079`（`-22`，`-0.057741%`）；7 个 root 缩小、零增长，mnemonic delta 为
+  `STR -11 / LDR -11`。
+- 仅作同错误边界诊断的 SQLite main 截断捕获保持 984 个公共 root 和全部 top-30，
+  `167,940 -> 167,759`（`-181`，`-0.107777%`）；41 个 root 缩小、零增长，mnemonic delta 为
+  `STR -87 / LDR -87 / MOV -7`。
+- Orb clean GCC 构建通过 `swift_runtime`、`svm_translator_linux`，并完成
+  `spill_forwarding_test.cpp.o` 定向编译。
+
+第 16.51–16.52 节累计将 smallpt 从 `45,479` 收敛到 `45,173`（`-306`，`-0.672838%`），
+SQLite `--help` 从 `38,283` 收敛到 `38,079`（`-204`，`-0.532874%`）。本阶段没有保留 probe、
+日志、env 开关、临时路径、硬编码 guest PC 或兼容 fallback，也没有运行长基准或压力测试。剩余
+region-owned load 不能继续局部放宽；若要删除其 round trip，必须让 RA 统一分配 memory input 与
+result definition 的同指令双所有权，而不是由 JIT 在 pending scratch 与既有 definition region 之间
+猜测空闲寄存器。
