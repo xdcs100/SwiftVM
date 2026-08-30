@@ -1874,3 +1874,42 @@ SQLite `--help` 从 `38,283` 收敛到 `38,079`（`-204`，`-0.532874%`）。本
 region-owned load 不能继续局部放宽；若要删除其 round trip，必须让 RA 统一分配 memory input 与
 result definition 的同指令双所有权，而不是由 JIT 在 pending scratch 与既有 definition region 之间
 猜测空闲寄存器。
+
+### 16.53 fault-backed load input/result 双所有权
+
+提交 `83eca10` 在 spill reload planner 中为紧邻的单 use `GetOperand -> LoadMemory` 建立 input/result
+联合所有权。planner 先为 spilled load result 选择完整 definition region，再为地址选择不同的 GPR；地址
+region 从 `GetOperand` definition 延续到 faulting load，结果 region 从 load definition 延续到最后一个
+已证明 consumer。非紧邻、multi-use、terminal-observed、非 `GetOperand` producer 或 scratch headroom
+不足的形态继续使用 canonical spill 路径。
+
+地址 region 带有首类 `fault_backed` 属性。`JitContext` 在 definition 直接写入 region GPR，同时排队一次
+强制 backing write；进入 faulting load 前仍把地址写入 canonical spill slot，但 load 直接读取 resident
+region，不再从 slot reload。这样 fault recovery 可以重建输入状态，正常路径只保留必要的 `STR`。普通
+spill region 不携带该属性，原有 pending adoption 和完整无 backing handoff 均不改变。
+
+短程 census 在最终实现前已删除。它确认 smallpt 的 22 个、SQLite `--help` 的 13 个被拒绝事件全部是
+单 use `GetOperand` 紧接单 use spilled-result load。仅分配两个无 backing region 的中间版本虽然缩小
+静态代码，但 SQLite main 从 baseline 的 984 roots / `SQL logic error` 提前退化为 564 roots /
+`malformed database schema`，已完整删除。最终 fault-backed 版本恢复两侧相同的 984 roots、相同 stdout
+SHA-256 `3ab8e757a485190b72d8d9f5a1a53b84faa5414a087f3fdfcace1333cede7902` 和相同
+`SQL logic error`。
+
+最终短门禁结果：
+
+- Mac Debug/Release 构建通过；spill、双所有权和七个真实 guest fault 组通过 31 个 case /
+  23,218 条断言。
+- 严格同源 smallpt `4 8 6` static-only A/B 保持 275 roots、100% root/top-30 coverage、零增长和
+  canonical PPM，`45,173 -> 45,153`（`-20`，`-0.044274%`）；9 个 root 缩小。
+- SQLite `--help` 保持 225 roots、100% root/top-30 coverage、零增长和逐字节一致 stdout，
+  `38,079 -> 38,066`（`-13`，`-0.034140%`）；5 个 root 缩小。
+- 仅作错误边界诊断的 SQLite main 保持 984 个公共 root、全部 top-30 和相同错误，
+  `167,759 -> 167,686`（`-73`，`-0.043515%`），零增长；该 workload 的 baseline 本身没有正常
+  完成，因此不作为正确性或性能结论。
+- Orb GCC 13.2 clean 构建通过 `swift_runtime`、`svm_translator_linux`，并按生成的 compile command
+  完成 `spill_forwarding_test.cpp.o`。完整 `swift_test` 仍被既有
+  `direct_link_production_test.cpp:1320` designated-initializer 顺序错误阻断。
+
+本阶段没有保留 census、日志、env 开关、临时路径、硬编码 guest PC 或兼容 fallback，也没有运行长
+基准或压力测试。第 16.52 节量化到的 region-owned faulting load round trip 至此闭合；其他需要跨 fault
+继续存活的地址仍保留 backing，不把这项合同扩展成无观察点证明的通用 definition transfer。
