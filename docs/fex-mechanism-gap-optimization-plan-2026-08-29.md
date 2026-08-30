@@ -2157,3 +2157,32 @@ SQLite 只额外减少 1 条，smallpt/CoreMark 严格不变，14 个 SQLite com
 本轮删除了 source-count 改动、published-target gate、临时日志、额外 rejection ABI 和所有源码测试改动。
 `balance_nonroot` 的下一步不能再调全局 source/budget 阈值；需要运行时反馈驱动的 code-object
 membership，或能在发布前比较 component 独立/合并成本的编译计划。
+
+### 16.63 SSE4.2 精确 lowering contract 与 pinned-state continuity
+
+提交 `7296907` 把 `Sse42Str` 从通用 opaque helper 边界迁移到精确 lowering contract。新的公共
+`Sse42StrVectorCallABI` 只描述当前真实存在的 `0x02` EqualAny 与 `0x1a` EqualEach native helper：
+前者精确 clobber `x11/x13-x17`、`v0/v1/v3-v7`，后者精确 clobber `x11/x13-x17`、`v0-v7`；
+其他 immediate 由 inline lowering 完成，不声明额外寄存器 clobber。contract 同时明确无隐式 guest-state
+访问、无 direct fault/reentry、FPCR transparent，但不保留 host NZCV。
+
+`GuestStateMap`、CFG width facts 和 fixed-home lifetime 因此不再在每个 SSE4.2 string compare 前
+无条件丢弃 x0-x9 pinned version。首个生产 consumer 验证 native/inline 两条路径都能让已发布到 x7 的
+旧版本穿过 `Sse42Str`，随后 faulting address 直接读取 x7。native helper 调用端同时删除不可达的 generic
+BL/RET、x30 frame 和对应分支；当前 helper address resolver 只会返回两种 x17-return helper，不保留未来
+模式的运行时 fallback。ABI 定义从 frontend helper 头拆到独立 common 头，backend contract 与 frontend
+resolver 消费同一来源。
+
+门禁结果：
+
+- Mac Debug/Release 构建通过；helper contract、pinned、SSE4.2 live-through、Rosetta/SDM 差分、
+  16-byte boundary 和 alias/REX 分别通过 59、141、26、16,255、4 和 27 条断言。
+- Orb GCC 13.2 `svm_translator_linux` 构建通过。
+- 严格同源 static-only 保持全部 root 和正确性 oracle。SQLite `252,544 -> 252,543`，唯一缩小的是
+  `__strcspn_sse42@0x506d30` `229 -> 228`；smallpt 保持 `263 / 36,749` 和 canonical PPM，CoreMark
+  保持 `293 / 36,574` 与 `crcfinal=0x4983`，三语料零增长。
+- 两组四次反向顺序 SQLite 短配对方向交叉：wall 分别为 `+0.729%` 与 `-0.200%`，guest TOTAL
+  分别为 `+1.005%` 与 `-0.512%`；只据此排除方向一致的明显回退，不声明宏观性能收益。
+
+本阶段没有新增 env 开关、日志、probe、硬编码 guest PC、临时运行路径或兼容兜底，也没有运行长基准
+或压力测试。第 9 节 helper ABI 至此不再把具有专用 emitter 的 SSE4.2 指令误归类为 opaque host call。
