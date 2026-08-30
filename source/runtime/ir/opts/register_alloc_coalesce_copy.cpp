@@ -248,6 +248,11 @@ void CoalesceLow32CopyChains(
         const Vector<u32>& use_end,
         const RegisterAllocFamilyCallbacks& callbacks) {
     auto& list = lir_block->GetInstList();
+    auto uses_stay_in_block = [&](Value value) {
+        return !callbacks.value_uses_stay_in_block ||
+               callbacks.value_uses_stay_in_block(
+                       callbacks.context, lir_block, value);
+    };
     for (auto bridge_it = list.begin(); bridge_it != list.end(); ++bridge_it) {
         auto& bridge = *bridge_it;
         if (bridge.GetOp() != OpCode::BitExtract ||
@@ -255,11 +260,15 @@ void CoalesceLow32CopyChains(
             bridge.GetArg<Imm>(1).Get() != 0 ||
             bridge.GetArg<Imm>(2).Get() != 32 ||
             reg_alloc->IsWidthChainCoalesced(bridge.Id()) ||
-            reg_alloc->IsLow32CopyCoalesced(bridge.Id())) {
+            reg_alloc->IsLow32CopyCoalesced(bridge.Id()) ||
+            !uses_stay_in_block(Value{&bridge})) {
             continue;
         }
 
         auto source = ResolveBitCastSource(bridge.GetArg<Value>(0));
+        if (!uses_stay_in_block(source)) {
+            continue;
+        }
         if (source.Defined() && CanCoalesceLiveLow32View(
                                         lir_block, reg_alloc, bridge, source,
                                         use_end)) {

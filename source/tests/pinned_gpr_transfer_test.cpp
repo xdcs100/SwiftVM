@@ -218,6 +218,67 @@ std::vector<std::string> EmitCrossBlockWidth(bool external_entry) {
     return Disassemble(context);
 }
 
+struct CrossBlockCoalesceState {
+    bool write_coalesced{};
+    bool read_coalesced{};
+    swift::u16 write_home{};
+    swift::u16 read_home{};
+};
+
+CrossBlockCoalesceState AllocateCrossBlockPublication() {
+    constexpr Location entry{0x97a0};
+    constexpr Location external_entry{0x97b0};
+    constexpr Location successor{0x97c0};
+    Config config{
+            .loc_start = 0,
+            .loc_end = 1ull << 48,
+            .enable_jit = true,
+            .has_local_operation = false,
+            .backend_isa = kArm64,
+    };
+    AddressSpace address_space{config};
+    FeatureSet features{};
+    HIRBuilder builder{1, true, features};
+    auto* function = builder.AppendFunction(entry, Location{0x97d0});
+
+    auto* external = builder.LinkBlock(terminal::LinkBlock{external_entry});
+    function->RegisterExternalEntryRoot(external);
+    builder.SetCurBlock(external);
+    auto published = function->LoadImm(Imm{swift::u32{7}})
+                             .SetType(ValueType::U32);
+    auto* publication = function->AppendInst(
+            OpCode::SetHostGPR, published, HostRegIndex(23), Imm{0u});
+    auto read = function->GetHostGPR(HostRegIndex(23), Imm{0u})
+                        .SetType(ValueType::U32);
+    auto* next = builder.LinkBlock(terminal::LinkBlock{successor});
+    builder.SetCurBlock(next);
+    auto replacement = function->LoadImm(Imm{swift::u32{9}})
+                               .SetType(ValueType::U32);
+    function->SetHostGPR(replacement, HostRegIndex(23), Imm{0u});
+    auto first = function->Add(published, Operand{Imm{swift::u32{1}}})
+                         .SetType(ValueType::U32);
+    auto second = function->Add(read, Operand{Imm{swift::u32{1}}})
+                          .SetType(ValueType::U32);
+    function->StoreUniform(Uniform{64, ValueType::U32}, first);
+    function->StoreUniform(Uniform{68, ValueType::U32}, second);
+    function->EndBlock(terminal::ReturnToHost{});
+    function->EndFunction();
+    function->ComputeRPO();
+    function->IdByRPO();
+
+    RegAlloc alloc{function->MaxInstrCount(),
+                   address_space.GetTrampolines().GetGPRRegs(),
+                   address_space.GetTrampolines().GetFPRRegs(),
+                   features};
+    RegisterAllocPass::Run(function, &alloc, features);
+    return {
+            alloc.IsHostWriteCoalesced(publication->Id()),
+            alloc.IsHostReadCoalesced(read.Id()),
+            alloc.ValueGPR(published).id,
+            alloc.ValueGPR(read).id,
+    };
+}
+
 arm64::GuestStateMap::ExtensionFacts DiamondEntryFacts(
         bool signed_value,
         bool clobber_predecessor) {
@@ -340,6 +401,14 @@ TEST_CASE("pinned CFG width facts stop at external entry roots") {
     const auto external = EmitCrossBlockWidth(true);
     REQUIRE(Count(internal, "mov w23, w23", "") == 0);
     REQUIRE(Count(external, "mov w23, w23", "") == 1);
+}
+
+TEST_CASE("fixed-home coalescing stops at cross-block value ownership") {
+    const auto state = AllocateCrossBlockPublication();
+    REQUIRE_FALSE(state.write_coalesced);
+    REQUIRE_FALSE(state.read_coalesced);
+    REQUIRE(state.write_home != 23);
+    REQUIRE(state.read_home != 23);
 }
 
 TEST_CASE("pinned CFG width facts meet at diamonds and backedges") {

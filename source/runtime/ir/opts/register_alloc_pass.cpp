@@ -111,6 +111,7 @@ public:
         call_abi_affinity.resize(function->MaxInstrCount(), UINT16_MAX);
         fixed_class = backend::FixedGPRClassEnabled(alloc->GetGprs(), features);
         InitializeFixedClobbers();
+        InitializeBlockLocalValues();
         if (single_block_fast_path) {
             fast_active_lives.reserve(function->MaxInstrCount());
         }
@@ -462,6 +463,62 @@ private:
         } else {
             reg_alloc->MapRegister(id, HostGPR{target});
         }
+    }
+
+    void InitializeBlockLocalValues() {
+        block_local_values.resize(function->MaxInstrCount(), true);
+        auto mark_use = [&](HIRBlock* user, Value value) {
+            value = ResolveBitCastSource(value);
+            if (!value.Defined() || value.Id() >= block_local_values.size()) {
+                return;
+            }
+            auto* definition = function->GetHIRValue(value);
+            if (!definition || definition->block != user) {
+                block_local_values[value.Id()] = false;
+            }
+        };
+        for (auto* hir_block : function->GetHIRBlocks()) {
+            auto* lir_block = hir_block->GetBlock();
+            for (auto& inst : lir_block->GetInstList()) {
+                for (auto value : inst.GetValues()) {
+                    mark_use(hir_block, value);
+                }
+            }
+            auto walk_terminal = [&](auto&& self, const Terminal& terminal_value) -> void {
+                VisitVariant<void>(terminal_value, [&](const auto& edge) {
+                    using T = std::decay_t<decltype(edge)>;
+                    if constexpr (std::is_same_v<T, terminal::If>) {
+                        mark_use(hir_block, edge.cond);
+                        self(self, edge.then_);
+                        self(self, edge.else_);
+                    } else if constexpr (std::is_same_v<T, terminal::Switch>) {
+                        mark_use(hir_block, edge.value);
+                        for (const auto& item : edge.cases) {
+                            self(self, item.then);
+                        }
+                    } else if constexpr (std::is_same_v<T, terminal::Condition>) {
+                        self(self, edge.then_);
+                        self(self, edge.else_);
+                    } else if constexpr (std::is_same_v<T, terminal::CheckHalt>) {
+                        self(self, edge.else_);
+                    }
+                });
+            };
+            walk_terminal(walk_terminal, lir_block->GetTerminal());
+        }
+    }
+
+    [[nodiscard]] bool ValueUsesStayInBlock(Block* lir_block, Value value) const {
+        if (!function) {
+            return true;
+        }
+        value = ResolveBitCastSource(value);
+        if (!value.Defined() || value.Id() >= block_local_values.size() ||
+            !block_local_values[value.Id()]) {
+            return false;
+        }
+        auto* definition = function->GetHIRValue(value);
+        return definition && definition->block->GetBlock() == lir_block;
     }
 
     void PlanFixedGPRAffinities() {
@@ -957,7 +1014,11 @@ private:
                     return static_cast<LinearScanAllocator*>(context)->CheckInstr(
                             inst, extra_gpr, extra_fpr);
                 },
-                nullptr};
+                nullptr,
+                [](void* context, Block* lir_block, Value value) {
+                    return static_cast<LinearScanAllocator*>(context)
+                            ->ValueUsesStayInBlock(lir_block, value);
+                }};
         auto coalesce_block = [&](Block* lir_block) {
             auto use_end = CollectGuestGPRUseEnds(lir_block, InstrCount());
             CoalesceLow32CopyChains(lir_block, reg_alloc, use_end, callbacks);
@@ -983,7 +1044,11 @@ private:
                     return static_cast<LinearScanAllocator*>(context)->CheckInstr(
                             inst, extra_gpr, extra_fpr);
                 },
-                nullptr};
+                nullptr,
+                [](void* context, Block* lir_block, Value value) {
+                    return static_cast<LinearScanAllocator*>(context)
+                            ->ValueUsesStayInBlock(lir_block, value);
+                }};
         auto coalesce_block = [&](Block* lir_block) {
             auto use_end = CollectGuestGPRUseEnds(lir_block, InstrCount());
 
@@ -991,7 +1056,7 @@ private:
                     lir_block, reg_alloc, features, use_end, fixed_gpr_clobbers,
                     callbacks);
             CoalescePinnedWViewInputs(lir_block, reg_alloc, use_end, callbacks);
-            CoalesceGuestGPRReads(lir_block, reg_alloc, use_end);
+            CoalesceGuestGPRReads(lir_block, reg_alloc, use_end, callbacks);
             CensusPinnedHostResidual(lir_block, reg_alloc, use_end);
         };
 
@@ -1011,7 +1076,11 @@ private:
                     return static_cast<LinearScanAllocator*>(context)->CheckInstr(
                             inst, extra_gpr, extra_fpr);
                 },
-                nullptr};
+                nullptr,
+                [](void* context, Block* lir_block, Value value) {
+                    return static_cast<LinearScanAllocator*>(context)
+                            ->ValueUsesStayInBlock(lir_block, value);
+                }};
         const bool host_accesses = features.ra_coalesce &&
                 backend::X86PinExtLevel2Enabled(reg_alloc->GetGprs());
         auto transact_block = [&](Block* lir_block) {
@@ -1031,7 +1100,7 @@ private:
                         lir_block, reg_alloc, baseline_features, use_end,
                         fixed_gpr_clobbers, callbacks);
                 CoalescePinnedWViewInputs(lir_block, reg_alloc, use_end, callbacks);
-                CoalesceGuestGPRReads(lir_block, reg_alloc, use_end);
+                CoalesceGuestGPRReads(lir_block, reg_alloc, use_end, callbacks);
             }
             auto baseline_long = CollectLongWidthChainBridges(
                     lir_block, reg_alloc, baseline_features, InstrCount(), use_end);
@@ -2464,6 +2533,7 @@ private:
     Vector<u16> fixed_gpr_affinity{};
     Vector<u32> fixed_gpr_affinity_store{};
     Vector<u16> call_abi_affinity{};
+    Vector<u8> block_local_values{};
     std::array<Vector<std::pair<u32, u32>>, 32> fixed_ranges{};
     Vector<bool> spill_slots{};
     Vector<u32> fixed_gpr_clobbers{};

@@ -44,6 +44,7 @@ struct RegisterAllocFamilyCallbacks {
     void* context{};
     bool (*check_instr)(void*, Inst*, u32, u32){};
     bool (*directly_feeds_memory)(void*, Inst*){};
+    bool (*value_uses_stay_in_block)(void*, Block*, Value){};
 };
 
 void CoalesceWidthChainBridges(
@@ -58,7 +59,8 @@ Vector<u32> CollectGuestGPRUseEnds(Block* lir_block, u32 instr_count);
 void CoalesceGuestGPRReads(
         Block* lir_block,
         backend::RegAlloc* reg_alloc,
-        const Vector<u32>& use_end);
+        const Vector<u32>& use_end,
+        const RegisterAllocFamilyCallbacks& callbacks);
 bool GuestGPRMappedTo(Value value, u32 target, backend::RegAlloc* reg_alloc);
 bool HasGuestGPRTargetConflict(
         Block* lir_block,

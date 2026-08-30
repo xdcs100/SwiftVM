@@ -662,13 +662,20 @@ Vector<u32> CollectGuestGPRUseEnds(Block* lir_block, u32 instr_count) {
 void CoalesceGuestGPRReads(
         Block* lir_block,
         backend::RegAlloc* reg_alloc,
-        const Vector<u32>& use_end) {
+        const Vector<u32>& use_end,
+        const RegisterAllocFamilyCallbacks& callbacks) {
     auto& list = lir_block->GetInstList();
+    auto uses_stay_in_block = [&](Value value) {
+        return !callbacks.value_uses_stay_in_block ||
+               callbacks.value_uses_stay_in_block(
+                       callbacks.context, lir_block, value);
+    };
     for (auto& read : list) {
         if (read.GetOp() != OpCode::GetHostGPR ||
             read.GetArg<Imm>(1).Get() != 0 ||
             GetValueSizeByte(read.ReturnType()) != sizeof(u32) ||
-            reg_alloc->IsWidthChainCoalesced(read.Id())) {
+            reg_alloc->IsWidthChainCoalesced(read.Id()) ||
+            !uses_stay_in_block(Value{&read})) {
             continue;
         }
         const u32 target = read.GetArg<Imm>(0).Get();
@@ -827,6 +834,11 @@ void CoalesceGuestGPRWrites(
     auto CheckInstr = [&](Inst* inst, u32 extra_gpr, u32 extra_fpr) {
         return callbacks.check_instr(callbacks.context, inst, extra_gpr, extra_fpr);
     };
+    auto uses_stay_in_block = [&](Value value) {
+        return !callbacks.value_uses_stay_in_block ||
+               callbacks.value_uses_stay_in_block(
+                       callbacks.context, lir_block, value);
+    };
 
     for (auto& store : list) {
         if (store.GetOp() != OpCode::SetHostGPR ||
@@ -886,7 +898,9 @@ void CoalesceGuestGPRWrites(
                       IsWidthChainRootProducer(producer);
         if (!producer ||
             (!IsPinnedCoalesceProducer(producer->GetOp()) && !width_root) ||
-            reg_alloc->ValueType(produced) != backend::RegAlloc::GPR) {
+            reg_alloc->ValueType(produced) != backend::RegAlloc::GPR ||
+            !uses_stay_in_block(produced) ||
+            (zero_extend_chain && !uses_stay_in_block(stored))) {
             continue;
         }
         if (width_root &&
@@ -1241,18 +1255,25 @@ void CoalescePinnedWViewInputs(Block* lir_block,
     auto CheckInstr = [&](Inst* inst) {
         return callbacks.check_instr(callbacks.context, inst, 0, 0);
     };
+    auto uses_stay_in_block = [&](Value value) {
+        return !callbacks.value_uses_stay_in_block ||
+               callbacks.value_uses_stay_in_block(
+                       callbacks.context, lir_block, value);
+    };
     for (auto& bridge : lir_block->GetInstList()) {
         if (bridge.GetOp() != OpCode::BitExtract || bridge.GetUses() != 1 ||
             reg_alloc->IsWidthChainCoalesced(bridge.Id()) ||
             GetValueSizeByte(bridge.ReturnType()) != sizeof(u32) ||
             bridge.GetArg<Imm>(1).Get() != 0 || bridge.GetArg<Imm>(2).Get() != 32 ||
-            bridge.Id() >= use_end.size()) {
+            bridge.Id() >= use_end.size() ||
+            !uses_stay_in_block(Value{&bridge})) {
             continue;
         }
         auto source = ResolveBitCastSource(bridge.GetArg<Value>(0));
         if (!source.Defined() || source.Id() >= use_end.size() ||
             use_end[source.Id()] != bridge.Id() ||
-            reg_alloc->ValueType(source) != backend::RegAlloc::GPR) {
+            reg_alloc->ValueType(source) != backend::RegAlloc::GPR ||
+            !uses_stay_in_block(source)) {
             continue;
         }
         const u32 target = reg_alloc->ValueGPR(source).id;
