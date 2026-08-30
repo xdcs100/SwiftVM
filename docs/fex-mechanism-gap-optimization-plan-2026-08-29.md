@@ -1378,3 +1378,44 @@ reload 同时删除。不满足完整 use、terminal、fixed-clobber 或 scratch
 本阶段没有保留 probe、日志、env 开关、临时源码路径或兼容兜底，也没有运行长基准或压力测试。
 FPR pool 审计显示 smallpt 最大 live FPR 只有 7、默认 pool 为 16，因此不立 FPR spill region；剩余 RA
 方向只保留需要显式 CFG split interval 的跨局部控制流形态，等待新的加权规模证明。
+
+### 16.37 fault-aware spilled fixed publication window
+
+提交 `84a4d08` 将原本只接受 IR 紧邻的 spilled fixed publication 收敛为显式 publication
+window。producer 仍必须只有一个普通 `SetHostGPR` consumer、宽度与目标 fixed home 完全匹配，
+但 flags pseudo use 不再阻断同一算术事务；`GuestStateMap::PublicationWindowSafe` 统一证明提前写入
+目标 home 不会穿过未覆盖的 fault/observer。局部控制流、固定寄存器 clobber、目标 home 的其他
+输入或定义继续整条拒绝。
+
+`GetOperand` 与 `SignExtend` 现在和既有 load/整数 ALU producer 一样直接选择目标 fixed home，
+publication 不再生成 spill store/reload 和末尾 move。两个 emitter 只消费已经建立的
+`pinned_gpr_values` 结果，不新增运行时状态或第二套 publication 协议。定向用例同时覆盖跨纯 flags
+窗口的正向路径和没有 fault snapshot 时的拒绝路径。
+
+短门禁结果：
+
+- Debug spill 分组通过 14 个 case / 23,091 条断言；CallLambda、function entry、fault snapshot、
+  SSE4.2 Rosetta/SDM 差分和 production direct-link 分组分别通过 67、87、56、16,255 和 864 条断言。
+- smallpt `4 8 6` 保持 275 roots、100% root/top-30 覆盖、零增长和 canonical PPM，
+  `46,363 -> 46,258`（`-105`，`-0.226%`）；同源 RA shape 的 `spill_loads/stores`
+  从 `858/872` 降到 `842/856`。
+- SQLite `main/size1` 保持 2,114 roots、100% root/top-30 覆盖和零增长，
+  `334,592 -> 334,016`（`-576`，`-0.172%`）；去除 timing 后的输出逐行一致。
+  `__strcmp_sse42@0x505120` 从 `339 -> 336`。
+
+本阶段没有运行长基准或压力测试，也没有保留 probe、日志、env 开关、硬编码 guest PC、临时源码
+路径或兼容兜底。
+
+### 16.38 剩余机制的规模与前置条件复核
+
+本轮同时用同一 smallpt/SQLite 短门禁复核了三个更宽的机制候选，均未保留：
+
+- 跨局部控制流的显式 spill preload 具备 dominance、scratch headroom 和 canonical slot 证明，
+  定向 13 个 spill case 通过，但 smallpt 与完整短 SQLite 都是严格零代码变化。当前真实 spill
+  residual 不命中这一形态，不建立空机制。
+- R15 block carrier 的最窄无 store/helper 版本在 SQLite 只减少 36 条；扩展到显式块入口 reload 后
+  会在约第 477 个 root 触发 guest trap。level 2 emitter 仍有区别于完整 level 3 的隐藏 fixed-register
+  ABI，单独保留 x9 会形成不受支持的 hybrid。该原型已完整删除，不重试启发式 R15 residency。
+- fallthrough-preserving hot-chain stitching 的 smallpt 静态上限只有 33 条额外邻接边；直接在 emitter
+  换序会破坏 function RA 的 instruction-id/RPO emission 同序约束，使 smallpt 在第 5 个 root 后提前
+  退出。后续只有在 RA live interval 本身支持 layout order 后才可重启，不保留 emitter-only 重排。
