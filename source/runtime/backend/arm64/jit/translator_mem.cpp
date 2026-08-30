@@ -1375,6 +1375,13 @@ void JitTranslator::EmitSetHostGPR(ir::Inst* inst) {
         return;
     }
     const auto published = inst->GetArg<ir::Value>(0);
+    if (auto update = MatchBiasedMemoryUpdate(published.Def());
+        update && update->publication == inst) {
+        __ Sub(update->base,
+               update->base,
+               static_cast<u64>(-update->offset));
+        return;
+    }
     if (auto update = MatchPreIndexMemoryUpdate(published.Def());
         update && update->publication == inst) {
         return;

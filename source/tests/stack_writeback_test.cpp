@@ -24,6 +24,22 @@ using namespace swift::runtime;
 using namespace swift::runtime::backend;
 using namespace swift::runtime::ir;
 
+std::vector<std::string> Disassemble(arm64::JitContext& context) {
+    auto& masm = context.GetMasm();
+    auto* first = masm.GetBuffer()->GetStartAddress<const vixl::aarch64::Instruction*>();
+    auto* last = masm.GetBuffer()->GetEndAddress<const vixl::aarch64::Instruction*>();
+    vixl::aarch64::Decoder decoder;
+    vixl::aarch64::Disassembler disassembler;
+    decoder.AppendVisitor(&disassembler);
+    std::vector<std::string> lines;
+    for (auto* instruction = first; instruction < last;
+         instruction = instruction->GetNextInstruction()) {
+        decoder.Decode(instruction);
+        lines.emplace_back(disassembler.GetOutput());
+    }
+    return lines;
+}
+
 std::vector<std::string> EmitPushShape(bool store_rsp, bool biased_memory) {
     Config config{
             .loc_start = 0,
@@ -56,20 +72,51 @@ std::vector<std::string> EmitPushShape(bool store_rsp, bool biased_memory) {
     arm64::JitTranslator translator{context};
     translator.Translate(block.get());
     context.Finish();
+    return Disassemble(context);
+}
 
-    auto& masm = context.GetMasm();
-    auto* first = masm.GetBuffer()->GetStartAddress<const vixl::aarch64::Instruction*>();
-    auto* last = masm.GetBuffer()->GetEndAddress<const vixl::aarch64::Instruction*>();
-    vixl::aarch64::Decoder decoder;
-    vixl::aarch64::Disassembler disassembler;
-    decoder.AppendVisitor(&disassembler);
-    std::vector<std::string> lines;
-    for (auto* instruction = first; instruction < last;
-         instruction = instruction->GetNextInstruction()) {
-        decoder.Decode(instruction);
-        lines.emplace_back(disassembler.GetOutput());
+std::vector<std::string> EmitSpilledPushShape() {
+    IntrusivePtr<Block> block{new Block(0, Location{0x8940})};
+    std::vector<Value> retained;
+    for (swift::u64 value = 1; value <= 6; ++value) {
+        retained.push_back(block->LoadImm(Imm{value}).SetType(ValueType::U64));
     }
-    return lines;
+    const auto rsp = block->GetHostGPR(HostRegIndex(4), Imm{0u})
+                             .SetType(ValueType::U64);
+    const auto stored = block->GetHostGPR(HostRegIndex(3), Imm{0u})
+                                .SetType(ValueType::U64);
+    const auto updated = block->Sub(rsp, Operand{Imm{swift::u64{8}}})
+                                 .SetType(ValueType::U64);
+    block->StoreMemory(Operand{updated}, stored);
+    block->SetHostGPR(updated, HostRegIndex(4), Imm{0u});
+    auto total = retained.front();
+    for (std::size_t i = 1; i < retained.size(); ++i) {
+        total = block->Add(total, Operand{retained[i]}).SetType(ValueType::U64);
+    }
+    block->StoreUniform(Uniform{0, ValueType::U64}, total);
+    block->SetTerminal(terminal::ReturnToDispatch{});
+    block->ReIdInstr();
+
+    const GPRSMask gprs{~((1u << 6) - 1u)};
+    const FPRSMask fprs{~((1u << 8) - 1u)};
+    RegAlloc alloc{block->MaxInstrId(), gprs, fprs, FeatureSet{}};
+    RegisterAllocPass::RunForSpillEvictTest(block.get(), &alloc, false);
+    REQUIRE(alloc.ValueType(updated) == RegAlloc::MEM);
+
+    Config config{
+            .loc_start = 0,
+            .loc_end = 1ull << 48,
+            .enable_jit = true,
+            .has_local_operation = false,
+            .backend_isa = kArm64,
+            .page_table = reinterpret_cast<void*>(0x1000),
+    };
+    AddressSpace address_space{config};
+    arm64::JitContext context{address_space.GetDefaultModule(), alloc};
+    arm64::JitTranslator translator{context};
+    translator.Translate(block.get());
+    context.Finish();
+    return Disassemble(context);
 }
 
 std::size_t Count(const std::vector<std::string>& lines, std::string_view text) {
@@ -93,6 +140,24 @@ TEST_CASE("stack push pre-index rejects address bias and base-data overlap") {
     REQUIRE(Count(biased, "sub ") == 1);
     REQUIRE(Count(overlap, "]!") == 0);
     REQUIRE(Count(overlap, "sub ") == 1);
+}
+
+TEST_CASE("spilled biased stack update publishes only after the store") {
+    const auto instructions = EmitSpilledPushShape();
+    const auto address = std::ranges::find_if(instructions, [](const auto& instruction) {
+        return instruction.find("sub x10, x4, #0x8") != std::string::npos;
+    });
+    const auto store = std::ranges::find_if(instructions, [](const auto& instruction) {
+        return instruction.find("str x3, [x10, x24]") != std::string::npos;
+    });
+    const auto publication = std::ranges::find_if(instructions, [](const auto& instruction) {
+        return instruction.find("sub x4, x4, #0x8") != std::string::npos;
+    });
+    REQUIRE(address != instructions.end());
+    REQUIRE(store != instructions.end());
+    REQUIRE(publication != instructions.end());
+    REQUIRE(address < store);
+    REQUIRE(store < publication);
 }
 
 TEST_CASE("faulting stack push preserves the pre-instruction RSP") {

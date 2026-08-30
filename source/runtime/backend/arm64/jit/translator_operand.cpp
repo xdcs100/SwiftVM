@@ -88,9 +88,9 @@ bool JitTranslator::HasOnlyZeroStoreUses(ir::Inst* definition) {
            compatible_uses == definition->GetUses(false);
 }
 
-std::optional<JitTranslator::PreIndexMemoryUpdate>
-JitTranslator::MatchPreIndexMemoryUpdate(ir::Inst* update) const {
-    if (use_memory_base || !update || update->GetOp() != ir::OpCode::Sub ||
+std::optional<JitTranslator::MemoryUpdate>
+JitTranslator::MatchMemoryUpdate(ir::Inst* update) const {
+    if (!update || update->GetOp() != ir::OpCode::Sub ||
         ir::GetValueSizeByte(update->ReturnType()) != sizeof(u64) ||
         update->GetUses(false) != 2) {
         return std::nullopt;
@@ -146,12 +146,32 @@ JitTranslator::MatchPreIndexMemoryUpdate(ir::Inst* update) const {
         return std::nullopt;
     }
 
-    return PreIndexMemoryUpdate{
+    return MemoryUpdate{
             .memory = memory_it.operator->(),
             .publication = publication_it.operator->(),
             .base = base,
             .offset = -static_cast<s64>(decrement),
     };
+}
+
+std::optional<JitTranslator::MemoryUpdate>
+JitTranslator::MatchPreIndexMemoryUpdate(ir::Inst* update) const {
+    if (use_memory_base) {
+        return std::nullopt;
+    }
+    return MatchMemoryUpdate(update);
+}
+
+std::optional<JitTranslator::MemoryUpdate>
+JitTranslator::MatchBiasedMemoryUpdate(ir::Inst* update) const {
+    if (!use_memory_base) {
+        return std::nullopt;
+    }
+    auto match = MatchMemoryUpdate(update);
+    if (!match || !context.IsSpilled(ir::Value{update})) {
+        return std::nullopt;
+    }
+    return match;
 }
 
 MemOperand JitTranslator::EmitMemOperand(ir::Operand& ir_op,
@@ -204,9 +224,16 @@ MemOperand JitTranslator::EmitMemOperand(ir::Operand& ir_op,
                 return MemOperand{context.R(addr_value), static_cast<s64>(*offset)};
             }
             if (allow_writeback && !atomic) {
-                auto update = MatchPreIndexMemoryUpdate(addr_value.Def());
-                if (update && update->memory == memory_inst) {
-                    return MemOperand{update->base, update->offset, PreIndex};
+                if (use_memory_base) {
+                    auto update = MatchBiasedMemoryUpdate(addr_value.Def());
+                    if (update && update->memory == memory_inst) {
+                        return BiasMem(update->base, update->offset, false);
+                    }
+                } else {
+                    auto update = MatchPreIndexMemoryUpdate(addr_value.Def());
+                    if (update && update->memory == memory_inst) {
+                        return MemOperand{update->base, update->offset, PreIndex};
+                    }
                 }
             }
             if ((mem_narrow_fuse || addr_ea_tie) &&

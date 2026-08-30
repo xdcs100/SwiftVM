@@ -142,7 +142,7 @@ void JitTranslator::EmitAdd(ir::Inst* inst) {
 }
 
 void JitTranslator::EmitSub(ir::Inst* inst) {
-    if (MatchPreIndexMemoryUpdate(inst)) {
+    if (MatchPreIndexMemoryUpdate(inst) || MatchBiasedMemoryUpdate(inst)) {
         return;
     }
     if (auto plan = narrow_compares.find(inst); plan != narrow_compares.end()) {

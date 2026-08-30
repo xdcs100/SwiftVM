@@ -156,14 +156,18 @@ private:
     [[nodiscard]] bool ReproveCoalescedHostFPRRead(ir::Inst* inst) const;
     [[nodiscard]] bool ReproveAesChainTie(ir::Inst* inst) const;
     [[nodiscard]] bool ReproveAesChainHostWrite(ir::Inst* inst) const;
-    struct PreIndexMemoryUpdate {
+    struct MemoryUpdate {
         ir::Inst* memory{};
         ir::Inst* publication{};
         XRegister base{};
         s64 offset{};
     };
-    [[nodiscard]] std::optional<PreIndexMemoryUpdate>
+    [[nodiscard]] std::optional<MemoryUpdate>
+    MatchMemoryUpdate(ir::Inst* update) const;
+    [[nodiscard]] std::optional<MemoryUpdate>
     MatchPreIndexMemoryUpdate(ir::Inst* update) const;
+    [[nodiscard]] std::optional<MemoryUpdate>
+    MatchBiasedMemoryUpdate(ir::Inst* update) const;
     struct PinnedLoadUpdate {
         ir::Inst* load{};
         ir::Inst* update{};
