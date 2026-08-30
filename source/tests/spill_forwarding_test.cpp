@@ -56,6 +56,22 @@ SpillForwardingBlock MakeSpillWidthTransferBlock() {
     return {std::move(block), arriving};
 }
 
+SpillForwardingBlock MakeRepeatedSpillUseBlock() {
+    IntrusivePtr<Block> block{new Block(0, Location{0x2440})};
+    const auto longest = block->LoadImm(Imm{swift::u64{1}});
+    const auto middle = block->LoadImm(Imm{swift::u64{2}});
+    const auto shortest = block->LoadImm(Imm{swift::u64{3}});
+    const auto arriving = block->LoadImm(Imm{swift::u64{4}});
+    const auto first = block->Add(arriving, Operand{shortest});
+    const auto bridge = block->Add(first, Operand{middle});
+    const auto second = block->Add(arriving, Operand{longest});
+    const auto total = block->Add(second, Operand{bridge});
+    block->StoreUniform(Uniform{0, ValueType::U64}, total);
+    block->SetTerminal(terminal::ReturnToDispatch{});
+    block->ReIdInstr();
+    return {std::move(block), arriving};
+}
+
 std::vector<std::string> Emit(SpillForwardingBlock input, GPRSMask gprs) {
     FPRSMask fprs{~((1u << 8) - 1u)};
     RegAlloc alloc{input.block->MaxInstrId(), gprs, fprs, FeatureSet{}};
@@ -159,4 +175,54 @@ TEST_CASE("spill forwarding stops before a width ownership transfer") {
                line.find(address) != std::string::npos;
     });
     REQUIRE(reload != emitted.end());
+}
+
+TEST_CASE("repeated spilled scalar uses share one reload region") {
+    const auto emitted = Emit(MakeRepeatedSpillUseBlock(),
+                              GPRSMask{~((1u << 5) - 1u) & ~(1u << 18)});
+    const auto definition = std::ranges::find_if(emitted, [](const auto& line) {
+        return line.find("mov x") != std::string::npos &&
+               line.find("#0x4") != std::string::npos;
+    });
+    REQUIRE(definition != emitted.end());
+    const auto store = std::find_if(std::next(definition), emitted.end(), [](const auto& line) {
+        return line.find("str x") != std::string::npos &&
+               line.find("[x28") != std::string::npos;
+    });
+    REQUIRE(store != emitted.end());
+    const auto address_begin = store->find("[x28");
+    const auto address_end = store->find(']', address_begin);
+    REQUIRE(address_begin != std::string::npos);
+    REQUIRE(address_end != std::string::npos);
+    const auto address = store->substr(address_begin, address_end - address_begin + 1);
+    REQUIRE(std::count_if(std::next(store), emitted.end(), [&](const auto& line) {
+        return line.find("ldr x") != std::string::npos &&
+               line.find(address) != std::string::npos;
+    }) == 1);
+}
+
+TEST_CASE("spill reload regions stop at local control flow") {
+    IntrusivePtr<Block> block{new Block(0, Location{0x2460})};
+    const auto longest = block->LoadImm(Imm{swift::u64{1}});
+    const auto middle = block->LoadImm(Imm{swift::u64{2}});
+    const auto shortest = block->LoadImm(Imm{swift::u64{3}});
+    const auto arriving = block->LoadImm(Imm{swift::u64{4}});
+    const auto first = block->Add(arriving, Operand{shortest});
+    const auto condition = block->LoadImm<BOOL>(Imm{swift::u64{1}});
+    const auto skip = block->NotGoto(condition);
+    block->Add(first, Operand{middle});
+    block->BindLabel(skip);
+    const auto second = block->Add(arriving, Operand{longest});
+    block->StoreUniform(Uniform{0, ValueType::U64}, second);
+    block->SetTerminal(terminal::ReturnToDispatch{});
+    block->ReIdInstr();
+
+    GPRSMask gprs{~((1u << 5) - 1u) & ~(1u << 18)};
+    FPRSMask fprs{~((1u << 8) - 1u)};
+    RegAlloc alloc{block->MaxInstrId(), gprs, fprs, FeatureSet{}};
+    RegisterAllocPass::RunForSpillEvictTest(block.get(), &alloc, false);
+
+    REQUIRE(alloc.ValueType(arriving) == RegAlloc::MEM);
+    REQUIRE_FALSE(alloc.HasSpillReload(arriving.Id(), first.Id()));
+    REQUIRE_FALSE(alloc.HasSpillReload(arriving.Id(), second.Id()));
 }

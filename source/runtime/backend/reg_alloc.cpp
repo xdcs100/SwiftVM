@@ -575,6 +575,8 @@ RegAlloc::RegAlloc(u32 instr_size, const GPRSMask& gprs, const FPRSMask& fprs,
 
 void RegAlloc::ResetAllocations() {
     std::fill(alloc_result.begin(), alloc_result.end(), Map{});
+    spill_reloads.clear();
+    spill_reload_region_count = 0;
     std::fill(coalesced_host_writes.begin(), coalesced_host_writes.end(), false);
     std::fill(coalesced_host_reads.begin(), coalesced_host_reads.end(), false);
     std::fill(width_chain_anchors.begin(), width_chain_anchors.end(), UINT32_MAX);
@@ -616,6 +618,30 @@ void RegAlloc::MapMemSpill(u32 id, ir::SpillSlot slot) {
     map.type = MEM;
     map.slot = slot.offset;
     map.fixed_gpr = false;
+}
+
+void RegAlloc::MapSpillReload(u32 value_id, u32 first_use, u32 last_use,
+                              ir::HostGPR reg) {
+    value_id = ResolveId(value_id);
+    ASSERT(alloc_result[value_id].type == MEM);
+    ASSERT(first_use <= last_use);
+    if (spill_reloads.size() < alloc_result.size()) {
+        spill_reloads.resize(alloc_result.size());
+    }
+    const u32 region = spill_reload_region_count++;
+    for (u32 id = first_use; id <= last_use; ++id) {
+        ASSERT(id < alloc_result.size());
+        auto& reloads = spill_reloads[id];
+        ASSERT(std::none_of(reloads.begin(), reloads.end(), [value_id](const auto& reload) {
+            return reload.value == value_id;
+        }));
+        reloads.push_back(SpillReload{
+                .region = region,
+                .value = value_id,
+                .reg = reg.id,
+        });
+        alloc_result[id].dirty_gprs.Mark(reg.id);
+    }
 }
 
 void RegAlloc::MapReference(u32 from, u32 to) {
@@ -825,6 +851,40 @@ ir::SpillSlot RegAlloc::ValueMem(u32 id) {
     id = ResolveId(id);
     ASSERT(alloc_result[id].type == MEM);
     return ir::SpillSlot{alloc_result[id].slot};
+}
+
+u32 RegAlloc::AllocationId(const ir::Value& value) const {
+    return ResolveId(value.Id());
+}
+
+const RegAlloc::SpillReload* RegAlloc::SpillReloadAt(
+        u32 value_id, u32 instruction_id) const {
+    value_id = ResolveId(value_id);
+    const auto* reloads = SpillReloadsAt(instruction_id);
+    if (!reloads) {
+        return nullptr;
+    }
+    const auto it = std::find_if(reloads->begin(), reloads->end(), [value_id](const auto& reload) {
+        return reload.value == value_id;
+    });
+    return it == reloads->end() ? nullptr : &*it;
+}
+
+const RegAlloc::SpillReload* RegAlloc::SpillReloadAt(
+        const ir::Value& value, u32 instruction_id) const {
+    return SpillReloadAt(value.Id(), instruction_id);
+}
+
+bool RegAlloc::HasSpillReload(u32 value_id, u32 instruction_id) const {
+    return SpillReloadAt(value_id, instruction_id) != nullptr;
+}
+
+const Vector<RegAlloc::SpillReload>* RegAlloc::SpillReloadsAt(
+        u32 instruction_id) const {
+    if (instruction_id >= spill_reloads.size() || spill_reloads[instruction_id].empty()) {
+        return nullptr;
+    }
+    return &spill_reloads[instruction_id];
 }
 
 RegAlloc::Type RegAlloc::ValueType(const ir::Value& value) {

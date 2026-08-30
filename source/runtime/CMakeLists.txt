@@ -86,6 +86,8 @@ add_library(swift_runtime STATIC
         ir/opts/register_alloc_pass.cpp
         ir/opts/register_alloc_pass.h
         ir/opts/register_alloc_internal.h
+        ir/opts/register_alloc_spill_reload.cpp
+        ir/opts/register_alloc_spill_reload.h
         ir/opts/register_alloc_verified.inc
         ir/opts/reid_instr_pass.cpp
         ir/opts/reid_instr_pass.h

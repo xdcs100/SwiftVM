@@ -391,6 +391,21 @@ Register JitContext::SpillGPR(const ir::Value& value, bool definition) {
                 {value.Id(), slot.offset, static_cast<u8>(tmp.GetCode()), false});
         return tmp;
     }
+    if (cur_inst) {
+        if (const auto* reload = reg_alloc.SpillReloadAt(value, cur_inst->Id())) {
+            auto resident = XRegister(reload->reg);
+            if (active_spill_reload_regions.size() <= reload->region) {
+                active_spill_reload_regions.resize(reload->region + 1);
+            }
+            if (!active_spill_reload_regions[reload->region]) {
+                active_spill_reload_regions[reload->region] = true;
+                __ Ldr(resident, MemOperand(state, offset));
+                if (RAShapeProfEnabled()) ++reg_alloc.RAShape().spill_loads;
+                RecordHotSpillReload();
+            }
+            return resident;
+        }
+    }
     // Use access: reload from the spill slot. Any write-back of a value
     // defined by an earlier instruction has already been flushed at this
     // instruction's TickIR, so the slot is current.
@@ -457,6 +472,7 @@ std::optional<u8> JitContext::FlushSpillWrites(ir::Inst* consumer) {
         fixed_forward = write.reg == spill_scratch.GetCode();
 #endif
         if (consumer && !forwarded && !write.is_fpr &&
+            !reg_alloc.HasSpillReload(write.value, consumer->Id()) &&
             (fixed_forward ||
              IsPortableSpillForwardConsumer(consumer->GetOp())) &&
             !reg_alloc.DirtyGPR(consumer->Id()).Get(write.reg) &&

@@ -4,6 +4,7 @@
 
 #include "register_alloc_pass.h"
 #include "register_alloc_internal.h"
+#include "register_alloc_spill_reload.h"
 #include <cstdio>
 #include "base/logging.h"
 #include "runtime/backend/arm64/pshufd_direct.h"
@@ -393,6 +394,13 @@ public:
         }
         // Fill any remaining instructions after the last interval start.
         fill_gap(instr_count);
+        if (!has_eviction_candidate) {
+            if (function) {
+                PlanSpillReloadRegions(function, reg_alloc, features);
+            } else {
+                PlanSpillReloadRegions(block, reg_alloc, features);
+            }
+        }
         perf_assign.Stop();
 
         FusePinnedWriteChains();
@@ -1756,7 +1764,11 @@ private:
                 return;
             }
             counted.push_back(source.Id());
-            (IsFloatValue(source.Def()) ? reload_fpr : reload_gpr)++;
+            if (IsFloatValue(source.Def())) {
+                ++reload_fpr;
+            } else if (!reg_alloc->HasSpillReload(source.Id(), id)) {
+                ++reload_gpr;
+            }
         };
         for (auto& value : inst->GetValues()) {
             add(value);

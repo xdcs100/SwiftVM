@@ -474,6 +474,7 @@ private:
     // names, which is the bound backend::kSpillReloadHeadroom encodes.
     std::map<u32, u8> spill_use_scratch;
     std::vector<PendingSpillWrite> pending_spill_writes;
+    std::vector<bool> active_spill_reload_regions;
     std::vector<DirectLinkSiteInfo> pending_direct_link_sites;
     struct ReturnSiteInfo {
         u32 code_offset{};

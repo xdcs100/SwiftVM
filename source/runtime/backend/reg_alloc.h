@@ -247,6 +247,12 @@ public:
         bool operator==(const WidthComponentOwner&) const = default;
     };
 
+    struct SpillReload {
+        u32 region{};
+        u32 value{};
+        u16 reg{};
+    };
+
     // The GPR coalescer stages one whole block and publishes it only after the
     // write/read/width proofs agree.  This snapshot is deliberately limited to
     // state that family can mutate; pools, spills and scratch contracts remain
@@ -267,6 +273,8 @@ public:
     void MapFixedRegister(u32 id, ir::HostGPR gpr);
     void MapRegister(u32 id, ir::HostFPR fpr);
     void MapMemSpill(u32 id, ir::SpillSlot slot);
+    void MapSpillReload(u32 value_id, u32 first_use, u32 last_use,
+                        ir::HostGPR reg);
     void MapReference(u32 from, u32 to);
     void MarkHostWriteCoalesced(u32 id);
     void MarkHostReadCoalesced(u32 id);
@@ -307,6 +315,12 @@ public:
     ir::HostGPR ValueGPR(u32 id);
     ir::HostFPR ValueFPR(u32 id);
     ir::SpillSlot ValueMem(u32 id);
+    [[nodiscard]] u32 AllocationId(const ir::Value& value) const;
+    [[nodiscard]] const SpillReload* SpillReloadAt(
+            u32 value_id, u32 instruction_id) const;
+    [[nodiscard]] const SpillReload* SpillReloadAt(
+            const ir::Value& value, u32 instruction_id) const;
+    [[nodiscard]] bool HasSpillReload(u32 value_id, u32 instruction_id) const;
     // Resolves REF (bitcast alias) entries, so the result is the underlying
     // GPR/FPR/MEM allocation rather than the alias itself.
     Type ValueType(const ir::Value &value);
@@ -334,8 +348,11 @@ private:
     // Follows REF chains (MapReference) to the id holding the real
     // GPR/FPR/MEM allocation.
     [[nodiscard]] u32 ResolveId(u32 id) const;
+    [[nodiscard]] const Vector<SpillReload>* SpillReloadsAt(u32 instruction_id) const;
 
     Vector<Map> alloc_result;
+    Vector<Vector<SpillReload>> spill_reloads{};
+    u32 spill_reload_region_count{};
     Vector<bool> coalesced_host_writes{};
     Vector<bool> coalesced_host_reads{};
     Vector<u32> width_chain_anchors{};
