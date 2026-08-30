@@ -2272,3 +2272,45 @@ root、每 root code size 和 oracle 均逐项相同；不为零命中形态运�
 transfer 的兼容合同，不是 continuation 分类或单一 flags 分支。双来源、地址排除、临时 marker、日志和
 捕获均已删除，生产继续保持三来源门槛。本阶段没有新增 env 开关、probe、硬编码 guest PC、临时运行
 路径或兼容兜底，也没有运行长基准或压力测试。
+
+### 16.67 跨块 fixed-home 所有权与分级 external-root admission
+
+双来源 SQLite 的剩余 host fault 最终收敛到普通 GPR coalescer，而不是 continuation、flags 或 pin
+完整度。关闭 `ra_coalesce` 后相同输入稳定完成；逐项审计发现 `CollectGuestGPRUseEnds` 按 LIR block
+统计用途，但 live publication、U32 fixed-home read、pinned W view 和 low32 copy 会在函数级分配后改写
+物理 home。如果被改写的值还有后继 block consumer，本块证明看不到跨块覆盖，后继再次写同一 guest
+home 后会让旧 SSA value 静默别名到新值。
+
+函数级 allocator 现在一次建立 value-to-block ownership，并把查询作为同一 coalescer family contract
+传给 GPR read/write、pinned W view 和 low32 copy。只有定义与所有普通/terminal consumer 都属于当前
+block 时，块内 use-end 证明才可消除 fixed-home move；独立 block allocator 保持原合同。定向函数用例
+从 canonical external root 定义并发布 U32 value，在后继覆盖同一 home 后继续消费原 publication 和
+GetHost snapshot，验证两种 coalescing 都 fail-closed。
+
+正确性闭合后，直接开放全部双来源 target 虽可完成 SQLite，但同 RA 三来源基线的八次反向短配对仍为
+wall `2.5107s -> 2.6376s`（`+5.056%`）、guest TOTAL `2.2575s -> 2.3815s`
+（`+5.493%`）。分组归因表明回退来自 source-count=2 target 对 primary entry owner 的切分：该形态让
+所有普通函数入口先执行 prefix 再进入 target，两个外部来源不足以支付热入口重排成本。最终 admission
+保留 source-count≥3 的既有 `OwnerPolicy::Any`，source-count=2 只接受
+`OwnerPolicy::Interior`；不使用 guest PC、符号名或运行时白名单。
+
+门禁结果：
+
+- Mac Debug/Release 与 Orb GCC 13.2 的 `swift_test`、`svm_translator_linux` 构建通过。最终 Orb
+  `[function-entry]`、`[direct-link][production]`、`[continuation]` 和非压力 `[smc]` 分别通过
+  100、544、117 和 406 条断言；跨块 fixed-home 用例单独通过 4 条断言。
+- 相对同一 ownership 修复、仍保持三来源 admission 的 static-only control，smallpt
+  `263 / 36,742 -> 261 / 36,713`，SQLite `2,079 / 252,489 -> 2,052 / 251,899`，CoreMark 2k
+  `293 / 36,568 -> 288 / 36,473`。smallpt/CoreMark 无增长 root；SQLite 有 4 个公共 root 合计增长
+  44 条、49 个公共 root 合计缩小 211 条，并消除 27 个独立 root 合计 423 条，baseline top-20 无增长。
+- smallpt PPM SHA-256 保持
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`，SQLite timing-normalized
+  stdout 逐字节一致，CoreMark `crcfinal=0x4983`。
+- 最终 admission 与同 RA 三来源 control 的八次反向 SQLite 短配对为 wall
+  `2.4318s -> 2.4188s`（`-0.535%`）、guest TOTAL `2.1865s -> 2.1755s`（`-0.503%`）；只据此
+  排除方向一致回退，不声明吞吐收益。
+
+归因阶段的 source bucket、marker、日志、临时二进制和捕获均不进入代码树；最终没有新增 env 开关、
+probe、硬编码 guest PC、兼容兜底或过时三来源旁路，也没有运行长基准或压力测试。多 CFG root 缺口从
+“双来源整体不可用”收窄为“弱来源不能切 primary entry owner”；更低 fan-in 或真正跨 component 的
+membership 仍需要独立的动态权重合同。
