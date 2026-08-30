@@ -89,6 +89,25 @@ SpillForwardingBlock MakeSpillAddressBlock() {
     return {std::move(block), arriving};
 }
 
+SpillForwardingBlock MakeSpillPublicationBlock(bool fixed_home) {
+    IntrusivePtr<Block> block{new Block(0, Location{0x243c})};
+    const auto longest = block->LoadImm(Imm{swift::u64{1}});
+    const auto middle = block->LoadImm(Imm{swift::u64{2}});
+    const auto shortest = block->LoadImm(Imm{swift::u64{3}});
+    const auto arriving = block->LoadImm(Imm{swift::u64{4}});
+    if (fixed_home) {
+        block->SetHostGPR(arriving, HostRegIndex(15), Imm{0u});
+    } else {
+        block->StoreUniform(Uniform{0, ValueType::U64}, arriving);
+    }
+    const auto first = block->Add(shortest, Operand{middle});
+    const auto total = block->Add(first, Operand{longest});
+    block->StoreUniform(Uniform{8, ValueType::U64}, total);
+    block->SetTerminal(terminal::ReturnToDispatch{});
+    block->ReIdInstr();
+    return {std::move(block), arriving};
+}
+
 SpillForwardingBlock MakeRepeatedSpillUseBlock() {
     IntrusivePtr<Block> block{new Block(0, Location{0x2440})};
     const auto longest = block->LoadImm(Imm{swift::u64{1}});
@@ -301,6 +320,37 @@ TEST_CASE("address consumers retain final-use spilled inputs") {
         return line.find("str " + scratch + ", [x28") != std::string::npos ||
                line.find("ldr " + scratch + ", [x28") != std::string::npos;
     }));
+}
+
+TEST_CASE("publication consumers retain final-use spilled inputs") {
+    auto check = [](bool fixed_home) {
+        const auto emitted = Emit(
+                MakeSpillPublicationBlock(fixed_home),
+                GPRSMask{~((1u << 5) - 1u) & ~(1u << 18)});
+        const auto definition = std::ranges::find_if(emitted, [](const auto& line) {
+            return line.find("mov x") != std::string::npos &&
+                   line.find("#0x4") != std::string::npos;
+        });
+        REQUIRE(definition != emitted.end());
+        const auto delimiter = definition->find(',');
+        REQUIRE(delimiter != std::string::npos);
+        const auto scratch = definition->substr(4, delimiter - 4);
+        const auto consumer = std::find_if(std::next(definition), emitted.end(),
+                                           [&](const auto& line) {
+            return fixed_home
+                    ? line.find("mov x15, " + scratch) != std::string::npos
+                    : line.find("str " + scratch + ", [x28") != std::string::npos;
+        });
+        REQUIRE(consumer != emitted.end());
+        REQUIRE(std::none_of(std::next(definition), consumer,
+                             [&](const auto& line) {
+            return line.find("str " + scratch + ", [x28") != std::string::npos ||
+                   line.find("ldr " + scratch + ", [x28") != std::string::npos;
+        }));
+    };
+
+    SECTION("guest register publication") { check(true); }
+    SECTION("uniform memory") { check(false); }
 }
 
 TEST_CASE("spilled scalar definitions transfer into multi-use reload regions") {

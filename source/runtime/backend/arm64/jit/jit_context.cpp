@@ -76,6 +76,8 @@ bool IsPortableSpillForwardConsumer(ir::OpCode op) {
         case O::LsrValue:
         case O::AsrValue:
         case O::GetOperand:
+        case O::SetHostGPR:
+        case O::StoreUniform:
             return true;
         default:
             return false;
