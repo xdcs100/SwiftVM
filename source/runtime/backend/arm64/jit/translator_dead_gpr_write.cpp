@@ -134,7 +134,10 @@ void JitTranslator::PrepareDeadPinnedGPRWrites(ir::Block* block) {
         }
     }
     guest_state_map.BuildValueVersions(
-            dead_pinned_gpr_writes, coalesced_writes, has_reused_publication);
+            dead_pinned_gpr_writes,
+            std::span<const GuestStateMap::CoalescedWrite>{
+                    coalesced_writes.data(), coalesced_writes.size()},
+            has_reused_publication);
 }
 
 }  // namespace swift::runtime::backend::arm64
