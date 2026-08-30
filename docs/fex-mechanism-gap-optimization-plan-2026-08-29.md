@@ -1546,6 +1546,35 @@ EqualAny 不再保存和恢复 x30。frame planner 在仍有 live-through GPR �
 本阶段没有运行长基准或压力测试，也没有保留调试路径、probe、日志、env 开关、硬编码 guest PC、
 临时源码路径或兼容兜底。
 
+### 16.45 memory-base 精确常量地址复用
+
+常量地址 RA 原本已把同一 basic block、同一页且通过 scratch 复核的 `GetOperand` 链绑定到一个
+page-base owner；identity 映射可由 memory operand 直接消费 page offset，但 Linux memory-base 模式仍在
+每个候选处重新物化完整 guest 地址。新的 emitter consumer 在同一 anchor、同一物理 GPR 且前一个
+缓存候选的完整地址与当前值严格相等时保留寄存器内容；同页不同地址仍重新物化，因此不会把 page-base
+等价误当成 exact-address 等价。
+
+常量地址提取、RA 元数据复核、page-offset 解析和 exact reuse 发码从
+`translator_control.cpp` 拆到独立的 `translator_const_address.cpp`。实现没有新增 RA metadata、运行时分支
+或第二套 cache 协议，identity 映射的 page-base 路径保持原样。
+
+短门禁结果：
+
+- 本地 Release 的常量地址定向用例通过 19 条断言，覆盖 identity 同页复用、memory-base 同地址复用、
+  同页不同地址重新物化、scratch 不足回退和 publication coalescing 并存。
+- 同一二进制的 smallpt `4 8 6` static-only A/B 保持 275 roots、100% root/top-30 coverage 和 canonical
+  PPM，`46,258 -> 46,188`（`-70`，`-0.151325%`）；17 个 root 缩小、零增长。
+  `main@0x402497` 与相邻 `0x40248e` 均减少 4 条完整地址物化指令。
+- SQLite `main/size1` 使用固定 8 秒上限，两侧均按门限退出；candidate 覆盖全部 821 个 baseline root 和
+  top-30，公共集 `146,169 -> 146,115`（`-54`，`-0.036944%`），15 个 root 缩小、零增长。该截断账
+  只用于确认生产命中与无共同 root 回退，不冒充完整 SQLite 结果。
+- Orb 的 `swift_runtime` 与 `svm_translator_linux` GCC 构建通过，`main_case.cpp.o` 定向编译通过。完整
+  `swift_test` 链接前被既有 `direct_link_production_test.cpp:1320` designated-initializer 顺序错误阻断，
+  本阶段不宣称 Orb 测试可执行文件门禁通过。
+
+CoreMark 20k 在 12 秒硬上限内未完成后立即终止，没有延长或改跑压力测试。用于同二进制归因的临时
+开关已删除；最终树没有新增 env、日志、probe、临时路径、硬编码 guest PC 或兼容兜底。
+
 ### 16.44 EqualEach 精确 clobber 与专用 return ABI
 
 提交 `a2aec22` 将 native `0x1a EqualEach` helper 的长度计算收敛到与 EqualAny 相同的
