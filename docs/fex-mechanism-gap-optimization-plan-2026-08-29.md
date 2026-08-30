@@ -1445,3 +1445,34 @@ ARM64 native `0x1a` helper 的真实 FPR clobber 是 `q2-q7`，generic `0x02` he
 本阶段没有运行长基准或压力测试，也没有保留 probe、日志、env 开关、硬编码 guest PC、临时源码
 路径或兼容兜底。第 9 节已知 SSE4.2 vector helper 的 caller-save 大头至此闭合；后续字符串工作只保留
 循环 fallthrough、共享调用控制流和热冷分支布局，不再用扩大 clobber 集掩盖 live-through 边界。
+
+### 16.40 SSE4.2 packed result 的直接 publication
+
+提交 `18aceb8` 将 index/flags 从 packed helper 结果的普通长 SSA 链收敛为同一指令事务。flags
+publication 现在紧随 packed result，随后 index 以 `BitExtract(16,8)` 产生已经完整零扩展的值；因此
+架构上的 ECX 写可等价发布为完整 RCX 写，现有 fixed-home coalescer 能直接生成到 x23。ARM64
+`BitExtract` emitter 同时消费 spilled fixed publication 计划，`SetHostGPR` 不再重新 load/move。
+
+spill definition transfer 增加 `Sse42Str` producer 和 `PublishSse42StrFlags` consumer，使 packed value
+在 helper 返回后可由同一个 reload-region owner 同时服务 flags 与 index，不必先写 canonical spill
+slot。publication 前后没有 memory、helper 或 external observer，fault 仍只可能发生在更早的 memory
+operand load，未改变 x86 指令的可观察提交点。
+
+短门禁结果：
+
+- helper-effects、SSE4.2 scratch、Rosetta/SDM 差分和 spill 分组分别通过 25、512、16,255 和
+  23,094 条断言；spill 分组共 15 个 case，新增用例验证 spilled `BitExtract` 直接发布到 fixed home。
+- SQLite `main/size1` 保持 2,114 roots、100% root/top-30 覆盖和零增长，
+  `333,865 -> 333,692`（`-173`，`-0.051817%`），16 个 root 缩小；去除 timing 后 stdout 逐行一致。
+  `__strcmp_sse42@0x505120` 从 `328 -> 318`，EqualAny 主组从 `203 -> 192`。
+- smallpt `4 8 6` 保持 275 roots、`46,258` 条 host 指令和 canonical PPM，严格零变化。
+- 两组反向短配对分别为 `4.154s/4.219s` 与 `3.698s/3.713s`，只证明没有方向一致的明显回退，
+  不声明动态性能收益。
+
+同时复核并删除了两个不合格原型：只约束普通 FPR interval 跨 helper 避开 `q0-q7` 时，完整 SQLite
+只减少 2 条，真实热点的保存对象不属于该可迁移集合；把 `ZeroExtend32To64` 全局纳入提前 fixed-home
+publication 虽使前 295 个公共 root 减少 319 条，但 guest 在第 301 个 root 前退出，不能把字符串链的
+零扩展证明外推到通用 W/X publication。
+
+本阶段没有运行长基准或压力测试，也没有保留临时 planner probe、日志、env 开关、硬编码 guest PC、
+临时源码路径或兼容兜底。剩余字符串大头已经从 packed result 搬运收窄为真实 helper frame 与循环控制流。
