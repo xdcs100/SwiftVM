@@ -1262,3 +1262,29 @@ spill 的 biased 路径保持一次普通地址计算，identity 路径继续使
 
 本阶段没有增加 env 开关、日志、probe、临时路径或旧机制兜底，只运行了 8 秒上限的 static-only
 短跑；实际 SQLite/smallpt capture 分别约 4.1 秒和 0.6 秒。
+
+### 16.33 紧邻 spilled producer 直接发布
+
+提交 `5ca4239` 把剩余的 `producer -> spill store -> reload -> SetHostGPR move` 收敛为一个分配后
+publication transaction。新 planner 只接受 U32/U64 `LoadImm`、`LoadMemory`、`Add`、`Sub` 和
+`And`：producer 必须确实落入 `RegAlloc::MEM`，只有一个紧邻的零偏移 `SetHostGPR` use，不产生
+pseudo flags，目标必须是启用的 pinned GPR，且不能与 dead/coalesced write 或已有 pinned value plan
+重叠。producer emitter 直接选择目标 fixed home，publication 本身不再发码。
+
+`LoadMemory` 也使用同一事务，但不把 publication 移到访存之前：ARM64 faulting load 只有成功完成才
+提交目标寄存器，因此同步 data abort 仍保留旧 fixed-home 值，fault snapshot 可以恢复 fault 前 guest
+状态。纯 ALU/常量 producer 与 publication 之间没有其他 IR，提前一个 IR id 写入不会跨越 observer。
+
+短门禁结果：
+
+- Debug 的全部 pinned 分组通过 35 个 case / 131 条断言；紧邻常量、faulting load 和 ALU producer
+  均由强制 `RegAlloc::MEM` 的定向形态覆盖。相关 publication/fault 分组通过 5 个 case / 22 条断言。
+- Release SQLite 保持 2,114 roots，`346,127 -> 343,547`（`-2,580`，`-0.745%`），对应 860 个
+  transaction。8 秒 Debug 公共集的 753 个 root 中有 47 个缩小、零增长，所有变化严格为三条指令的
+  整数倍。
+- Release smallpt 保持 275 roots，`47,992 -> 47,650`（`-342`，`-0.713%`），对应 114 个
+  transaction；PPM SHA-256 保持
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`。
+
+本阶段没有新增 env 开关、日志、probe、运行时兜底或长期基准；SQLite/smallpt Release static-only
+capture 分别约 4.3 秒和 0.5 秒。
