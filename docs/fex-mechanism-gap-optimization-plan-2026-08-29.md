@@ -2055,3 +2055,32 @@ mnemonic 保持不变。
 Debug spill wildcard 通过 23 个 case / 23,152 条断言；Orb GCC 13.2 完成 `swift_test`、
 `svm_translator_linux` 构建并通过相同 low32 组。没有运行完整测试集、正式长基准或压力测试；临时日志、
 census、A/B 二进制和目录均已删除，最终树没有新增 env 开关、probe、硬编码 guest PC 或兼容兜底。
+
+### 16.59 multi-consumer pinned W view 的回退裁定
+
+第 16.58 节后重新统计 U32 `GetHostGPR`，SQLite、smallpt、CoreMark 分别仍有 921、151、182 条
+`ubfx xN, xM, #0, #32`。SQLite 动态 census 的 924 个事件全部来自零偏移 U32 host read，其中
+x22/x29/x21/x23/x20 分别占 508/119/100/99/98 个；431 个结果只有一个 use，其余主要是 2 至 3 个
+use。该残差不是 guest GPR 没有驻留：源值已经位于 pinned X home，但 U32 read 只表示 W view，不是
+物理 W write，不能据此宣称 X 高 32 位已清零。
+
+三个原型均已删除：
+
+- live-interval 收集阶段直接把 U32 read 固定到 pinned home，SQLite `252,544 -> 251,394`
+  （`-1,150`），但改变了后续分配，SQLite/smallpt/CoreMark 分别出现 5/2/4 个增长 root；atomic 和
+  low32 bridge 的寄存器身份也随之变化，不符合零增长门禁。
+- 分配后重映射保留了 baseline 的其他物理寄存器选择，但无 consumer 合同时会让只保证 W-form 的值被
+  X-form consumer 读取，SQLite 和 CoreMark 在启动 root 后以无效指针退出。补齐 block-local、无同 home
+  写穿越和 instruction-aware consumer 合同后，三语料恢复正确。
+- 最终收敛原型只接受 U32 scalar ALU、低位 extract/sign-extend、select 和窄 store consumer，并排除
+  carry-chain consumer。SQLite 保持 2,079 roots，`252,544 -> 251,970`（`-574`），359 个 root
+  缩小、零增长；smallpt `36,749 -> 36,709`（`-40`），CoreMark `36,574 -> 36,507`
+  （`-67`），两者同样零增长。三者的 zero32 `UBFX` 分别减少 316/32/52 条；SQLite timing 归一化
+  stdout 一致，smallpt PPM 保持 canonical SHA-256，CoreMark 两侧 `crcfinal=0x4983`。
+
+静态门禁通过后，SQLite 三对交错短跑的 wall-time 中位数为 `2.658s -> 2.706s`（`+1.802%`），guest
+TOTAL 中位数为 `2.374s -> 2.433s`（`+2.485%`）。该机制只省一次 snapshot，却让多个后续 consumer
+持续依赖同一 architectural home；在当前调度和 publication 结构下，静态收益没有转化为执行收益。
+因此实现、测试、共享 consumer 表和所有 census/捕获均已删除，不保留默认关闭分支或局部 fallback。
+剩余 zero32 read 不能再解释为“GPR 未 pin”；下一次只有跨 CFG 宽度事实能证明同版本 X 高位已清零，
+或新的 consumer 能在不延长 architectural-home 依赖链的情况下接管 W view 时才重开。
