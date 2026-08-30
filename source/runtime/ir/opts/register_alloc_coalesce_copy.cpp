@@ -63,7 +63,7 @@ bool CanCoalesceLiveLow32View(
     return has_consumer;
 }
 
-bool TransferLow32ViewTail(
+bool TransferFinalLow32View(
         Block* block,
         backend::RegAlloc* reg_alloc,
         Inst& bridge,
@@ -72,8 +72,7 @@ bool TransferLow32ViewTail(
         const RegisterAllocFamilyCallbacks& callbacks) {
     if (!source.Defined() || bridge.GetUses() == 0 ||
         source.Id() >= use_end.size() || bridge.Id() >= use_end.size() ||
-        use_end[source.Id()] < bridge.Id() ||
-        use_end[source.Id()] >= use_end[bridge.Id()] ||
+        use_end[source.Id()] != bridge.Id() ||
         use_end[bridge.Id()] <= bridge.Id() ||
         reg_alloc->IsFixedGPR(source.Id()) || reg_alloc->IsFixedGPR(bridge.Id()) ||
         reg_alloc->ValueType(source) != backend::RegAlloc::GPR ||
@@ -180,8 +179,8 @@ void CoalesceLow32CopyChains(
             reg_alloc->MarkLow32CopyCoalesced(bridge.Id(), source.Id());
             continue;
         }
-        if (TransferLow32ViewTail(lir_block, reg_alloc, bridge, source,
-                                  use_end, callbacks)) {
+        if (TransferFinalLow32View(lir_block, reg_alloc, bridge, source,
+                                   use_end, callbacks)) {
             continue;
         }
         if (bridge.GetUses() != 1 || bridge.Id() >= use_end.size()) {
