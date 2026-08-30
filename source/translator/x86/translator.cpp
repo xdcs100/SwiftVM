@@ -460,12 +460,9 @@ static void PinUnusedCallLambdas(ir::Block* block) {
 // Why a *region* rather than a whole function: measured on func_tests /
 // real_busy (static glibc), 56% of the blocks inside eagerly compiled function
 // units are never executed, and a short-lived guest spends ~60% of its wall
-// clock translating.  Why this is safe at any budget: no IR value crosses a
-// block boundary in function mode -- uniform and flag elimination are
-// block-local and FlushFlags runs at every block end (measured: 0 cross-block
-// operands over 17431 operands / 822 blocks on func_tests) -- so every decoded
-// block already is a self-contained entry point.  TranslateIR has always
-// relied on that, publishing every decoded block into the L2 dispatch table.
+// clock translating. Function regions can carry SSA values across blocks;
+// allocator ownership checks keep block-local coalescing from remapping those
+// values, while external roots retain canonical entry contracts.
 static size_t LazyFuncBudget() {
     return static_cast<size_t>(runtime::GetSvmConfig().func_lazy);
 }

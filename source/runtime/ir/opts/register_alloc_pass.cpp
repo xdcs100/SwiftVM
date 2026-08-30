@@ -983,7 +983,11 @@ private:
                     return static_cast<LinearScanAllocator*>(context)->CheckInstr(
                             inst, extra_gpr, extra_fpr);
                 },
-                nullptr};
+                nullptr,
+                [](void* context, Block* lir_block, Value value) {
+                    return static_cast<LinearScanAllocator*>(context)
+                            ->ValueUsesStayInBlock(lir_block, value);
+                }};
         auto coalesce_block = [&](Block* lir_block) {
             auto use_end = CollectWidthChainUseEnds(lir_block, InstrCount());
             auto long_bridge = CollectLongWidthChainBridges(

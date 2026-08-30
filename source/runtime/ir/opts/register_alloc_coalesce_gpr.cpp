@@ -431,6 +431,11 @@ void CoalesceWidthChainBridges(
     auto CheckInstr = [&](Inst* inst, u32 extra_gpr, u32 extra_fpr) {
         return callbacks.check_instr(callbacks.context, inst, extra_gpr, extra_fpr);
     };
+    auto uses_stay_in_block = [&](Value value) {
+        return !callbacks.value_uses_stay_in_block ||
+               callbacks.value_uses_stay_in_block(
+                       callbacks.context, lir_block, value);
+    };
     auto component_anchor = [&](Value value) {
         value = ResolveBitCastSource(value);
         if (!value.Defined()) {
@@ -477,7 +482,9 @@ void CoalesceWidthChainBridges(
              !long_u32_snapshot) ||
             reg_alloc->ValueType(source) != backend::RegAlloc::GPR ||
             reg_alloc->ValueType(Value{&bridge}) != backend::RegAlloc::GPR ||
-            bridge.Id() >= use_end.size() || bridge.GetUses() == 0) {
+            bridge.Id() >= use_end.size() || bridge.GetUses() == 0 ||
+            !uses_stay_in_block(source) ||
+            !uses_stay_in_block(Value{&bridge})) {
             continue;
         }
         const u16 target = reg_alloc->ValueGPR(source).id;

@@ -221,6 +221,7 @@ std::vector<std::string> EmitCrossBlockWidth(bool external_entry) {
 struct CrossBlockCoalesceState {
     bool write_coalesced{};
     bool read_coalesced{};
+    bool width_coalesced{};
     swift::u16 write_home{};
     swift::u16 read_home{};
 };
@@ -250,6 +251,29 @@ CrossBlockCoalesceState AllocateCrossBlockPublication() {
             OpCode::SetHostGPR, published, HostRegIndex(23), Imm{0u});
     auto read = function->GetHostGPR(HostRegIndex(23), Imm{0u})
                         .SetType(ValueType::U32);
+    auto invariant = function->GetHostGPR(HostRegIndex(29), Imm{0u})
+                             .SetType(ValueType::U32);
+    Value current = function->GetHostGPR(HostRegIndex(22), Imm{0u})
+                            .SetType(ValueType::U32);
+    Value cross_block_bridge{};
+    for (swift::u32 index = 0; index < 32; ++index) {
+        Value left = current;
+        Value right = invariant;
+        if (index != 0) {
+            left = function->BitExtract(current, Imm{0u}, Imm{32u})
+                           .SetType(ValueType::U32);
+            right = function->BitExtract(invariant, Imm{0u}, Imm{32u})
+                            .SetType(ValueType::U32);
+            if (!cross_block_bridge.Defined()) {
+                cross_block_bridge = left;
+            }
+        }
+        auto producer = (index & 1u)
+                ? function->Xor(left, Operand{right}).SetType(ValueType::U32)
+                : function->Add(left, Operand{right}).SetType(ValueType::U32);
+        current = function->ZeroExtend32To64(producer).SetType(ValueType::U64);
+        function->SetHostGPR(current, HostRegIndex(22), Imm{0u});
+    }
     auto* next = builder.LinkBlock(terminal::LinkBlock{successor});
     builder.SetCurBlock(next);
     auto replacement = function->LoadImm(Imm{swift::u32{9}})
@@ -259,8 +283,12 @@ CrossBlockCoalesceState AllocateCrossBlockPublication() {
                          .SetType(ValueType::U32);
     auto second = function->Add(read, Operand{Imm{swift::u32{1}}})
                           .SetType(ValueType::U32);
+    auto third = function->Add(cross_block_bridge,
+                               Operand{Imm{swift::u32{1}}})
+                         .SetType(ValueType::U32);
     function->StoreUniform(Uniform{64, ValueType::U32}, first);
     function->StoreUniform(Uniform{68, ValueType::U32}, second);
+    function->StoreUniform(Uniform{72, ValueType::U32}, third);
     function->EndBlock(terminal::ReturnToHost{});
     function->EndFunction();
     function->ComputeRPO();
@@ -274,6 +302,7 @@ CrossBlockCoalesceState AllocateCrossBlockPublication() {
     return {
             alloc.IsHostWriteCoalesced(publication->Id()),
             alloc.IsHostReadCoalesced(read.Id()),
+            alloc.IsWidthChainCoalesced(cross_block_bridge.Id()),
             alloc.ValueGPR(published).id,
             alloc.ValueGPR(read).id,
     };
@@ -407,6 +436,7 @@ TEST_CASE("fixed-home coalescing stops at cross-block value ownership") {
     const auto state = AllocateCrossBlockPublication();
     REQUIRE_FALSE(state.write_coalesced);
     REQUIRE_FALSE(state.read_coalesced);
+    REQUIRE_FALSE(state.width_coalesced);
     REQUIRE(state.write_home != 23);
     REQUIRE(state.read_home != 23);
 }
