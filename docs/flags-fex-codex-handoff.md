@@ -3656,6 +3656,14 @@ peepholes.
   log, temporary path or fallback remains. Do not fake a nonzero `packed_flags_version`; remove that
   unused speculative ABI next, then re-rank string/complex-EA roots.
 
+- `d7076b7` removes the unused `packed_flags_version` state and target-contract field instead of
+  manufacturing a nonzero layout. Link-site/target records shrink `80/96 -> 72/88` bytes; disk-cache
+  block and edge records drop both serialized u64 slots and the format advances `v19 -> v20`, with
+  no legacy reader. Direct-link flags, serializer, full JIT-cache, region-flags production and
+  trampoline groups pass. Release shape stays smallpt `275 / 49,055` and SQLite
+  `2,114 / 354,491`. EdgeFlags now has no unimplemented state dimension; next work should be chosen
+  from measured string/complex-EA residuals rather than another flags representation layer.
+
 ## Orb loop
 
 ```

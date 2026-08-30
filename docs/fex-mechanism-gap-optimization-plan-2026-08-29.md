@@ -1168,3 +1168,17 @@ SQLite 保持 2,114 roots 和 100% 覆盖，`354,519 -> 354,491`（`-28`，`-0.0
 必须先证明更广的 producer/consumer lineage 命中真实热点，不再重试该同值自发布形态。本阶段没有
 保留 env 开关、probe、日志、临时路径或兼容兜底，也没有运行长基准或压力测试。EdgeFlags 剩余的
 `packed_flags_version` 目前没有非零生产者，下一步应删除这项推测性 ABI，而不是伪造第二种 layout。
+
+### 16.29 删除未使用的 packed-flags version ABI
+
+提交 `d7076b7` 删除 `EdgeFlagsState` 与 `EdgeFlagsTargetContract` 中从未有生产非零值的
+`packed_flags_version`。pending state、target acceptance 和 canonical-stub key 不再携带恒为 0 的
+version；`LinkSiteRecord` 与 `LinkTargetRecord` 分别从 80/96 字节缩小到 72/88 字节。磁盘 JIT cache
+同时删除 block target contract 和 link-site edge state 中的两个 64 位序列化槽，格式版本从 19 升为
+20，旧 cache 由现有 validity key 直接拒绝，不保留双格式读取兜底。
+
+Mac Debug 的 direct-link flags、serializer、完整 JIT-cache、region-flags production 和全部
+direct-link trampoline 分组通过；serializer v20 定向分组通过 63 条断言。Release static-only 保持
+smallpt `275 / 49,055` 与 SQLite `2,114 / 354,491`，说明该阶段只收缩状态/缓存 ABI，不改变发码。
+源码与测试中已不存在 `packed_flags_version` 或测试专用 nonzero producer，也没有新增日志、env 开关、
+probe、临时路径或兼容读取机制。第 6 节 EdgeFlags ABI 至此没有未实现的状态维度。
