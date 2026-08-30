@@ -435,7 +435,8 @@ RegionBranchRun RunRegionBranchFunction(bool enabled,
                                         bool helper_after_producer = false,
                                         u8 initial_selector = 1,
                                         bool compatible_fallthrough = false,
-                                        Flags source_flags = Flags::All) {
+                                        Flags source_flags = Flags::All,
+                                        bool sse42_target = false) {
     constexpr VAddr source_guest = 0x2100;
     constexpr VAddr hot_guest = 0x2180;
     constexpr VAddr cold_guest = 0x2200;
@@ -505,24 +506,44 @@ RegionBranchRun RunRegionBranchFunction(bool enabled,
     REQUIRE(cold != nullptr);
 
     builder.SetCurBlock(hot);
-    if (observe_before_overwrite) {
+    auto observe_target_flags = [&] {
         const auto hot_token = function->LoadImm(Imm{u64{0}}).SetType(ValueType::U64);
         const auto incoming = function->GetFlags(hot_token, Flags::All)
                                       .SetType(ValueType::U64);
         function->StoreUniform(Uniform{result_offset, ValueType::U64}, incoming);
         function->AdvancePC(Imm{u64{1}});
+    };
+    if (sse42_target) {
+        const auto left = function->LoadUniform(Uniform{16, ValueType::V128});
+        const auto right = function->LoadUniform(Uniform{32, ValueType::V128});
+        const auto packed = function->Sse42Str(left, right, Imm{u64{0x02}})
+                                    .SetType(ValueType::U64);
+        if (observe_before_overwrite) {
+            observe_target_flags();
+        }
+        function->PublishSse42StrFlags(packed, Flags::All);
+    } else {
+        if (observe_before_overwrite) {
+            observe_target_flags();
+        }
+        const auto hot_left = function->LoadImm(Imm{u8{7}}).SetType(ValueType::U8);
+        const auto hot_right = function->LoadImm(Imm{u8{3}}).SetType(ValueType::U8);
+        const auto hot_result = function->Sub(hot_left, Operand{hot_right})
+                                        .SetType(ValueType::U8);
+        function->SaveFlags(hot_result, Flags::All);
     }
-    const auto hot_left = function->LoadImm(Imm{u8{7}}).SetType(ValueType::U8);
-    const auto hot_right = function->LoadImm(Imm{u8{3}}).SetType(ValueType::U8);
-    const auto hot_result = function->Sub(hot_left, Operand{hot_right})
-                                    .SetType(ValueType::U8);
-    function->SaveFlags(hot_result, Flags::All);
     const auto hot_polarity = function->LoadImm(Imm{u8{1}}).SetType(ValueType::U8);
     function->StoreUniform(
             Uniform{offsetof(swift::x86::ThreadContext64, carry_inverted),
                     ValueType::U8},
             hot_polarity);
     function->AdvancePC(Imm{u64{1}});
+    if (sse42_target && !observe_before_overwrite) {
+        const auto token = function->LoadImm(Imm{u64{0}}).SetType(ValueType::U64);
+        const auto final_flags = function->GetFlags(token, Flags::All)
+                                         .SetType(ValueType::U64);
+        function->StoreUniform(Uniform{result_offset, ValueType::U64}, final_flags);
+    }
     function->EndBlock(terminal::ReturnToHost{});
 
     builder.SetCurBlock(cold);
@@ -2370,6 +2391,27 @@ TEST_CASE("region branch flags materialize only on the observing exit",
     REQUIRE(helper_on.observed_flags == helper_off.observed_flags);
     REQUIRE(helper_on.code_size == helper_off.code_size);
     REQUIRE(helper_on.code_hash == helper_off.code_hash);
+
+    const auto sse42_off = RunRegionBranchFunction(
+            false, false, false, 2, true, Flags::All, true);
+    const auto sse42_on = RunRegionBranchFunction(
+            true, false, false, 2, true, Flags::All, true);
+    REQUIRE(sse42_off.halt == HaltReason::CallHost);
+    REQUIRE(sse42_on.halt == HaltReason::CallHost);
+    REQUIRE(sse42_on.selector == sse42_off.selector);
+    REQUIRE(sse42_on.observed_flags == sse42_off.observed_flags);
+    REQUIRE(sse42_on.branch_precedes_merge);
+
+    const auto sse42_observed_off = RunRegionBranchFunction(
+            false, true, false, 2, true, Flags::All, true);
+    const auto sse42_observed_on = RunRegionBranchFunction(
+            true, true, false, 2, true, Flags::All, true);
+    REQUIRE(sse42_observed_off.halt == HaltReason::CallHost);
+    REQUIRE(sse42_observed_on.halt == HaltReason::CallHost);
+    REQUIRE(sse42_observed_on.selector == sse42_observed_off.selector);
+    REQUIRE(sse42_observed_on.observed_flags == sse42_observed_off.observed_flags);
+    REQUIRE(sse42_observed_on.code_size == sse42_observed_off.code_size);
+    REQUIRE(sse42_observed_on.code_hash == sse42_observed_off.code_hash);
 #else
     SUCCEED("region branch-flags execution probe requires an AArch64 host");
 #endif

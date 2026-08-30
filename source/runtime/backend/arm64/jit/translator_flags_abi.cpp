@@ -1,7 +1,5 @@
 #include "translator.h"
 
-#include "runtime/backend/arm64/helper_call_contract.h"
-
 #include "runtime/backend/arm64/defines.h"
 #include "runtime/backend/context.h"
 #include "runtime/common/svm_config.h"
@@ -83,8 +81,7 @@ EdgeFlagsTargetContract JitTranslator::AnalyzeEdgeFlagsTarget(
 
     for (const auto& inst : found->second->GetInstList()) {
         const auto op = inst.GetOp();
-        const auto helper = HelperCallContract::Resolve(inst, context.GetFeatures());
-        if (MayFaultOrObserve(inst) || (helper && !helper->RetainsPendingNZCV())) {
+        if (MayFaultOrObserve(inst)) {
             contract.barrier_before_commit = true;
             return contract;
         }
