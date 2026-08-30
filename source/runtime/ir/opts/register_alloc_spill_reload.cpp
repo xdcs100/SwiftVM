@@ -39,6 +39,7 @@ bool SupportsDefinitionTransfer(OpCode op) {
         case O::LsrValue:
         case O::AsrValue:
         case O::BitExtract:
+        case O::Sse42Str:
             return true;
         default:
             return false;
@@ -71,6 +72,7 @@ bool SupportsDefinitionConsumer(OpCode op) {
         case O::LsrValue:
         case O::AsrValue:
         case O::BitExtract:
+        case O::PublishSse42StrFlags:
             return true;
         default:
             return false;

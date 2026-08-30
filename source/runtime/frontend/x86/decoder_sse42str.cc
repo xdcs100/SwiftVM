@@ -1208,6 +1208,8 @@ void X64Decoder::DecodeSse42StrBody(_RegisterType reg1,
                          .SetType(kU64);
     }
 
+    Sse42StrFlags(packed);
+
     if (mask_form) {
         // The destination is the IMPLICIT XMM0.  distorm reports no operand for
         // it (ops[2] is the immediate), unlike the BLENDV family where it does,
@@ -1240,15 +1242,13 @@ void X64Decoder::DecodeSse42StrBody(_RegisterType reg1,
             ZeroYmmHigh(0);
         }
     } else {
-        // ECX, so bits 63:32 of RCX are zeroed -- including under REX.W, where
-        // only the LENGTHS are 64-bit.  The index forms write no vector
-        // register, so nothing is zeroed even in the VEX encoding.
-        R(R_ECX, __ And(__ LsrImm(packed, ir::Imm(kResIndexShift)),
-                        ir::Operand{ir::Imm(u64(0xFF))})
+        // The architectural ECX write zeroes RCX[63:32]. BitExtract already
+        // produces the same full-width zero-extended value, so publish it as RCX.
+        R(R_RCX, __ BitExtract(packed, ir::Imm(kResIndexShift),
+                               ir::Imm(8u))
                          .SetType(kU64));
     }
 
-    Sse42StrFlags(packed);
 }
 
 // ---------------------------------------------------------------------------

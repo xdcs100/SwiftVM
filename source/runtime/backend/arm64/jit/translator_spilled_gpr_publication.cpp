@@ -12,7 +12,7 @@ bool SupportsDirectPublication(ir::OpCode op) {
     using O = ir::OpCode;
     return op == O::LoadImm || op == O::LoadMemory || op == O::Add ||
            op == O::Sub || op == O::And || op == O::GetOperand ||
-           op == O::SignExtend;
+           op == O::SignExtend || op == O::BitExtract;
 }
 
 }  // namespace

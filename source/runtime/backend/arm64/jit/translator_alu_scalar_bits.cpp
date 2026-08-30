@@ -497,7 +497,13 @@ void JitTranslator::EmitBitExtract(ir::Inst* inst) {
     auto value = inst->GetArg<ir::Value>(0);
     auto left = inst->GetArg<ir::Imm>(1).Get();
     auto bits = inst->GetArg<ir::Imm>(2).Get();
-    auto result = context.R(ir::Value{inst});
+    auto result = [&]() -> Register {
+        if (auto pinned = pinned_gpr_values.find(inst);
+            pinned != pinned_gpr_values.end()) {
+            return XRegister(pinned->second);
+        }
+        return context.R(ir::Value{inst});
+    }();
     if (context.IsWidthChainCoalesced(inst->Id())) {
         ASSERT_MSG(ReproveWidthChainBridge(inst),
                    "width-chain BitExtract proof drifted before emission at IR {}",

@@ -94,6 +94,23 @@ SpillForwardingBlock MakeSpilledPublicationWindowBlock(bool faulting = false) {
     return {std::move(block), published};
 }
 
+SpillForwardingBlock MakeSpilledBitExtractPublicationBlock() {
+    IntrusivePtr<Block> block{new Block(0, Location{0x24a0})};
+    const auto longest = block->LoadImm(Imm{swift::u64{1}});
+    const auto middle = block->LoadImm(Imm{swift::u64{2}});
+    const auto shortest = block->LoadImm(Imm{swift::u64{3}});
+    const auto source = block->LoadImm(Imm{swift::u64{0x123400}});
+    const auto published = block->BitExtract(source, Imm{16u}, Imm{8u})
+                                   .SetType(ValueType::U64);
+    block->AppendInst(OpCode::SetHostGPR, published, HostRegIndex(29), Imm{0u});
+    const auto first = block->Add(longest, Operand{middle});
+    const auto total = block->Add(first, Operand{shortest});
+    block->StoreUniform(Uniform{0, ValueType::U64}, total);
+    block->SetTerminal(terminal::ReturnToDispatch{});
+    block->ReIdInstr();
+    return {std::move(block), published};
+}
+
 std::vector<std::string> Emit(SpillForwardingBlock input, GPRSMask gprs) {
     FPRSMask fprs{~((1u << 8) - 1u)};
     RegAlloc alloc{input.block->MaxInstrId(), gprs, fprs, FeatureSet{}};
@@ -237,6 +254,18 @@ TEST_CASE("spilled fixed publications retain canonical state across an untracked
                               GPRSMask{~((1u << 5) - 1u) & ~(1u << 18)});
     REQUIRE(std::ranges::none_of(emitted, [](const auto& line) {
         return line.find("mov x29, #0x1234") != std::string::npos;
+    }));
+}
+
+TEST_CASE("spilled bit extracts publish directly to a fixed home") {
+    const auto emitted = Emit(MakeSpilledBitExtractPublicationBlock(),
+                              GPRSMask{~((1u << 5) - 1u) & ~(1u << 18)});
+    REQUIRE(std::ranges::any_of(emitted, [](const auto& line) {
+        return line.find("ubfx x29") != std::string::npos;
+    }));
+    REQUIRE(std::ranges::none_of(emitted, [](const auto& line) {
+        return line.find("str x29, [x28") != std::string::npos ||
+               line.find("ldr x29, [x28") != std::string::npos;
     }));
 }
 
