@@ -243,7 +243,7 @@ TEST_CASE("SSE4.2 helper preserves only live-through vector values",
         REQUIRE(Count(dead_arguments.instructions, "str w16, [sp") == 0);
         REQUIRE(Count(dead_arguments.instructions, "sub sp, sp") == 0);
         REQUIRE(Count(dead_arguments.instructions, "add sp, sp") == 0);
-        const size_t link_saves = imm == 0x02 ? 0 : 1;
+        const size_t link_saves = 0;
         REQUIRE(CountStackRegister(
                         dead_arguments.instructions, true, "x30") ==
                 link_saves);

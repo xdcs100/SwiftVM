@@ -50,7 +50,7 @@ void JitTranslator::EmitSse42StrVectorCall(ir::Inst* inst,
     std::array<int, 8> fpr_slots{};
     gpr_slots.fill(-1);
     fpr_slots.fill(-1);
-    const bool preserve_host_link = imm != 0x02;
+    const bool preserve_host_link = imm != 0x02 && imm != 0x1a;
     u32 cursor{};
     for (u32 code : save_gprs) {
         gpr_slots[code] = int(cursor);

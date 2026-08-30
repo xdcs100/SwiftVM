@@ -83,19 +83,14 @@
     cmeq v3.16b, v1.16b, #0
     shrn v2.8b, v2.8h, #4
     shrn v3.8b, v3.8h, #4
-    fmov x10, d2
-    fmov x11, d3
-    rbit x13, x10
-    rbit x14, x11
+    fmov x13, d2
+    fmov x14, d3
+    rbit x13, x13
+    rbit x14, x14
     clz x13, x13
     clz x14, x14
     lsr w13, w13, #2
     lsr w14, w14, #2
-    mov w15, #16
-    cmp x10, #0
-    csel w13, w15, w13, eq
-    cmp x11, #0
-    csel w14, w15, w14, eq
 
     ldr q4, 1f
     dup v2.16b, w13
@@ -117,24 +112,24 @@
     xtn v7.8b, v6.8h
     umov w15, v7.h[0]
 
-    rbit w17, w15
-    clz w17, w17
-    mov w10, #16
+    rbit w11, w15
+    clz w11, w11
+    mov w16, #16
     cmp w15, #0
-    csel w17, w10, w17, eq
+    csel w11, w16, w11, eq
     mov w16, w15
-    bfi x16, x17, #16, #8
+    bfi x16, x11, #16, #8
     cmp w13, #16
-    cset w17, ne
-    bfi x16, x17, #24, #1
+    cset w11, ne
+    bfi x16, x11, #24, #1
     cmp w14, #16
-    cset w17, ne
-    bfi x16, x17, #25, #1
+    cset w11, ne
+    bfi x16, x11, #25, #1
     cmp w15, #0
-    cset w17, ne
-    bfi x16, x17, #26, #1
+    cset w11, ne
+    bfi x16, x11, #26, #1
     bfi x16, x15, #27, #1
-    ret
+    br x17
 
     .align 4
 1:
