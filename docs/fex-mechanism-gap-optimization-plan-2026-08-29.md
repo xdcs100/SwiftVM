@@ -1913,3 +1913,14 @@ SHA-256 `3ab8e757a485190b72d8d9f5a1a53b84faa5414a087f3fdfcace1333cede7902` 和�
 本阶段没有保留 census、日志、env 开关、临时路径、硬编码 guest PC 或兼容 fallback，也没有运行长
 基准或压力测试。第 16.52 节量化到的 region-owned faulting load round trip 至此闭合；其他需要跨 fault
 继续存活的地址仍保留 backing，不把这项合同扩展成无观察点证明的通用 definition transfer。
+
+### 16.54 non-canonical terminal entry 的当前权重复核
+
+第 16.53 节完成后，用最终删除的只读 census 复核了唯一 owner、非空 call-return terminal block。
+smallpt 出现 68 个唯一结构候选、合计 727 条 IR；SQLite `--help` 出现 65 个、合计 653 条 IR。两个
+短语料中都没有候选 block start 同时作为独立代码 root 编译，因此当前账上不存在可由 external veneer
+消除的重复代码对象成本。重复事件来自同一函数的不同编译版本，不计为新的候选。
+
+该 census、日志和捕获已删除，没有保留代码或开关。含 SSA/PSTATE live-in 的 terminal entry 继续
+fail-closed 并独立 canonical re-decode；只有新的 branch-heavy/FEX join 证明这些地址实际形成重复热 root
+后，才值得引入 live-in serialization/veneer。不能为了补齐抽象状态格而发布当前内部 block。
