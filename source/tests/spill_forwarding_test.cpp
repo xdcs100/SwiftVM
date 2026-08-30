@@ -38,6 +38,24 @@ SpillForwardingBlock MakeSpillForwardingBlock() {
     return {std::move(block), arriving};
 }
 
+SpillForwardingBlock MakeSpillWidthTransferBlock() {
+    IntrusivePtr<Block> block{new Block(0, Location{0x2420})};
+    const auto longest = block->LoadImm(Imm{swift::u64{1}});
+    const auto middle = block->LoadImm(Imm{swift::u64{2}});
+    const auto shortest = block->LoadImm(Imm{swift::u64{3}});
+    const auto arriving = block->LoadImm(Imm{swift::u64{4}})
+                                  .SetType(ValueType::U32);
+    const auto extended = block->ZeroExtend32To64(arriving)
+                                  .SetType(ValueType::U64);
+    const auto first = block->Add(extended, Operand{shortest});
+    const auto second = block->Add(first, Operand{middle});
+    const auto total = block->Add(second, Operand{longest});
+    block->StoreUniform(Uniform{0, ValueType::U64}, total);
+    block->SetTerminal(terminal::ReturnToDispatch{});
+    block->ReIdInstr();
+    return {std::move(block), arriving};
+}
+
 std::vector<std::string> Emit(SpillForwardingBlock input, GPRSMask gprs) {
     FPRSMask fprs{~((1u << 8) - 1u)};
     RegAlloc alloc{input.block->MaxInstrId(), gprs, fprs, FeatureSet{}};
@@ -76,29 +94,29 @@ std::vector<std::string> Emit(SpillForwardingBlock input, GPRSMask gprs) {
 
 }  // namespace
 
-TEST_CASE("adjacent spilled scalar def-use stays in a free x18 scratch") {
-#if defined(__linux__) && !defined(__ANDROID__)
+TEST_CASE("adjacent spilled scalar def-use retains its free scratch") {
     const auto emitted = Emit(MakeSpillForwardingBlock(),
                               GPRSMask{~((1u << 5) - 1u) & ~(1u << 18)});
     const auto definition = std::ranges::find_if(emitted, [](const auto& line) {
-        return line.find("mov x18, #0x4") != std::string::npos;
+        return line.find("mov x") != std::string::npos &&
+               line.find("#0x4") != std::string::npos;
     });
     REQUIRE(definition != emitted.end());
-    const auto consumer = std::find_if(std::next(definition), emitted.end(), [](const auto& line) {
+    const auto delimiter = definition->find(',');
+    REQUIRE(delimiter != std::string::npos);
+    const auto scratch = definition->substr(4, delimiter - 4);
+    const auto consumer = std::find_if(std::next(definition), emitted.end(), [&](const auto& line) {
         return line.find("add ") != std::string::npos &&
-               line.find("x18") != std::string::npos;
+               line.find(scratch) != std::string::npos;
     });
     REQUIRE(consumer != emitted.end());
-    REQUIRE(std::none_of(std::next(definition), consumer, [](const auto& line) {
-        return (line.find("str x18, [x28") != std::string::npos) ||
-               (line.find("ldr x18, [x28") != std::string::npos);
+    REQUIRE(std::none_of(std::next(definition), consumer, [&](const auto& line) {
+        return (line.find("str " + scratch + ", [x28") != std::string::npos) ||
+               (line.find("ldr " + scratch + ", [x28") != std::string::npos);
     }));
     const auto after_consumer = std::next(consumer);
     REQUIRE(after_consumer != emitted.end());
-    REQUIRE(after_consumer->find("str x18, [x28") == std::string::npos);
-#else
-    SUCCEED("x18 spill scratch is Linux-only");
-#endif
+    REQUIRE(after_consumer->find("str " + scratch + ", [x28") == std::string::npos);
 }
 
 TEST_CASE("x18 spill forwarding yields to a live allocated value") {
@@ -114,4 +132,31 @@ TEST_CASE("x18 spill forwarding yields to a live allocated value") {
 #else
     SUCCEED("x18 spill scratch is Linux-only");
 #endif
+}
+
+TEST_CASE("spill forwarding stops before a width ownership transfer") {
+    const auto emitted = Emit(MakeSpillWidthTransferBlock(),
+                              GPRSMask{~((1u << 5) - 1u) & ~(1u << 18)});
+    const auto definition = std::ranges::find_if(emitted, [](const auto& line) {
+        return line.find("mov w") != std::string::npos &&
+               line.find("#0x4") != std::string::npos;
+    });
+    REQUIRE(definition != emitted.end());
+    const auto delimiter = definition->find(',');
+    REQUIRE(delimiter != std::string::npos);
+    const auto scratch = "x" + definition->substr(5, delimiter - 5);
+    const auto store = std::find_if(std::next(definition), emitted.end(), [&](const auto& line) {
+        return line.find("str " + scratch + ", [x28") != std::string::npos;
+    });
+    REQUIRE(store != emitted.end());
+    const auto address_begin = store->find("[x28");
+    const auto address_end = store->find(']', address_begin);
+    REQUIRE(address_begin != std::string::npos);
+    REQUIRE(address_end != std::string::npos);
+    const auto address = store->substr(address_begin, address_end - address_begin + 1);
+    const auto reload = std::find_if(std::next(store), emitted.end(), [&](const auto& line) {
+        return line.find("ldr x") != std::string::npos &&
+               line.find(address) != std::string::npos;
+    });
+    REQUIRE(reload != emitted.end());
 }

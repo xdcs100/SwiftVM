@@ -369,13 +369,14 @@ private:
     // A value the linear scan could not keep in a host register lives in
     // State::spill_area (backend/context.h). Spilled defs compute into a
     // scratch register and are written back at the next instruction or block
-    // boundary. A Linux x18 def may stay resident for an adjacent direct
-    // consumer when x18 is not live there; all other uses reload from the slot.
+    // boundary. A scalar def may stay resident for an adjacent direct consumer
+    // when the same scratch is free and has no fixed role there.
     //
     // Platform and capacity constraints:
     //  - On desktop Linux, the first scalar spill reload/write-back may use
     //    x18 when it is free at that instruction. Further scalar reloads and
-    //    x18 conflicts use the allocator's verified headroom.
+    //    x18 conflicts use the allocator's verified headroom. Other platforms
+    //    forward an allocator-visible scratch only across one proven edge.
     //    SIMD spill scratch still comes from GetTmpV and PANICs loudly if that
     //    contract is ever violated.
     //  - The spill area holds kMaxSpillSlots u64 slots; the allocator
@@ -389,7 +390,7 @@ private:
     [[nodiscard]] Register SpillGPR(const ir::Value& value, bool definition = false);
     [[nodiscard]] VRegister SpillFPR(const ir::Value& value);
     void FlushSpillWrites();
-    [[nodiscard]] bool FlushSpillWrites(ir::Inst* consumer);
+    [[nodiscard]] std::optional<u8> FlushSpillWrites(ir::Inst* consumer);
     [[nodiscard]] static bool IsFloatValue(const ir::Value& value);
 
     // Scratch handed to a spill reload rather than to the emitter. Budgeted

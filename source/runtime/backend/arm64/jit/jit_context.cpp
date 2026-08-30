@@ -26,7 +26,6 @@ static_assert(kMaxSpillSlots == sizeof(State::spill_area) / sizeof(u64),
 
 namespace {
 
-#if defined(__linux__) && !defined(__ANDROID__)
 bool IsSpillForwardBarrier(ir::OpCode op) {
     using O = ir::OpCode;
     switch (op) {
@@ -55,7 +54,32 @@ bool IsSpillForwardBarrier(ir::OpCode op) {
             return false;
     }
 }
-#endif
+
+bool IsPortableSpillForwardConsumer(ir::OpCode op) {
+    using O = ir::OpCode;
+    switch (op) {
+        case O::Add:
+        case O::Sub:
+        case O::Adc:
+        case O::Sbb:
+        case O::And:
+        case O::Or:
+        case O::Xor:
+        case O::Not:
+        case O::Select:
+        case O::SelectZero:
+        case O::CondSelect:
+        case O::LslImm:
+        case O::LsrImm:
+        case O::AsrImm:
+        case O::LslValue:
+        case O::LsrValue:
+        case O::AsrValue:
+            return true;
+        default:
+            return false;
+    }
+}
 
 }  // namespace
 
@@ -419,13 +443,24 @@ void JitContext::FlushSpillWrites() {
     (void)FlushSpillWrites(nullptr);
 }
 
-bool JitContext::FlushSpillWrites(ir::Inst* consumer) {
-    bool forwarded = false;
+std::optional<u8> JitContext::FlushSpillWrites(ir::Inst* consumer) {
+    std::optional<u8> forwarded;
     std::optional<PendingSpillWrite> retained;
+    const bool scratch_only = consumer &&
+            backend::X86PinExtScratchOnlyEnabled(reg_alloc.GetGprs(), features);
+    const u32 fixed = consumer
+            ? backend::FixedGPRClobbers(*consumer, features, scratch_only)
+            : 0;
     for (auto& write : pending_spill_writes) {
+        bool fixed_forward = false;
 #if defined(__linux__) && !defined(__ANDROID__)
-        if (consumer && !forwarded && !write.is_fpr && write.reg == spill_scratch.GetCode() &&
-            !reg_alloc.DirtyGPR(consumer->Id()).Get(spill_scratch.GetCode()) &&
+        fixed_forward = write.reg == spill_scratch.GetCode();
+#endif
+        if (consumer && !forwarded && !write.is_fpr &&
+            (fixed_forward ||
+             IsPortableSpillForwardConsumer(consumer->GetOp())) &&
+            !reg_alloc.DirtyGPR(consumer->Id()).Get(write.reg) &&
+            !(fixed & (1u << write.reg)) &&
             !IsSpillForwardBarrier(consumer->GetOp())) {
             u32 direct_uses = 0;
             ir::Inst* definition = nullptr;
@@ -435,16 +470,16 @@ bool JitContext::FlushSpillWrites(ir::Inst* consumer) {
                     ++direct_uses;
                 }
             }
-            if (definition) {
+            if (definition &&
+                (definition->GetUses(false) == direct_uses || fixed_forward)) {
                 spill_use_scratch.emplace(write.value, write.reg);
                 if (definition->GetUses(false) != direct_uses) {
                     retained = write;
                 }
-                forwarded = true;
+                forwarded = write.reg;
                 continue;
             }
         }
-#endif
         const u32 offset = state_offset_spill_area + write.slot * sizeof(u64);
         if (write.is_fpr) {
             __ Str(VRegister::GetVRegFromCode(write.reg).Q(), MemOperand(state, offset));
@@ -1528,16 +1563,14 @@ void JitContext::TickIR(ir::Inst* instr) {
     EndVixlScratch();
     spill_def_scratch.clear();
     spill_use_scratch.clear();
-    const bool forwarded_spill = FlushSpillWrites(instr);
+    const auto forwarded_spill = FlushSpillWrites(instr);
     cur_inst = instr;
     reg_alloc.SetCurrent(instr);
     cur_dirty_gprs = reg_alloc.GetDirtyGPR();
     cur_dirty_fprs = reg_alloc.GetDirtyFPR();
-#if defined(__linux__) && !defined(__ANDROID__)
     if (forwarded_spill) {
-        cur_dirty_gprs.Mark(spill_scratch.GetCode());
+        cur_dirty_gprs.Mark(*forwarded_spill);
     }
-#endif
     // Baseline for the per-instruction scratch budget (see GetTmpX).
     tick_dirty_gprs = cur_dirty_gprs;
     tick_dirty_fprs = cur_dirty_fprs;
@@ -1563,7 +1596,8 @@ void JitContext::TickIR(ir::Inst* instr) {
             if (code == 12 && GetSvmConfig().flags_regs) {
                 continue;
             }
-            if (!(fixed & (1u << code))) {
+            if (!(fixed & (1u << code)) &&
+                (!forwarded_spill || *forwarded_spill != code)) {
                 cur_dirty_gprs.Clear(code);
                 tick_dirty_gprs.Clear(code);
             }
@@ -1574,7 +1608,8 @@ void JitContext::TickIR(ir::Inst* instr) {
     // mem_scratch's address role. This is the eighth slot needed by a
     // five-register emitter plus high-pressure spill reloads.
     if (backend::X86PinExtLevel3AluScratchEnabled(reg_alloc.GetGprs(),
-                                                  instr->GetOp())) {
+                                                  instr->GetOp()) &&
+        (!forwarded_spill || *forwarded_spill != 10)) {
         cur_dirty_gprs.Clear(10);
         tick_dirty_gprs.Clear(10);
     }
