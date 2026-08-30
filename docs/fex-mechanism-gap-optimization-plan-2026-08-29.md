@@ -2314,3 +2314,32 @@ wall `2.5107s -> 2.6376s`（`+5.056%`）、guest TOTAL `2.2575s -> 2.3815s`
 probe、硬编码 guest PC、兼容兜底或过时三来源旁路，也没有运行长基准或压力测试。多 CFG root 缺口从
 “双来源整体不可用”收窄为“弱来源不能切 primary entry owner”；更低 fan-in 或真正跨 component 的
 membership 仍需要独立的动态权重合同。
+
+### 16.68 singleton interior external root
+
+第 16.62 节的 canonical single-source 原型同时允许 primary-entry owner，并发生 239 个公共 root 增长；
+该结果不能直接外推到第 16.67 节已经建立的分级 ownership contract。现在 source-count≥3 继续使用
+`OwnerPolicy::Any`，其余候选统一使用 `OwnerPolicy::Interior`，因此 singleton target 只能切函数中部
+owner，不会改变所有普通函数入口的热 prefix。新增 frontier 用例用一个 external direct-link source
+证明 singleton interior target 被发现，同时保持 primary owner 的既有拒绝边界。
+
+严格同源 static-only 结果：
+
+- smallpt `261 / 36,713 -> 249 / 36,448`：12 个独立 root、265 条总指令消失；3 个公共 root 合计
+  增长 5 条、26 个缩小 82 条，baseline top-20 无增长，PPM SHA-256 保持
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`。
+- SQLite `2,052 / 251,899 -> 1,923 / 249,687`：131 个独立 root 合计 1,760 条消失，新增 2 个 root
+  合计 492 条；20 个公共 root 合计增长 111 条、261 个缩小 1,055 条，净减少 2,212 条且 baseline
+  top-20 无增长。timing-normalized stdout 逐字节一致。
+- CoreMark 2k `288 / 36,473 -> 270 / 36,172`：18 个独立 root、301 条总指令消失；唯一增长 root
+  增加 1 条，35 个缩小 93 条，baseline top-20 无增长，`crcfinal=0x4983`。
+
+SQLite 八次反向短配对为 wall `2.5128s -> 2.5075s`（`-0.209%`）、guest TOTAL
+`2.2510s -> 2.2545s`（`+0.155%`），方向交叉，只用于排除明显动态回退。Mac Release 与 Orb GCC 13.2
+构建通过；两侧 `[function-entry]` 均通过 103 条断言 / 10 个 case，Orb 的
+`[direct-link][production]`、`[continuation]` 和非压力 `[smc]` 分别通过 545、117 和 399 条断言。
+
+`balance_nonroot` 从 28 roots / 3,430 条收敛到 25 / 3,373，仍远于 FEX 的单一 multiblock unit。
+这说明当前 code object 内部的 fan-in 门槛已不再是主体；剩余 24 个 root 属于不同 64-block publication
+component，必须依靠重编译/运行时热度或发布前独立与合并成本计划，不能继续降低本地 source threshold。
+本阶段没有新增 env 开关、probe、日志、临时路径、PC 白名单或兼容兜底，也没有运行长基准或压力测试。
