@@ -56,6 +56,21 @@ SpillForwardingBlock MakeSpillWidthTransferBlock() {
     return {std::move(block), arriving};
 }
 
+SpillForwardingBlock MakeSpillFlagsOnlyBlock(OpCode consumer) {
+    IntrusivePtr<Block> block{new Block(0, Location{0x2430})};
+    const auto longest = block->LoadImm(Imm{swift::u64{1}});
+    const auto middle = block->LoadImm(Imm{swift::u64{2}});
+    const auto shortest = block->LoadImm(Imm{swift::u64{3}});
+    const auto arriving = block->LoadImm(Imm{swift::u64{4}});
+    block->AppendInst(consumer, arriving, Flags::NZCV);
+    const auto first = block->Add(shortest, Operand{middle});
+    const auto total = block->Add(first, Operand{longest});
+    block->StoreUniform(Uniform{0, ValueType::U64}, total);
+    block->SetTerminal(terminal::ReturnToDispatch{});
+    block->ReIdInstr();
+    return {std::move(block), arriving};
+}
+
 SpillForwardingBlock MakeRepeatedSpillUseBlock() {
     IntrusivePtr<Block> block{new Block(0, Location{0x2440})};
     const auto longest = block->LoadImm(Imm{swift::u64{1}});
@@ -214,6 +229,35 @@ TEST_CASE("spill forwarding stops before a width ownership transfer") {
                line.find(address) != std::string::npos;
     });
     REQUIRE(reload != emitted.end());
+}
+
+TEST_CASE("flags-only consumers discard dead spill results") {
+    auto check = [](OpCode consumer) {
+        const auto emitted = Emit(
+                MakeSpillFlagsOnlyBlock(consumer),
+                GPRSMask{~((1u << 5) - 1u) & ~(1u << 18)});
+        const auto definition = std::ranges::find_if(emitted, [](const auto& line) {
+            return line.find("mov x") != std::string::npos &&
+                   line.find("#0x4") != std::string::npos;
+        });
+        REQUIRE(definition != emitted.end());
+        const auto delimiter = definition->find(',');
+        REQUIRE(delimiter != std::string::npos);
+        const auto scratch = definition->substr(4, delimiter - 4);
+        const auto next_value = std::find_if(std::next(definition), emitted.end(),
+                                             [](const auto& line) {
+            return line.find("add ") != std::string::npos;
+        });
+        REQUIRE(next_value != emitted.end());
+        REQUIRE(std::none_of(std::next(definition), next_value,
+                             [&](const auto& line) {
+            return line.find("str " + scratch + ", [x28") != std::string::npos ||
+                   line.find("ldr " + scratch + ", [x28") != std::string::npos;
+        }));
+    };
+
+    SECTION("branch-only marker") { check(OpCode::BranchOnlyFlags); }
+    SECTION("architectural flags marker") { check(OpCode::SaveFlags); }
 }
 
 TEST_CASE("spilled scalar definitions transfer into multi-use reload regions") {

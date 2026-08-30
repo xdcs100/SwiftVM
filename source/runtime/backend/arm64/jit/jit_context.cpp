@@ -81,6 +81,10 @@ bool IsPortableSpillForwardConsumer(ir::OpCode op) {
     }
 }
 
+bool IsFlagsOnlySpillConsumer(ir::OpCode op) {
+    return op == ir::OpCode::SaveFlags || op == ir::OpCode::BranchOnlyFlags;
+}
+
 }  // namespace
 
 JitContext::JitContext(const std::shared_ptr<Module>& module,
@@ -475,6 +479,20 @@ std::optional<u8> JitContext::FlushSpillWrites(ir::Inst* consumer) {
 #if defined(__linux__) && !defined(__ANDROID__)
         fixed_forward = write.reg == spill_scratch.GetCode();
 #endif
+        u32 direct_uses = 0;
+        ir::Inst* definition = nullptr;
+        if (consumer && !write.is_fpr) {
+            for (const auto& value : consumer->GetValues()) {
+                if (value.Defined() && value.Id() == write.value) {
+                    definition = value.Def();
+                    ++direct_uses;
+                }
+            }
+        }
+        if (definition && IsFlagsOnlySpillConsumer(consumer->GetOp()) &&
+            definition->GetUses(false) == direct_uses) {
+            continue;
+        }
         if (consumer && !forwarded && !write.is_fpr &&
             !reg_alloc.HasSpillReload(write.value, consumer->Id()) &&
             (fixed_forward ||
@@ -482,14 +500,6 @@ std::optional<u8> JitContext::FlushSpillWrites(ir::Inst* consumer) {
             !reg_alloc.DirtyGPR(consumer->Id()).Get(write.reg) &&
             !(fixed & (1u << write.reg)) &&
             !IsSpillForwardBarrier(consumer->GetOp())) {
-            u32 direct_uses = 0;
-            ir::Inst* definition = nullptr;
-            for (const auto& value : consumer->GetValues()) {
-                if (value.Defined() && value.Id() == write.value) {
-                    definition = value.Def();
-                    ++direct_uses;
-                }
-            }
             if (definition &&
                 (definition->GetUses(false) == direct_uses || fixed_forward)) {
                 spill_use_scratch.emplace(write.value, write.reg);
