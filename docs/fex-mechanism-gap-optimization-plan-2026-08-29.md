@@ -2369,3 +2369,25 @@ continuation 和 tagged external frame 的零热税原型在 128-block SQLite �
 断言；Orb GCC 13.2 分别通过 5、103、550、117 和 400 条。没有保留 continuation 原型、env 开关、
 probe、日志、临时运行路径或兼容兜底，也没有运行长基准或压力测试。下一步只重开带独立成本账或运行时
 热度反馈的跨 publication-component 二级合并，不再重试全局 block budget 扩张。
+
+### 16.70 component membership 固定税归因
+
+在保持 64-block 总预算不变的前提下，尝试只在 frontier 超过剩余槽位时按 external source fan-in 和已解码
+predecessor 数选择最后一批 block。该方法没有建立 canonical cut 或独立 RA 边界：smallpt
+`249 / 36,448 -> 248 / 36,481`，CoreMark 2k `270 / 36,172 -> 269 / 36,180`，均以少一个 root
+换取总量增长；SQLite 在 `ANALYZE` 前以 `rc=1` 提前退出，已经产生 `1,949 / 250,348`，相对基线
+`1,923 / 249,687` 同时增长。该原型和 source-count 接口已删除，不能再用 frontier 排序代替 component
+状态合同。
+
+最终 SQLite 反汇编把 `balance_nonroot@0x44ef80..0x450dc0` 的 25 个 root、3,373 条逐一拆开。
+每个 root 都以 `STP x14, x30, [x25, #-16]!` 的 call-entry frame 开始，但相对 FEX 单一 unit 的
+3,087 条，重复 entry 最多只解释 24/286 条差额；单独延迟 call veneer 只能覆盖约 8.4% 的局部残差，
+还会让真实 indirect-call target 永久回到 call miss，不作为下一主线。剩余主体是 component 间已知边被迫
+支付独立 link、flags merge 和 dispatcher cold tail。
+
+下一机制因此定义为 multi-region code object：frontend 继续用经过验证的 64-block region 形成 canonical
+cut；每个 region 独立执行优化、live interval 和 RA，不允许 SSA/fixed-home 状态跨 cut；backend 在同一
+allocation 中顺序发射多个 region，共享 FunctionEntryPublisher、generation/invalidation transaction 和 cold
+tail，并把已知 region 间边链接到目标 canonical entry。只有该所有权层完成后才重新评估 128-block 总
+membership；不再把一个 128-block HIRFunction 交给单一 RA，也不先做 trace/layout 排序。本阶段没有保留
+源码原型、env 开关、probe、日志或临时路径，也没有运行长基准或压力测试。
