@@ -574,7 +574,6 @@ void WriteUnit(BlobWriter& w, const SerialUnit& unit) {
         w.U8(b.pending_flags_contract.observed_nzcv_mask);
         w.U8(b.pending_flags_contract.commits_before_fault);
         w.U8(b.pending_flags_contract.barrier_before_commit);
-        w.U64(b.pending_flags_contract.packed_flags_version);
         w.U8(b.entry_flags);
     }
     w.U32(static_cast<u32>(unit.relocs.size()));
@@ -600,7 +599,6 @@ void WriteUnit(BlobWriter& w, const SerialUnit& unit) {
         w.U32(site.edge_flags.valid_nzcv_mask);
         w.U8(static_cast<u8>(site.edge_flags.carry_polarity));
         w.U8(static_cast<u8>(site.edge_flags.producer));
-        w.U64(site.edge_flags.packed_flags_version);
     }
     w.U32(static_cast<u32>(unit.fault_sites.size()));
     for (const auto& site : unit.fault_sites) {
@@ -639,8 +637,7 @@ bool ReadUnit(BlobReader& r, SerialUnit& unit) {
             !r.U32(b.pending_flags_code_offset) ||
             !r.U32(b.pending_flags_contract.overwrite_before_observe) ||
             !r.U8(observed_nzcv_mask) || !r.U8(commits_before_fault) ||
-            !r.U8(barrier_before_commit) ||
-            !r.U64(b.pending_flags_contract.packed_flags_version) || !r.U8(b.entry_flags)) {
+            !r.U8(barrier_before_commit) || !r.U8(b.entry_flags)) {
             return false;
         }
         b.pending_flags_contract.observed_nzcv_mask = observed_nzcv_mask;
@@ -678,7 +675,7 @@ bool ReadUnit(BlobReader& r, SerialUnit& unit) {
         rel.kind = static_cast<RelocKind>(kind);
         rel.use = static_cast<RelocUse>(use);
     }
-    if (!r.U32(count) || count > r.Remaining() / 47) {
+    if (!r.U32(count) || count > r.Remaining() / 39) {
         return false;
     }
     unit.link_sites.resize(count);
@@ -694,8 +691,7 @@ bool ReadUnit(BlobReader& r, SerialUnit& unit) {
             !r.U32(site.flags_bypass_linked_instruction) ||
             !r.U32(site.flags_merge_branch_offset) ||
             !r.U32(site.edge_flags.valid_nzcv_mask) ||
-            !r.U8(carry_polarity) || !r.U8(producer) ||
-            !r.U64(site.edge_flags.packed_flags_version)) {
+            !r.U8(carry_polarity) || !r.U8(producer)) {
             return false;
         }
         site.edge_flags.carry_polarity =

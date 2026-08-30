@@ -1132,7 +1132,6 @@ private:
         u64 target{};
         u32 mask{};
         EdgeCarryPolarity polarity{EdgeCarryPolarity::Unknown};
-        u64 version{};
         bool token{};
 
         auto operator<=>(const RegionFlagsCanonicalStubKey&) const = default;

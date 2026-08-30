@@ -43,9 +43,9 @@ constexpr std::intptr_t kImm26Boundary = (std::intptr_t{1} << 27) - 4;
 
 static_assert(sizeof(LinkSiteKey) == 16);
 static_assert(sizeof(LinkSourceOwner) == 16);
-static_assert(sizeof(LinkSiteRecord) == 80);
+static_assert(sizeof(LinkSiteRecord) == 72);
 static_assert(sizeof(LinkSignalPatchSite) == 88);
-static_assert(sizeof(LinkTargetRecord) == 96);
+static_assert(sizeof(LinkTargetRecord) == 88);
 static_assert(sizeof(CodeRegion) == 40);
 
 constexpr auto kPendingNZCV = EdgeFlagsState::Pending(
@@ -57,7 +57,7 @@ constexpr EdgeFlagsTargetContract kOverwriteNZCV{
         .commits_before_fault = true,
 };
 
-TEST_CASE("edge flags contracts accept only overwritten version-compatible state",
+TEST_CASE("edge flags contracts accept only overwritten compatible state",
           "[direct-link][flags]") {
     constexpr u32 nz_mask = 0xC000'0000u;
     constexpr auto pending_nz = EdgeFlagsState::Pending(
@@ -81,11 +81,6 @@ TEST_CASE("edge flags contracts accept only overwritten version-compatible state
             .observed_nzcv_mask = 0x4,
             .commits_before_fault = true,
     };
-    constexpr auto versioned_nz = EdgeFlagsState::Pending(
-            nz_mask,
-            EdgeCarryPolarity::Unknown,
-            EdgeFlagsProducer::Logical,
-            1);
     constexpr auto direct_c = EdgeFlagsState::Pending(
             0x2000'0000u,
             EdgeCarryPolarity::Direct,
@@ -100,7 +95,6 @@ TEST_CASE("edge flags contracts accept only overwritten version-compatible state
     STATIC_REQUIRE(observe_z_overwrite_nc.Accepts(pending_nc));
     STATIC_REQUIRE_FALSE(observe_z_overwrite_nc.Accepts(pending_nz));
     STATIC_REQUIRE_FALSE(overwrite_nz.Accepts(kPendingNZCV));
-    STATIC_REQUIRE_FALSE(overwrite_nz.Accepts(versioned_nz));
     STATIC_REQUIRE(direct_c.IsWellFormed());
     STATIC_REQUIRE_FALSE(invalid_direct_nz.IsWellFormed());
 }

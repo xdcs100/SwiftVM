@@ -424,7 +424,7 @@ TEST_CASE("disk cache scanner keeps move-wide constants and rejects PC-relative 
     }
 }
 
-TEST_CASE("disk cache v19 serializes link and fault-site records",
+TEST_CASE("disk cache v20 serializes link and fault-site records",
           "[direct-link][jit-cache][serializer]") {
     SerialUnit input{};
     input.guest_start = 0x1000;
@@ -437,7 +437,6 @@ TEST_CASE("disk cache v19 serializes link and fault-site records",
     constexpr EdgeFlagsTargetContract overwrite_nzcv{
             .overwrite_before_observe = kEdgeNZCVMask,
             .commits_before_fault = true,
-            .packed_flags_version = 7,
     };
     input.blocks.push_back(
             {0x1000, 0x1004, 0, 0x1234, 16, 20, overwrite_nzcv});

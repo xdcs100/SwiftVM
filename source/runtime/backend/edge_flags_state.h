@@ -54,23 +54,20 @@ struct EdgeFlagsState {
     u32 valid_nzcv_mask{};
     EdgeCarryPolarity carry_polarity{EdgeCarryPolarity::Unknown};
     EdgeFlagsProducer producer{EdgeFlagsProducer::Canonical};
-    u64 packed_flags_version{};
 
     [[nodiscard]] static constexpr EdgeFlagsState Pending(u32 valid_nzcv_mask,
                                                           EdgeCarryPolarity carry_polarity,
-                                                          EdgeFlagsProducer producer,
-                                                          u64 packed_flags_version = 0) {
+                                                          EdgeFlagsProducer producer) {
         return {
                 .valid_nzcv_mask = valid_nzcv_mask,
                 .carry_polarity = carry_polarity,
                 .producer = producer,
-                .packed_flags_version = packed_flags_version,
         };
     }
 
     [[nodiscard]] constexpr bool IsCanonical() const {
         return valid_nzcv_mask == 0 && carry_polarity == EdgeCarryPolarity::Unknown &&
-               producer == EdgeFlagsProducer::Canonical && packed_flags_version == 0;
+               producer == EdgeFlagsProducer::Canonical;
     }
 
     [[nodiscard]] constexpr bool IsWellFormed() const {
@@ -98,7 +95,6 @@ struct EdgeFlagsTargetContract {
     u8 observed_nzcv_mask{};
     bool commits_before_fault{};
     bool barrier_before_commit{};
-    u64 packed_flags_version{};
 
     [[nodiscard]] constexpr bool IsWellFormed() const {
         return (overwrite_before_observe & ~kEdgeNZCVMask) == 0 &&
@@ -116,7 +112,6 @@ struct EdgeFlagsTargetContract {
 
     [[nodiscard]] constexpr bool Accepts(const EdgeFlagsState& incoming) const {
         return CanPublishPendingEntry() && incoming.HasPendingPState() &&
-               incoming.packed_flags_version == packed_flags_version &&
                (incoming.valid_nzcv_mask & ~overwrite_before_observe) == 0 &&
                (incoming.valid_nzcv_mask & ObservedHostMask()) == 0;
     }

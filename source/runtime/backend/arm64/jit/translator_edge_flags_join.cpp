@@ -139,7 +139,6 @@ Label* JitTranslator::GetRegionFlagsCanonicalStub(
             .target = plan.canonical_target.Value(),
             .mask = plan.incoming.valid_nzcv_mask,
             .polarity = plan.incoming.carry_polarity,
-            .version = plan.incoming.packed_flags_version,
             .token = plan.canonical_merge_token,
     };
     auto& entry = region_flags_canonical_stubs[key];
