@@ -2003,3 +2003,55 @@ Mac Debug/Release 构建和 low32 三个 case / 16 条断言通过；Debug spill
 上均以相同位置失败，因此不计为本阶段回归，也不宣称该组远端全绿。没有运行完整测试集、正式长基准或
 压力测试；所有 census、日志、临时二进制、源目录和既有 env 取样均已删除，最终树没有新增开关、probe、
 硬编码 guest PC 或兼容兜底。
+
+### 16.57 partial-overlap low32 tail 的回退裁定
+
+第 16.56 节后重新统计最终发码，SQLite、smallpt、CoreMark 仍分别有 638、121、128 条
+`lsr wN, wM, #0`。最终删除的 residual census 只记录未 coalesce 且 source/result 物理 home 不同的
+bridge：SQLite 1,015 个事件中，source home 在 result tail 被新 SSA 值复用 548 个，source 与 result
+生命周期部分重叠 440 个，scratch 门限 15 个，atomic 边界 12 个。部分重叠组中 398 个都是
+`source_end = bridge + 1 / result_end = bridge + 2`。
+
+提交 `645e688` 曾让 source 与 low32 view 在重叠区共享 home，并只把该 home 延长到 result tail；随后
+提交 `6f0a664` 完整撤销。静态门禁本身通过：SQLite 保持 2,081 roots，`252,961 -> 252,916`
+（`-45`，`-0.017789%`），36 个 root 缩小、零增长，mnemonic 为 `LSR -48 / MOV +3`；smallpt
+`36,756 -> 36,750`（`-6`），CoreMark `36,585 -> 36,580`（`-5`），两者同样零增长且 oracle 一致。
+但两组三对 SQLite 短配对分别为 `+0.303%` 和 `+0.517%`，反向顺序后仍同向回退。该方案改变 result
+tail 的物理寄存器身份，静态收益不足以覆盖动态代价，因此实现、测试和临时 census 全部删除，不保留
+为后续 recolor 的 fallback。
+
+### 16.58 final-use low32 source reverse recolor
+
+提交 `2489deb` 处理第 16.57 节最大的 548 个 source-home reuse 事件。与延长 source home 相反，该机制
+保留 baseline 已选定的 result/consumer home，只在 result home 对 source 的完整历史区间空闲时，把
+source producer 和此前 use 反向 recolor 到 result home；bridge 随后成为同寄存器低位 view，不发码。
+
+`RewriteActiveGPRRange` 统一承担 forward transfer 与 reverse recolor 的 active-mask 事务：逐条把旧 home
+替换为新 home、重过 scratch budget，任一失败恢复整个区间。reverse 路径额外要求 source/result 都是
+未绑定的直接 GPR allocation，并用 `HasGPROverlap` 同时证明 source home 和 result home 在历史区间没有
+第三方 allocation。结果 home 不变，因此 `AtomicExchange` 可以安全命中，exclusive loop 和 barrier
+mnemonic 保持不变。
+
+两个失败边界在最终实现前已闭合：只检查 result home 的原型在 SQLite test 230 后以 SIGABRT 退出，
+`GetHostGPR coalescing proof diverged at IR 62`；补齐双 home 独占后正确性恢复。随后
+`pagerOpenSavepoint@0x415160` `233 -> 234` 的唯一增长被归因到 `GetHostGPR -> BitExtract`：recolor
+只会把 fixed-home copy 提前，不能保证净收益。最终合同拒绝 host read/write coalescing 和
+`GetHostGPR` producer，不使用 guest PC 白名单；该 root 恢复零增长。
+
+最终短门禁结果：
+
+- SQLite 保持 2,081 roots，`252,961 -> 252,836`（`-125`，`-0.049415%`）；83 个 root 缩小、
+  零增长，timing 归一化 stdout 逐行一致。mnemonic 主差严格为 `LSR -138 / MOV +13`，atomic
+  指令零变化。
+- smallpt 保持 263 roots，`36,756 -> 36,749`（`-7`，`-0.019045%`），5 个 root 缩小、零增长，
+  PPM SHA-256 保持
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`。
+- CoreMark 2k 保持 293 roots，`36,585 -> 36,574`（`-11`，`-0.030067%`），8 个 root 缩小、
+  零增长，两侧 `crcfinal=0x4983`。
+- SQLite 三对短 wall-time 中位数 `2.267s -> 2.258s`（`-0.397%`）。
+
+契约测试覆盖普通 final transfer、source home 被复用时的 forward-reference recolor、atomic consumer
+保留 result allocation，以及 `GetHostGPR` 拒绝。Mac Debug/Release low32 通过 3 个 case / 22 条断言，
+Debug spill wildcard 通过 23 个 case / 23,152 条断言；Orb GCC 13.2 完成 `swift_test`、
+`svm_translator_linux` 构建并通过相同 low32 组。没有运行完整测试集、正式长基准或压力测试；临时日志、
+census、A/B 二进制和目录均已删除，最终树没有新增 env 开关、probe、硬编码 guest PC 或兼容兜底。
