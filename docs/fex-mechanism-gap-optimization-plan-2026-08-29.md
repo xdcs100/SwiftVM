@@ -1288,3 +1288,31 @@ pseudo flags，目标必须是启用的 pinned GPR，且不能与 dead/coalesced
 
 本阶段没有新增 env 开关、日志、probe、运行时兜底或长期基准；SQLite/smallpt Release static-only
 capture 分别约 4.3 秒和 0.5 秒。
+
+### 16.34 平台无关的紧邻算术 spill forwarding
+
+提交 `3b7acd4` 把原先仅限 desktop Linux x18 的相邻 spill forwarding 扩展为平台无关的单边
+ownership transfer。spilled scalar def 的 scratch 只有在 consumer active mask 未占用、consumer 没有
+同寄存器 fixed clobber、没有 memory/helper/control barrier 时才可转交；`TickIR` 在 emitter 和 VIXL
+scratch leasing 前把实际转交的寄存器写入 consumer dirty mask，scratch-only x12/x13 和 level-3 x10
+lease 也不得把它重新释放。非 Linux 路径只接受 definition 的全部剩余 use 都位于该 consumer，Linux
+x18 继续保留既有的多 use 延迟 writeback 能力。
+
+portable 路径进一步只允许会真实写出结果的整数 `Add/Sub/Adc/Sbb`、逻辑、select 和 shift
+consumer。最初的广覆盖版本以及只加 last-use 的版本都会在短 SQLite 中于 `rip=0x414a7e` 触发
+PageFatal；执行追踪确认 `ZeroExtend32To64` 等 ownership-transfer IR 可能因 RA width-chain 证明而不
+发机器指令，转交 source scratch 会绕过其结果 slot。最终版本明确排除全部 transparent wrapper/alias，
+并增加负向用例验证 width ownership transfer 仍提交并重载 spill slot。
+
+短门禁结果：
+
+- Debug spill 分组通过 10 个 case / 23,078 条断言，pinned 分组通过 35 个 case / 131 条断言；新增
+  portable forwarding 与 width-transfer rejection 共覆盖 11 条断言。
+- Release SQLite 保持 2,114 roots，`343,547 -> 339,999`（`-3,548`，`-1.033%`），对应 1,774 个
+  紧邻算术 forwarding edge；`setupLookaside` `534 -> 524`。
+- Release smallpt 保持 275 roots，`47,650 -> 47,110`（`-540`，`-1.133%`），对应 270 个 edge；
+  PPM SHA-256 保持
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`。
+
+每个命中只删除相邻的 spill store/reload 两条指令，不改变 consumer 发码或 root 划分。本阶段没有保留
+诊断输出、probe、env 开关、临时路径或兼容兜底，只运行了 8 秒上限的 static-only 短跑。
