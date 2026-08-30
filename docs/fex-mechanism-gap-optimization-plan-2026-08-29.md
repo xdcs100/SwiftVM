@@ -1676,3 +1676,35 @@ observer 的 dead-result 语义，没有保留诊断日志、env 开关、probe�
 本阶段没有增加 env、日志、probe、临时路径、硬编码 guest PC 或兼容兜底，也没有运行长基准或压力
 测试。剩余 address spill 不再是 final-use `GetOperand` 这一类，应重新归因到真实多 use、faulting memory
 consumer 或 width/publication ownership。
+
+### 16.48 final-use spilled publication forwarding
+
+`SetHostGPR` 和 `StoreUniform` 都是无 fault 的 scalar publication consumer。此前 producer 被分配为 MEM
+且 publication 是它的全部 use 时，portable 路径仍先把结果写入 spill slot，consumer 再 reload 后发布到
+fixed guest home 或 uniform memory。该 spill backing 在两条相邻 IR 之间没有 observer，既不承担旧版本
+snapshot，也不是架构 publication 本身。
+
+这两个 opcode 现在复用第 16.47 节的 portable final-use contract：definition 的全部 use 必须由当前
+consumer 直接读取，producer scratch 在 consumer 处不得属于 live allocation 或 fixed clobber，并继续
+拒绝 memory/helper/CFG barrier。`SetHostGPR` 的目标 home 仍由既有 fixed-clobber 判定保护；多 use、
+提前 publication、fault snapshot 和 width ownership 不进入该路径。
+
+短门禁结果：
+
+- 本地 Release 构建通过；spill 分组通过 18 个 case / 23,119 条断言，覆盖固定 guest-home publication
+  与 uniform-memory publication，并保留 flags-only、address、width、fault 和 multi-use 的既有边界。
+- 同源 smallpt `4 8 6` static-only A/B 保持 275 roots、100% root/top-30 coverage 和 canonical PPM，
+  `45,937 -> 45,819`（`-118`，`-0.256874%`）；19 个 root 缩小、零增长，mnemonic delta 精确为
+  `STR -59 / LDR -59`。
+- SQLite `--help` 保持 225 roots、100% coverage 和逐字节一致 stdout，
+  `38,450 -> 38,396`（`-54`，`-0.140442%`）；11 个 root 缩小、零增长，mnemonic delta 为
+  `STR -27 / LDR -27`。
+- SQLite `main/size1` 固定 8 秒配对中，candidate 覆盖全部 719 个 baseline root 和 top-30；公共集
+  `129,801 -> 129,603`（`-198`，`-0.152541%`），37 个 root 缩小、零增长，mnemonic delta 精确为
+  `STR -99 / LDR -99`。candidate 额外完成 49 个 root，不计入收益，两侧均按门限退出。
+- Orb 的 `swift_runtime`、`svm_translator_linux` 构建和 `spill_forwarding_test.cpp.o` GCC 定向编译通过；
+  完整 `swift_test` 仍受既有 `direct_link_production_test.cpp:1320` designated-initializer 顺序错误阻断。
+
+本阶段没有新增 env、日志、probe、临时路径、硬编码 guest PC 或兼容兜底，也没有运行长基准或压力
+测试。剩余 final-use spill 的最大未决组仍是 `ZeroExtend*`/`SignExtend` ownership；第 16.46 节已证明
+不能把它们按普通 consumer 批量放开，后续必须从统一 width-version contract 解决。
