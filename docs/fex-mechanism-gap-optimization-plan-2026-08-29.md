@@ -2109,3 +2109,25 @@ disconnected RPO 分段并提前发 cold stubs”作为多 root 合并前置条�
 拥有独立 allocation/scheduling 成本模型，或由动态权重决定 code-object membership，不能继续在单一
 buffer 中改排列顺序。没有保留 env 开关、probe、日志、临时路径或兼容兜底，也没有运行长基准或压力
 测试。
+
+### 16.61 `KnownZeroAbove32` entry read consumer 的回退裁定
+
+按第 16.59 节的重开条件，让 `GuestStateMap` 只为零偏移 U32 pinned read 启动函数级宽度求解，并且仅在
+全部真实 use 都能直接读取 fixed home、读点当前事实证明 `KnownZeroAbove(32)` 时消除原
+`GetHostGPR`。external root 从 Unknown 开始，块内 full-width clobber 使用读点事实而不是入口旧事实；
+定向用例分别覆盖 internal、external 和 clobbered entry，Mac pinned/low32/fault-snapshot 分组均通过。
+
+严格同源 short static-only 保持全部 root 和 oracle：SQLite `252,544 -> 252,468`（`-76`，
+`-0.030094%`），57 个 root 缩小、零增长；smallpt `36,749 -> 36,742`（`-7`），CoreMark
+`36,574 -> 36,566`（`-8`），两者同样零增长，PPM SHA-256 与 `crcfinal=0x4983` 保持一致。收益远小于
+第 16.59 节的 block-local W-view 原型，说明当前 must-lattice 能证明的动态 entry read 覆盖面很窄。
+
+两组六次反向顺序 SQLite 短配对方向相反：第一组 wall/guest 为 `+2.119%/+1.475%`，第二组为
+`-1.030%/-1.596%`；合并样本中位数仍为 wall `2.793s -> 2.827s`（`+1.235%`）、guest TOTAL
+`2.507s -> 2.529s`（`+0.858%`）。两次反向 profile 的 multi-block translation 中位数为
+`1025.024ms -> 1049.569ms`（`+2.395%`），主要成本来自为低覆盖候选启动函数级 fixed-point。
+
+曾把逐 read 候选扫描改为单次 use 汇总；三语料静态尺寸保持相同，但 SQLite 在完整生成 2,079 个 root
+后两次确定性以 `rc=135` 退出。该重构与原候选均已删除，不保留测试、默认关闭分支或局部 fallback。
+剩余 U32 read 不再单独触发函数级 width analysis；后续只有动态权重能证明目标 entry 热，或
+allocation/scheduling 能吸收 architectural-home 依赖时才重开。
