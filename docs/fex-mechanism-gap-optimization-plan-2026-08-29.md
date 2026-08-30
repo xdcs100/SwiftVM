@@ -1233,3 +1233,32 @@ fixed-class 直接放宽到 level 2 则产生大量增长 root，width-only 变�
 这些原型均未保留。后续 RA 工作需要首类 interval split/relocation，不能用隐式 scratch 生存期或
 宽泛 fixed-class 代替。该阶段没有新增 env 开关、日志、probe、临时路径或兼容兜底，也没有运行
 压力测试或长基准。
+
+### 16.32 biased memory 的故障安全 spilled update
+
+提交 `3fb918b` 收敛 memory-base 模式下的 `Sub -> StoreMemory -> SetHostGPR` spill 链。identity
+memory 可以用 ARM64 pre-index store 同时完成访存和基址更新；带 page-table bias 时无法表达
+`[guest_base + pt]` 的硬件 writeback，旧路径因此先物化 `Sub` 结果，store 成功后再从该 SSA 发布 guest
+基址。当更新值被 RA spill 时，这会为一个短生命周期地址引入 spill store、memory-address reload 和
+publication reload。
+
+新的公共 proof 仍要求 U64 `Sub` 只有 memory/publication 两个 use、递减量为 1..256 且等于 store
+宽度、三条 IR 相邻、源值来自目标 fixed home 的零偏移 `GetHostGPR`，并拒绝 stored value 与基址
+寄存器重叠。只有 memory-base 且 `Sub` 结果确实落入 `RegAlloc::MEM` 时才启用新发码：访存地址从旧
+fixed home 通过 `BiasMem(base, -decrement)` 计算，faulting store 先执行，store 成功后才在
+`SetHostGPR` 位置把递减量直接发布回 fixed home。这样越界 fault 仍观察到更新前的 guest 基址；未
+spill 的 biased 路径保持一次普通地址计算，identity 路径继续使用 pre-index store。
+
+短门禁结果：
+
+- Release/Debug 构建通过；stack writeback、故障保持、spilled biased update 和上一阶段 spilled EA
+  五个定向 case 共通过 24 条断言。强制 spill 用例验证地址计算、store、基址发布的机器指令顺序。
+- SQLite `--size 1 --testset main :memory:` 保持 2,114 roots、100% root/top-20 覆盖，
+  `350,451 -> 346,127`（`-4,324`，`-1.234%`）；159 个 root 缩小、零增长，`setupLookaside`
+  `558 -> 537`。
+- smallpt `4 8 6` 保持 275 roots、100% 覆盖，`48,601 -> 47,992`（`-609`，`-1.253%`）；
+  24 个 root 缩小、零增长，PPM SHA-256 保持
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`。
+
+本阶段没有增加 env 开关、日志、probe、临时路径或旧机制兜底，只运行了 8 秒上限的 static-only
+短跑；实际 SQLite/smallpt capture 分别约 4.1 秒和 0.6 秒。
