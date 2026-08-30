@@ -2131,3 +2131,29 @@ buffer 中改排列顺序。没有保留 env 开关、probe、日志、临时路
 后两次确定性以 `rc=135` 退出。该重构与原候选均已删除，不保留测试、默认关闭分支或局部 fallback。
 剩余 U32 read 不再单独触发函数级 width analysis；后续只有动态权重能证明目标 entry 热，或
 allocation/scheduling 能吸收 architectural-home 依赖时才重开。
+
+### 16.62 `balance_nonroot` root 组成与 membership 边界复核
+
+对有效 SQLite size10 输入重新拆解 `balance_nonroot@0x44ef80..0x450dc0`。默认 64-block lazy region
+下的 29 个 SwiftVM unit、3,448 条并非 register-allocation exception 或 128-block hard-cap fallback：
+`SVM_FUNC_STATS` 记录 2,079 次 attempt 全部成功，整个 workload 没有 block-cap/exception。该函数内
+29 个入口包含普通 conditional fallthrough/target、回边目标和两个可见 indirect-call return；本质是每个
+64-block region 成功发布后，尚未进入该 code object 的 CFG 在后续实际到达时继续形成新 region。
+
+对两来源 external root 的只读 census 找到 60 个结构候选，但默认与 candidate 的 root 差只消除了其中
+28 个；剩余候选并未在该输入上形成独立 baseline root。按目标当时是否已经存在 code-cache entry 过滤，
+SQLite 只额外减少 1 条，smallpt/CoreMark 严格不变，14 个 SQLite common-growth root 仍有 13 个，说明
+回退主体不是把已发布 target 再复制进当前 code object。该过滤器、rejection reason 和 census 均已删除。
+
+两个更宽边界也未保留：
+
+- `SVM_FUNC_LAZY=128` 在第 580 个 SQLite root 后以 `rc=139` 退出，不能用全局扩大 region window
+  代替 component membership；运行在 15 秒门限内结束。
+- canonical single-source external root 能把 SQLite `2,079 -> 1,919` roots、
+  `252,544 -> 250,845`（`-1,699`），但 239 个 common root 增长、只 58 个缩小；
+  `balance_nonroot` 也仅从 29 roots / 3,448 条收敛到 25 roots / 3,381 条。它主要把未执行的 cold CFG
+  拉进现有 code object，不满足零增长门禁，因此没有进入 wall-time 阶段。
+
+本轮删除了 source-count 改动、published-target gate、临时日志、额外 rejection ABI 和所有源码测试改动。
+`balance_nonroot` 的下一步不能再调全局 source/budget 阈值；需要运行时反馈驱动的 code-object
+membership，或能在发布前比较 component 独立/合并成本的编译计划。
