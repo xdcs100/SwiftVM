@@ -2246,3 +2246,29 @@ owner/target 邻接，原来只为生成 `ExternalLinkBlock` 服务的 `DecodeSt
 合同。本阶段没有新增 env 开关、日志、probe、硬编码 guest PC、临时运行路径或兼容兜底，也没有运行
 长基准或压力测试。该改进消除了已有 canonical external root 的 owner 重入税，但不把它误报为
 `balance_nonroot` membership 缺口已经闭合；后者仍需要独立 component cost 或运行时权重合同。
+
+### 16.66 call-return decode boundary 与普通 ownership transfer 分离
+
+第 16.65 节的 internal predecessor 不能覆盖“split 点本身就是 call return PC”的边。原 provenance 只有
+`call_return_owned`，它同时表示两种不同形态：split 位于 call 之前时，后续 call ownership 应转移到
+target；split 等于 return PC 时，owner prefix 已经完成 call，必须通过 continuation publication 进入
+target。把所有 `call_return_owned` 都外部化会让三来源 SQLite 在第 190 个 root 后 `rc=139`，说明该布尔
+字段不能直接决定 decoder terminal。
+
+`FunctionEntryProvenance` 现在独立记录 `call_return_boundary`：只有 owner 的 call-return block 起点与
+split target 完全相同时，decoder 才生成 `DecodeStopKind::CallReturn` 对应的 `ExternalLinkBlock`；普通
+ownership transfer 继续生成 internal `LinkBlock`。原来宽泛的 `External` stop 没有恢复，新增枚举只表达
+continuation 所需的单一职责。定向 frontier 用例分别证明 call 前 split 转移 ownership 但不是 boundary、
+精确 return PC 被识别为 boundary，以及普通 external root 同时保留 internal predecessor 和 canonical
+external identity。
+
+Mac Debug/Release 与 Orb GCC 13.2 构建通过；Mac/Orb `[function-entry]` 均通过 99 条断言 / 9 个 case，
+`[continuation]` 均通过 117 条，`[direct-link][production]` 分别通过 842/543 条。当前三来源生产语料中
+没有命中精确 call-return boundary，因此相对第 16.65 节的最终实现，smallpt、SQLite、CoreMark 的
+root、每 root code size 和 oracle 均逐项相同；不为零命中形态运行 wall-time。
+
+双来源门槛在加入精确 boundary 后仍以 host `SIGSEGV` 退出；关闭 `flags_region_branch` 不能恢复，关闭
+整个 `region_edges` 后 SQLite 正常完成，说明剩余边界是 external canonical entry 与完整 region state
+transfer 的兼容合同，不是 continuation 分类或单一 flags 分支。双来源、地址排除、临时 marker、日志和
+捕获均已删除，生产继续保持三来源门槛。本阶段没有新增 env 开关、probe、硬编码 guest PC、临时运行
+路径或兼容兜底，也没有运行长基准或压力测试。
