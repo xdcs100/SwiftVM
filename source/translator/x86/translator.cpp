@@ -813,10 +813,18 @@ struct X86Instance::Impl final {
                     }
                 }
                 if (to_decode.empty()) {
-                    constexpr u32 kExternalRootMinimumSources = 3;
-                    const auto external_roots =
-                            decode_frontier.DiscoverExternalRoots(
-                                    kExternalRootMinimumSources);
+                    auto external_roots =
+                            decode_frontier.DiscoverExternalRoots(3);
+                    for (const auto target :
+                         decode_frontier.DiscoverExternalRoots(
+                                 2, FunctionDecodeFrontier::OwnerPolicy::Interior)) {
+                        if (std::find(external_roots.begin(),
+                                      external_roots.end(), target) !=
+                            external_roots.end()) {
+                            continue;
+                        }
+                        external_roots.push_back(target);
+                    }
                     for (const auto target : external_roots) {
                         hir_func->CreateOrGetBlock(ir::Location{target});
                     }

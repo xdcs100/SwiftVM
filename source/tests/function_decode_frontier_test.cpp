@@ -167,6 +167,9 @@ TEST_CASE("function decode frontier promotes shared external targets",
     FunctionDecodeFrontier frontier{function};
     REQUIRE(frontier.DiscoverExternalRoots(4).empty());
     REQUIRE(frontier.FindProvenance(kTarget) == nullptr);
+    REQUIRE(frontier.DiscoverExternalRoots(
+                    3, FunctionDecodeFrontier::OwnerPolicy::Interior)
+                    .empty());
     REQUIRE(frontier.DiscoverExternalRoots(3) ==
             std::vector<LocationDescriptor>{kTarget});
     const auto* provenance = frontier.FindProvenance(kTarget);

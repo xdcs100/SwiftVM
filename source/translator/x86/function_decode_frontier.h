@@ -12,6 +12,11 @@ public:
     using Provenance = runtime::ir::FunctionEntryProvenance;
     using Rejection = runtime::ir::FunctionEntryRejection;
 
+    enum class OwnerPolicy : u8 {
+        Any,
+        Interior,
+    };
+
     struct Split {
         runtime::ir::HIRBlock* owner{};
         runtime::LocationDescriptor target{};
@@ -25,7 +30,9 @@ public:
     [[nodiscard]] std::optional<Split> FindExternalSplit(
             runtime::LocationDescriptor target);
     [[nodiscard]] std::vector<runtime::LocationDescriptor>
-    DiscoverExternalRoots(u32 minimum_sources);
+    DiscoverExternalRoots(
+            u32 minimum_sources,
+            OwnerPolicy owner_policy = OwnerPolicy::Any);
     [[nodiscard]] bool IsAccepted(runtime::LocationDescriptor target) const;
     void Accept(runtime::LocationDescriptor target);
     void Reject(runtime::LocationDescriptor target, Rejection reason);

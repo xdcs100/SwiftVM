@@ -14,7 +14,9 @@ FunctionDecodeFrontier::FindExternalSplit(
 }
 
 std::vector<runtime::LocationDescriptor>
-FunctionDecodeFrontier::DiscoverExternalRoots(u32 minimum_sources) {
+FunctionDecodeFrontier::DiscoverExternalRoots(
+        u32 minimum_sources,
+        OwnerPolicy owner_policy) {
     ASSERT(minimum_sources > 0);
     std::map<runtime::LocationDescriptor, u32> sources;
     if (function) {
@@ -27,9 +29,16 @@ FunctionDecodeFrontier::DiscoverExternalRoots(u32 minimum_sources) {
         if (count < minimum_sources) {
             continue;
         }
-        if (FindExternalSplit(target)) {
-            roots.push_back(target);
+        const auto split = FindExternalSplit(target);
+        if (!split) {
+            continue;
         }
+        if (owner_policy == OwnerPolicy::Interior &&
+            split->provenance->owner_start ==
+                    function->GetFunction()->GetStartLocation()) {
+            continue;
+        }
+        roots.push_back(target);
     }
     return roots;
 }
