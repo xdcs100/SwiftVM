@@ -1642,3 +1642,37 @@ write；不建立 forwarded register、不改变 PSTATE，也不延长 scratch �
 smallpt 稳定 root 集从 275 变为 260；宽度 ownership 部分已完整删除。最终实现只表达 flags-only
 observer 的 dead-result 语义，没有保留诊断日志、env 开关、probe、临时路径、硬编码 guest PC 或兼容
 兜底，也没有运行长基准或压力测试。
+
+### 16.47 final-use spilled address forwarding
+
+现有 portable spill forwarding 只接受整数 ALU/select/shift consumer，因此一个 spilled scalar producer
+紧邻 `GetOperand` 且全部 use 都在该地址形成指令中时，仍先写 spill slot，再立即 reload。`GetOperand`
+真实读取 scalar 输入，只形成地址，本身不 fault、不观察 guest state，也不承担 width ownership；它所需
+的 reload register 已经进入 RA scratch 预算。
+
+`GetOperand` 现在进入既有 portable final-use consumer contract。候选仍必须满足 definition 的全部 use
+都由当前指令直接消费、scratch register 在 consumer 处不属于 live allocation 或 fixed clobber、且边界
+不是 memory/helper/CFG barrier；随后由现有 `spill_use_scratch` 把 producer register 交给地址 emitter。
+机制不跨多 use，不改变 `GetOperand` result allocation，也不触碰第 16.46 节已单独建模的 flags-only sink。
+
+短门禁结果：
+
+- 本地 Release 构建通过；spill 分组通过 17 个 case / 23,109 条断言，新增用例验证带 immediate 的
+  `GetOperand` 直接消费最终 spilled input，既有 width ownership、fault window、multi-use region 和
+  flags-only sink 边界保持通过。
+- 同源 smallpt `4 8 6` static-only A/B 保持 275 roots、100% root/top-30 coverage 和 canonical PPM，
+  `46,091 -> 45,937`（`-154`，`-0.334122%`）；20 个 root 缩小、零增长，mnemonic delta 精确为
+  `STR -77 / LDR -77`。
+- SQLite `--help` 保持 225 roots、100% coverage 和逐字节一致 stdout，
+  `38,572 -> 38,450`（`-122`，`-0.316292%`）；12 个 root 缩小、零增长，mnemonic delta 为
+  `STR -61 / LDR -61`。`__strcmp_sse42@0x505120` 保持 311 条；相邻 `0x505da0` `247 -> 245`。
+- SQLite `main/size1` 的反向顺序 8 秒配对保持全部 773 个 baseline root、top-30 和 100% coverage，
+  公共集 `137,198 -> 136,748`（`-450`，`-0.327993%`），44 个 root 缩小、零增长，mnemonic delta
+  精确为 `STR -225 / LDR -225`；candidate 额外完成 2 个 root，不计入收益。首对配对中同一 PC 分别
+  编译为 27/682 条的不同代码对象版本，已排除且未用于结论。
+- Orb 的 `swift_runtime`、`svm_translator_linux` 构建和 `spill_forwarding_test.cpp.o` GCC 定向编译通过；
+  完整 `swift_test` 仍受既有 `direct_link_production_test.cpp:1320` designated-initializer 顺序错误阻断。
+
+本阶段没有增加 env、日志、probe、临时路径、硬编码 guest PC 或兼容兜底，也没有运行长基准或压力
+测试。剩余 address spill 不再是 final-use `GetOperand` 这一类，应重新归因到真实多 use、faulting memory
+consumer 或 width/publication ownership。
