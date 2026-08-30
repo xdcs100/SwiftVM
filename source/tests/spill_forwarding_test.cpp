@@ -177,7 +177,7 @@ TEST_CASE("spill forwarding stops before a width ownership transfer") {
     REQUIRE(reload != emitted.end());
 }
 
-TEST_CASE("repeated spilled scalar uses share one reload region") {
+TEST_CASE("spilled scalar definitions transfer into multi-use reload regions") {
     const auto emitted = Emit(MakeRepeatedSpillUseBlock(),
                               GPRSMask{~((1u << 5) - 1u) & ~(1u << 18)});
     const auto definition = std::ranges::find_if(emitted, [](const auto& line) {
@@ -185,20 +185,17 @@ TEST_CASE("repeated spilled scalar uses share one reload region") {
                line.find("#0x4") != std::string::npos;
     });
     REQUIRE(definition != emitted.end());
-    const auto store = std::find_if(std::next(definition), emitted.end(), [](const auto& line) {
-        return line.find("str x") != std::string::npos &&
-               line.find("[x28") != std::string::npos;
-    });
-    REQUIRE(store != emitted.end());
-    const auto address_begin = store->find("[x28");
-    const auto address_end = store->find(']', address_begin);
-    REQUIRE(address_begin != std::string::npos);
-    REQUIRE(address_end != std::string::npos);
-    const auto address = store->substr(address_begin, address_end - address_begin + 1);
-    REQUIRE(std::count_if(std::next(store), emitted.end(), [&](const auto& line) {
-        return line.find("ldr x") != std::string::npos &&
-               line.find(address) != std::string::npos;
-    }) == 1);
+    const auto delimiter = definition->find(',');
+    REQUIRE(delimiter != std::string::npos);
+    const auto resident = definition->substr(4, delimiter - 4);
+    REQUIRE(std::count_if(std::next(definition), emitted.end(), [&](const auto& line) {
+        return line.find("add ") != std::string::npos &&
+               line.find(resident) != std::string::npos;
+    }) >= 2);
+    REQUIRE(std::none_of(std::next(definition), emitted.end(), [&](const auto& line) {
+        return (line.find("str " + resident + ", [x28") != std::string::npos) ||
+               (line.find("ldr " + resident + ", [x28") != std::string::npos);
+    }));
 }
 
 TEST_CASE("spill reload regions stop at local control flow") {

@@ -1,5 +1,6 @@
 #include "register_alloc_spill_reload.h"
 
+#include <functional>
 #include <map>
 
 #include "register_alloc_internal.h"
@@ -10,6 +11,101 @@ namespace {
 
 bool IsLocalControlFlow(OpCode op) {
     return op == OpCode::BindLabel || op == OpCode::Goto || op == OpCode::NotGoto;
+}
+
+bool SupportsDefinitionTransfer(OpCode op) {
+    using O = OpCode;
+    switch (op) {
+        case O::LoadImm:
+        case O::LoadMemory:
+        case O::GetHostGPR:
+        case O::Add:
+        case O::Sub:
+        case O::Adc:
+        case O::Sbb:
+        case O::Mul:
+        case O::MulSub:
+        case O::And:
+        case O::Or:
+        case O::Xor:
+        case O::Not:
+        case O::Select:
+        case O::SelectZero:
+        case O::CondSelect:
+        case O::LslImm:
+        case O::LsrImm:
+        case O::AsrImm:
+        case O::LslValue:
+        case O::LsrValue:
+        case O::AsrValue:
+        case O::BitExtract:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool SupportsDefinitionConsumer(OpCode op) {
+    using O = OpCode;
+    switch (op) {
+        case O::StoreUniform:
+        case O::StoreMemory:
+        case O::StoreMemoryTSO:
+        case O::Add:
+        case O::Sub:
+        case O::Adc:
+        case O::Sbb:
+        case O::Mul:
+        case O::MulSub:
+        case O::And:
+        case O::Or:
+        case O::Xor:
+        case O::Not:
+        case O::Select:
+        case O::SelectZero:
+        case O::CondSelect:
+        case O::LslImm:
+        case O::LsrImm:
+        case O::AsrImm:
+        case O::LslValue:
+        case O::LsrValue:
+        case O::AsrValue:
+        case O::BitExtract:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool TerminalUsesValue(const Terminal& terminal,
+                       u32 value_id,
+                       const backend::RegAlloc& reg_alloc) {
+    bool used = false;
+    auto check = [&](Value value) {
+        used |= value.Defined() && reg_alloc.AllocationId(value) == value_id;
+    };
+    std::function<void(const Terminal&)> visit = [&](const Terminal& current) {
+        VisitVariant<void>(current, [&](auto term) {
+            using T = std::decay_t<decltype(term)>;
+            if constexpr (std::is_same_v<T, terminal::If>) {
+                check(term.cond);
+                visit(term.then_);
+                visit(term.else_);
+            } else if constexpr (std::is_same_v<T, terminal::Switch>) {
+                check(term.value);
+                for (const auto& case_ : term.cases) {
+                    visit(case_.then);
+                }
+            } else if constexpr (std::is_same_v<T, terminal::Condition>) {
+                visit(term.then_);
+                visit(term.else_);
+            } else if constexpr (std::is_same_v<T, terminal::CheckHalt>) {
+                visit(term.else_);
+            }
+        });
+    };
+    visit(terminal);
+    return used;
 }
 
 u32 ScratchOnlyGPRs(Inst& inst, const backend::RegAlloc& reg_alloc, const FeatureSet& features) {
@@ -91,9 +187,12 @@ std::optional<u16> FindRegionRegister(const Vector<Inst*>& instructions,
 }
 
 void PlanSegment(const Vector<Inst*>& instructions,
+                 const Terminal& terminal,
                  backend::RegAlloc* reg_alloc,
                  const FeatureSet& features) {
     std::map<u32, Vector<size_t>> uses;
+    std::map<u32, u32> use_counts;
+    std::map<u32, bool> transferable_uses;
     for (size_t i = 0; i < instructions.size(); ++i) {
         auto* inst = instructions[i];
         if (inst->IsPseudoOperation()) {
@@ -115,9 +214,41 @@ void PlanSegment(const Vector<Inst*>& instructions,
             counted.push_back(value_id);
             uses[value_id].push_back(i);
         }
+        for (auto value : inst->GetValues()) {
+            if (value.Defined() &&
+                reg_alloc->ValueType(value) == backend::RegAlloc::MEM &&
+                !IsFloatValueType(ResolveBitCastSource(value).Type())) {
+                const u32 value_id = reg_alloc->AllocationId(value);
+                ++use_counts[value_id];
+                auto transferable = transferable_uses.try_emplace(value_id, true).first;
+                transferable->second &= SupportsDefinitionConsumer(inst->GetOp());
+            }
+        }
     }
 
     for (auto& [value_id, positions] : uses) {
+        auto definition = std::find_if(instructions.begin(), instructions.end(),
+                                       [value_id](const auto* inst) {
+                                           return inst->Id() == value_id;
+                                       });
+        if (definition != instructions.end() &&
+            SupportsDefinitionTransfer((*definition)->GetOp()) &&
+            transferable_uses[value_id] &&
+            (*definition)->GetUses(false) == use_counts[value_id] &&
+            !TerminalUsesValue(terminal, value_id, *reg_alloc)) {
+            const size_t definition_pos = std::distance(instructions.begin(), definition);
+            if (definition_pos < positions.front()) {
+                auto reg = FindRegionRegister(instructions, definition_pos, positions.back(),
+                                              value_id, reg_alloc, features);
+                if (reg) {
+                    reg_alloc->MapSpillReload(value_id,
+                                              (*definition)->Id(),
+                                              instructions[positions.back()]->Id(),
+                                              HostGPR{*reg});
+                    continue;
+                }
+            }
+        }
         size_t begin = 0;
         while (begin + 1 < positions.size()) {
             size_t best = begin;
@@ -152,7 +283,7 @@ void PlanBlock(Block* block, backend::RegAlloc* reg_alloc, const FeatureSet& fea
     Vector<Inst*> segment;
     auto flush = [&] {
         if (!segment.empty()) {
-            PlanSegment(segment, reg_alloc, features);
+            PlanSegment(segment, block->GetTerminal(), reg_alloc, features);
             segment.clear();
         }
     };

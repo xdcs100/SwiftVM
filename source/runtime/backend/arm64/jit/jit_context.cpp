@@ -378,6 +378,25 @@ Register JitContext::SpillGPR(const ir::Value& value, bool definition) {
     const auto slot = reg_alloc.ValueMem(value);
     ASSERT_MSG(slot.offset < kMaxSpillSlots, "spill slot beyond reserved area");
     const u32 offset = state_offset_spill_area + slot.offset * sizeof(u64);
+    if (cur_inst) {
+        if (const auto* reload = reg_alloc.SpillReloadAt(value, cur_inst->Id())) {
+            auto resident = XRegister(reload->reg);
+            if (active_spill_reload_regions.size() <= reload->region) {
+                active_spill_reload_regions.resize(reload->region + 1);
+            }
+            if (definition || (value.Defined() && value.Def() == cur_inst)) {
+                active_spill_reload_regions[reload->region] = true;
+                return resident;
+            }
+            if (!active_spill_reload_regions[reload->region]) {
+                active_spill_reload_regions[reload->region] = true;
+                __ Ldr(resident, MemOperand(state, offset));
+                if (RAShapeProfEnabled()) ++reg_alloc.RAShape().spill_loads;
+                RecordHotSpillReload();
+            }
+            return resident;
+        }
+    }
     if (definition || (value.Defined() && value.Def() == cur_inst)) {
         // Def access: nothing to reload yet. Hand out (or reuse) the
         // scratch register the emitter will compute into and queue the
@@ -390,21 +409,6 @@ Register JitContext::SpillGPR(const ir::Value& value, bool definition) {
         pending_spill_writes.push_back(
                 {value.Id(), slot.offset, static_cast<u8>(tmp.GetCode()), false});
         return tmp;
-    }
-    if (cur_inst) {
-        if (const auto* reload = reg_alloc.SpillReloadAt(value, cur_inst->Id())) {
-            auto resident = XRegister(reload->reg);
-            if (active_spill_reload_regions.size() <= reload->region) {
-                active_spill_reload_regions.resize(reload->region + 1);
-            }
-            if (!active_spill_reload_regions[reload->region]) {
-                active_spill_reload_regions[reload->region] = true;
-                __ Ldr(resident, MemOperand(state, offset));
-                if (RAShapeProfEnabled()) ++reg_alloc.RAShape().spill_loads;
-                RecordHotSpillReload();
-            }
-            return resident;
-        }
     }
     // Use access: reload from the spill slot. Any write-back of a value
     // defined by an earlier instruction has already been flushed at this
