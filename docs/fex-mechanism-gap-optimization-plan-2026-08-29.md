@@ -1347,3 +1347,34 @@ live-in ABI。
 本阶段没有保留 probe、日志、env 开关、临时源码路径或兼容兜底，也没有运行长基准或压力测试。
 剩余 RA 缺口收窄为跨局部控制流的显式 split interval、FPR spill region，以及有完整 fault/observer
 证明的 definition-to-region transfer；在新的加权账证明其规模前不继续泛化。
+
+### 16.36 spill definition-to-region ownership transfer
+
+提交 `f5897d2` 让第 16.35 节的 reload region 直接接管满足闭包证明的 spilled definition。producer
+必须属于会真实写出 scalar GPR 结果的 load/整数 ALU/select/shift/bit-extract 集合；所有普通 use 必须
+位于同一个无局部控制流的 segment，use 计数必须与 definition 的完整非 pseudo use 集一致，terminal
+不得再引用该 value。所有 consumer 也必须属于明确读取输入的 memory store 或整数 consumer 集合，
+因此 `ZeroExtend32To64`、`BitCast/GetOperand`、直接 publication 和 helper 边不会以透明 ownership
+transfer 冒充真实读取。
+
+满足证明后，region 从 definition IR 开始占有同一物理 GPR。`SpillGPR` 在 definition 写入时直接激活
+region，不再建立 pending spill write；后续 use 读取同一 resident owner，因此 canonical store 和首次
+reload 同时删除。不满足完整 use、terminal、fixed-clobber 或 scratch headroom 证明的 value 继续使用
+第 16.35 节的 canonical backing，没有增加第二套运行时开关或回退协议。
+
+短门禁结果：
+
+- Debug spill 分组通过 12 个 case / 23,086 条断言；width ownership 负向用例继续观察到 canonical
+  store/reload，正向用例确认 multi-use definition 直接驻留且不访问 spill slot。CallLambda 67 条、
+  function/static interaction 65 条、SSE4.2 差分 16,255 条和 direct-link 900,306 条断言全部通过。
+- smallpt `4 8 6` 保持 275 roots、100% root/top-30 覆盖和零增长，
+  `46,573 -> 46,363`（`-210`，`-0.451%`）；PPM SHA-256 仍为
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`。同源 RA shape 中
+  `spill_loads/stores` 从 `907/922` 降到 `858/872`。
+- SQLite 8 秒共同 768 roots 保持 100% baseline root/top-30 覆盖，
+  `137,087 -> 136,445`（`-642`，`-0.468%`），68 个 root 缩小、700 个不变、零增长；候选额外完成
+  86 个 root，不把它们计入收益。`__strcmp_sse42@0x505120` `341 -> 339`。
+
+本阶段没有保留 probe、日志、env 开关、临时源码路径或兼容兜底，也没有运行长基准或压力测试。
+FPR pool 审计显示 smallpt 最大 live FPR 只有 7、默认 pool 为 16，因此不立 FPR spill region；剩余 RA
+方向只保留需要显式 CFG split interval 的跨局部控制流形态，等待新的加权规模证明。
