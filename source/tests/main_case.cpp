@@ -9079,6 +9079,14 @@ TEST_CASE("unit-local absolute addresses reuse only verified idle GPR windows") 
         REQUIRE(on.bytes + 2 * vixl::aarch64::kInstructionSize == off.bytes);
     }
 
+    SECTION("biased memory reuses an unchanged exact guest address") {
+        const auto off = run(false, false, false, 0x004958d8, true);
+        const auto on = run(true, false, false, 0x004958d8, true);
+        REQUIRE(on.anchor);
+        REQUIRE(on.reuse);
+        REQUIRE(on.bytes + 4 * vixl::aarch64::kInstructionSize == off.bytes);
+    }
+
     SECTION("scratch headroom shortage falls back without a cache owner") {
         const auto tight = run(true, true, false);
         REQUIRE_FALSE(tight.anchor);

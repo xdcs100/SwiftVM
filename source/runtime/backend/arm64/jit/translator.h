@@ -149,6 +149,8 @@ private:
     [[nodiscard]] bool HasOnlyZeroStoreUses(ir::Inst* definition);
     [[nodiscard]] bool ReproveCoalescedHostWrite(ir::Inst* inst) const;
     [[nodiscard]] bool ReproveCoalescedHostRead(ir::Inst* inst) const;
+    [[nodiscard]] bool EmitCachedConstAddress(ir::Inst* inst,
+                                              const Register& result);
     [[nodiscard]] std::optional<u64> CachedConstAddressOffset(ir::Inst* inst) const;
     [[nodiscard]] bool ReproveCoalescedHostFPRWrite(ir::Inst* inst) const;
     [[nodiscard]] bool ReproveScalarFPRTie(ir::Inst* inst) const;
@@ -210,6 +212,7 @@ private:
                                                 ir::Value source) const;
     [[nodiscard]] bool ReproveLow32Copy(ir::Inst* inst) const;
     [[nodiscard]] bool ReproveCachedConstAddress(ir::Inst* inst) const;
+    [[nodiscard]] bool CanReuseExactCachedConstAddress(ir::Inst* inst) const;
 
     struct PinnedGPRCopy {
         ir::Inst* read{};
