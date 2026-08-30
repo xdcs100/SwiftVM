@@ -3629,6 +3629,20 @@ peepholes.
   fallback remains. The section-7 GPR lattice now has ALU-extension, compare and memory consumers;
   audit XMM scalar reuse before broadening it further.
 
+- `3de2a5a` binds persisted host continuations to the existing QSBR reclaim generation. Each
+  `RuntimeEpoch` records the generation consumed by its RSB state, and `BeginJit` clears an obsolete
+  stack before any cache lookup; the multithreaded path reuses its existing `global_epoch_` load and
+  generated call/return code is unchanged. A recognized same-thread SMC fault also resets x25 in the
+  signal context through the guarded return-stack owner, while active cross-thread code remains
+  protected until its QSBR exit. The production allocation-retirement lifecycle passes 144 focused
+  assertions; continuation, production direct-link, non-stress SMC, indirect-L1 and guarded-RSB
+  groups pass. Release static shape remains smallpt `275 / 49,065` and SQLite `2,114 / 354,519`.
+  A temporary exact-HEAD SQLite pair is `TOTAL 1.555s -> 1.554s`; all temporary worktrees, builds and
+  captures were removed. No frame generation field, hot return instruction, env switch, probe, log,
+  temporary path or fallback remains. Continuation generation/unlink/invalidation and code-cache
+  reuse are now closed; next audit XMM scalar GuestStateMap reuse and the remaining exact-mask
+  EdgeFlags tail before entering string/complex-EA work.
+
 ## Orb loop
 
 ```

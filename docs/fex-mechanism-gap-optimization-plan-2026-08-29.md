@@ -1117,3 +1117,26 @@ codegen 为 315.6 ms、TOTAL 为 1.483 s，与上一阶段同量级，只作为�
 没有运行压力测试或长基准，也没有保留 env 开关、probe、日志、临时源路径或兼容兜底。GPR
 fault/CFG/extension 格的生产 consumer 已覆盖 ALU extension、narrow compare 和 narrow memory store；
 第 7 节下一步只剩 XMM scalar lane 是否能复用该模型的收益审计，不为低权重形态强行扩展。
+
+### 16.27 reclaim-generation continuation invalidation
+
+提交 `3de2a5a` 将 host continuation 生命周期绑定到现有 QSBR reclaim generation。每个
+`RuntimeEpoch` 记录已同步的 reclaim epoch 和该 Runtime 的 RSB 持久指针；`BeginJit` 在任何代码缓存
+查找之前比较 generation，发现旧代码已经进入退休队列时直接把持久 RSB 恢复为空。多线程路径复用
+原本必需的 `global_epoch_` 读取，单线程只有启用 RSB 时才读取一次 generation；return hit/miss 和
+call publication 的生成代码没有增加 frame generation、load、compare 或分支。
+
+当前线程触发受保护 guest code 页写 fault 时，SMC transaction 完成 target generation 撤销、direct
+unlink 和 dispatch slot 清除后，signal recovery 通过 `GuardedReturnStack::Reset` 立即把 ucontext 的
+x25 恢复为空。其他正在运行的 Runtime 仍遵守原有语义，可以完成失效前已经进入的旧代码；QSBR 在其
+退出前不复用 allocation，下一次 `BeginJit` 又会在读取 x25 之前消费新 generation，因此不存在旧
+host continuation 在 code-cache 地址复用后形成 ABA 命中的窗口。guard-page 越界恢复与 SMC 失效
+复用同一个 x25 reset 入口。
+
+Mac Debug 通过 continuation、production direct-link、非压力 SMC、indirect-L1 和 guarded return
+stack 定向分组；包含真实 source allocation 退休与重用门禁的 production lifecycle 用例通过 144 条
+断言。Release static-only 保持 smallpt `275 / 49,065` 和 SQLite `2,114 / 354,519`，与 `ae28113`
+完全一致。一次临时同源 SQLite 短配对为 `TOTAL 1.555s -> 1.554s`，只用于确认边界 generation 检查
+没有明显回退；临时 worktree、构建和 capture 均已删除。本阶段没有新增 env 开关、probe、日志、
+临时运行路径或兼容兜底。第 8 节 generation/unlink/invalidation 与 code-cache reuse 的 correctness
+缺口至此闭合，后续不再给 16-byte continuation frame 增加热路径 generation 字段。
