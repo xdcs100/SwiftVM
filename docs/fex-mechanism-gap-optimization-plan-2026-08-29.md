@@ -1316,3 +1316,34 @@ PageFatal；执行追踪确认 `ZeroExtend32To64` 等 ownership-transfer IR 可�
 
 每个命中只删除相邻的 spill store/reload 两条指令，不改变 consumer 发码或 root 划分。本阶段没有保留
 诊断输出、probe、env 开关、临时路径或兼容兜底，只运行了 8 秒上限的 static-only 短跑。
+
+### 16.35 基本块内多 use spill reload region
+
+提交 `48ef441` 把相邻 forwarding 之后的多 use spill 残差纳入一等分配所有权。新增的
+`register_alloc_spill_reload` 在普通线性扫描完成后按 LIR 基本块收集 scalar GPR spill use，并在
+`BindLabel/Goto/NotGoto` 处分段。只有一个动态 GPR 在完整区间内都不与 live value、fixed clobber 或
+既有 reload region 冲突，且扣除该 value 的逐 use reload 后每条 IR 仍满足精确 scratch budget，才发布
+region。`RegAlloc` 把该寄存器写入区间内每条 IR 的 dirty mask，现有最终 verifier 继续逐指令复核。
+
+JIT 不在 region 起点无条件插入 load；`SpillGPR` 在 emitter 第一次真实读取该 value 时才从 canonical
+spill slot 加载，并按 region id 复用到最后一个 use。这样 `GetOperand` 地址重物化、直接 pinned
+publication 和 transparent width owner 等“IR 有 use、emitter 不读 slot”的形态不会产生假 load。
+进入 region 的 consumer 禁止旧 pending-write forwarding，先按原顺序提交 spill slot，保证 fault、
+helper 和调度边界仍看到 canonical backing。region 不跨 LIR 局部控制流，也不改变 FPR spill 或 CFG
+live-in ABI。
+
+短门禁结果：
+
+- Debug spill 分组通过 12 个 case / 23,087 条断言；新增正向用例证明同一 spill slot 的两个非紧邻
+  arithmetic use 只加载一次，负向用例证明 region 不跨 `NotGoto/BindLabel`。CallLambda 与函数级
+  static interaction 分别通过 67/65 条断言，SSE4.2 Rosetta/SDM 差分通过 16,255 条断言。
+- 完整 smallpt `4 8 6` static-only A/B 保持 275 roots、100% root/top-30 覆盖和零增长，
+  `47,110 -> 46,573`（`-537`，`-1.140%`）；PPM SHA-256 保持
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`。
+- SQLite 只跑 8 秒上限，不将缺失 root 外推为全量结果。共同的 768 roots 覆盖 baseline host code
+  `88.348%`，`138,603 -> 137,087`（`-1,516`，`-1.094%`），96 个 root 缩小、672 个不变、零增长；
+  `__strcmp_sse42@0x505120` `351 -> 341`。
+
+本阶段没有保留 probe、日志、env 开关、临时源码路径或兼容兜底，也没有运行长基准或压力测试。
+剩余 RA 缺口收窄为跨局部控制流的显式 split interval、FPR spill region，以及有完整 fault/observer
+证明的 definition-to-region transfer；在新的加权账证明其规模前不继续泛化。
