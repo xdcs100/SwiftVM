@@ -118,9 +118,9 @@ void JitTranslator::EmitSse42StrVectorCall(ir::Inst* inst,
         }
     };
     if (left.GetCode() == 1 && right.GetCode() == 0) {
-        __ Orr(v2.V16B(), v0.V16B(), v0.V16B());
+        __ Orr(v7.V16B(), v0.V16B(), v0.V16B());
         __ Orr(v0.V16B(), v1.V16B(), v1.V16B());
-        __ Orr(v1.V16B(), v2.V16B(), v2.V16B());
+        __ Orr(v1.V16B(), v7.V16B(), v7.V16B());
     } else if (right.GetCode() == 0 && left.GetCode() != 0) {
         load_argument(v1.Q(), right);
         load_argument(v0.Q(), left);
