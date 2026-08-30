@@ -31,7 +31,7 @@ SpilledEaBlock MakeSpilledEaBlock() {
                               .SetType(ValueType::U64);
     const auto address = block->GetOperand(
             Operand{base, Imm{24u}, OperandPlus}).SetType(ValueType::U64);
-    const auto stored = block->LoadImm(Imm{0x1122334455667788ull})
+    const auto stored = block->LoadImm(Imm{swift::u64{0x1122334455667788ull}})
                                 .SetType(ValueType::U64);
     block->StoreMemory(Operand{address}, stored);
     auto total = retained.front();

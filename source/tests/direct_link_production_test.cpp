@@ -1308,12 +1308,12 @@ TEST_CASE("static forwards register their flags bypass",
                 .enable_asm_interp = false,
                 .has_local_operation = false,
                 .backend_isa = kArm64,
-                .arm64_features = flags_case == 3
-                        ? Arm64Features::None
-                        : Arm64Features::FlagM,
                 .uniform_buffer_size = 64,
                 .global_opts = Optimizations::BlockLink |
                                Optimizations::ReturnStackBuffer,
+                .arm64_features = flags_case == 3
+                        ? Arm64Features::None
+                        : Arm64Features::FlagM,
                 .region_edges = true,
                 .memory_base = guest_memory,
                 .guest_addr_mask = guest_size - 1,
