@@ -252,6 +252,7 @@ public:
         u32 value{};
         u16 reg{};
         bool owns_all_uses{};
+        bool fault_backed{};
     };
 
     // The GPR coalescer stages one whole block and publishes it only after the
@@ -275,7 +276,8 @@ public:
     void MapRegister(u32 id, ir::HostFPR fpr);
     void MapMemSpill(u32 id, ir::SpillSlot slot);
     void MapSpillReload(u32 value_id, u32 first_use, u32 last_use,
-                        ir::HostGPR reg, bool owns_all_uses = false);
+                        ir::HostGPR reg, bool owns_all_uses = false,
+                        bool fault_backed = false);
     void MapReference(u32 from, u32 to);
     void MarkHostWriteCoalesced(u32 id);
     void MarkHostReadCoalesced(u32 id);

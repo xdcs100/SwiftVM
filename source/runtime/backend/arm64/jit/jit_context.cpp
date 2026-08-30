@@ -393,6 +393,13 @@ Register JitContext::SpillGPR(const ir::Value& value, bool definition) {
             }
             if (definition || (value.Defined() && value.Def() == cur_inst)) {
                 active_spill_reload_regions[reload->region] = true;
+                if (reload->fault_backed &&
+                    !spill_def_scratch.contains(value.Id())) {
+                    spill_def_scratch.emplace(value.Id(), reload->reg);
+                    pending_spill_writes.push_back(
+                            {value.Id(), slot.offset,
+                             static_cast<u8>(reload->reg), false, true});
+                }
                 return resident;
             }
             if (!active_spill_reload_regions[reload->region]) {
@@ -504,6 +511,18 @@ bool JitContext::AdoptPendingSpillWrite(
     return true;
 }
 
+void JitContext::EmitSpillWriteback(const PendingSpillWrite& write) {
+    const u32 offset = state_offset_spill_area + write.slot * sizeof(u64);
+    if (write.is_fpr) {
+        __ Str(VRegister::GetVRegFromCode(write.reg).Q(),
+               MemOperand(state, offset));
+    } else {
+        __ Str(XRegister(write.reg), MemOperand(state, offset));
+    }
+    if (RAShapeProfEnabled()) ++reg_alloc.RAShape().spill_stores;
+    RecordHotSpillWriteback();
+}
+
 std::optional<u8> JitContext::FlushSpillWrites(
         ir::Inst* consumer,
         bool forward_spilled_width_input,
@@ -517,6 +536,10 @@ std::optional<u8> JitContext::FlushSpillWrites(
             ? backend::FixedGPRClobbers(*consumer, features, scratch_only)
             : 0;
     for (auto& write : pending_spill_writes) {
+        if (write.required_backing) {
+            EmitSpillWriteback(write);
+            continue;
+        }
         bool fixed_forward = false;
 #if defined(__linux__) && !defined(__ANDROID__)
         fixed_forward = write.reg == spill_scratch.GetCode();
@@ -560,14 +583,7 @@ std::optional<u8> JitContext::FlushSpillWrites(
                 continue;
             }
         }
-        const u32 offset = state_offset_spill_area + write.slot * sizeof(u64);
-        if (write.is_fpr) {
-            __ Str(VRegister::GetVRegFromCode(write.reg).Q(), MemOperand(state, offset));
-        } else {
-            __ Str(XRegister(write.reg), MemOperand(state, offset));
-        }
-        if (RAShapeProfEnabled()) ++reg_alloc.RAShape().spill_stores;
-        RecordHotSpillWriteback();
+        EmitSpillWriteback(write);
     }
     pending_spill_writes.clear();
     if (retained) {

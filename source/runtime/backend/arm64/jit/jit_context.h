@@ -411,6 +411,7 @@ private:
             std::optional<u32> forward_spilled_memory_input = std::nullopt);
     [[nodiscard]] bool AdoptPendingSpillWrite(
             const PendingSpillWrite& write, ir::Inst* consumer);
+    void EmitSpillWriteback(const PendingSpillWrite& write);
     [[nodiscard]] static bool IsFloatValue(const ir::Value& value);
 
     // Scratch handed to a spill reload rather than to the emitter. Budgeted
@@ -428,6 +429,7 @@ private:
         u16 slot;    // spill slot index
         u8 reg;      // scratch register code holding the value
         bool is_fpr;
+        bool required_backing{};
     };
 
     std::shared_ptr<Module> module;

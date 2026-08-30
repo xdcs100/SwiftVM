@@ -623,7 +623,8 @@ void RegAlloc::MapMemSpill(u32 id, ir::SpillSlot slot) {
 }
 
 void RegAlloc::MapSpillReload(u32 value_id, u32 first_use, u32 last_use,
-                              ir::HostGPR reg, bool owns_all_uses) {
+                              ir::HostGPR reg, bool owns_all_uses,
+                              bool fault_backed) {
     value_id = ResolveId(value_id);
     ASSERT(alloc_result[value_id].type == MEM);
     ASSERT(first_use <= last_use);
@@ -642,6 +643,7 @@ void RegAlloc::MapSpillReload(u32 value_id, u32 first_use, u32 last_use,
                 .value = value_id,
                 .reg = reg.id,
                 .owns_all_uses = owns_all_uses,
+                .fault_backed = fault_backed,
         });
         alloc_result[id].dirty_gprs.Mark(reg.id);
     }

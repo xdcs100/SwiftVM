@@ -171,9 +171,10 @@ std::optional<u16> FindRegionRegister(const Vector<Inst*>& instructions,
                                       size_t last,
                                       u32 value_id,
                                       backend::RegAlloc* reg_alloc,
-                                      const FeatureSet& features) {
+                                      const FeatureSet& features,
+                                      u32 forbidden = 0) {
     for (u16 reg = 0; reg < 31; ++reg) {
-        if (reg_alloc->GetGprs().Get(reg)) {
+        if ((forbidden & (1u << reg)) || reg_alloc->GetGprs().Get(reg)) {
             continue;
         }
         bool available = true;
@@ -190,6 +191,80 @@ std::optional<u16> FindRegionRegister(const Vector<Inst*>& instructions,
         }
     }
     return std::nullopt;
+}
+
+bool TryPlanLoadMemoryOwnershipPair(
+        const Vector<Inst*>& instructions,
+        const Terminal& terminal,
+        u32 input_id,
+        const Vector<size_t>& input_positions,
+        const std::map<u32, Vector<size_t>>& uses,
+        const std::map<u32, u32>& use_counts,
+        const std::map<u32, bool>& transferable_uses,
+        backend::RegAlloc* reg_alloc,
+        const FeatureSet& features,
+        Vector<u32>& planned_values) {
+    if (input_positions.size() != 1) {
+        return false;
+    }
+    const size_t consumer_pos = input_positions.front();
+    auto* consumer = instructions[consumer_pos];
+    auto definition = std::find_if(instructions.begin(), instructions.end(),
+                                   [input_id](const auto* inst) {
+                                       return inst->Id() == input_id;
+                                   });
+    const auto input_count = use_counts.find(input_id);
+    if (definition == instructions.end() ||
+        (*definition)->GetOp() != OpCode::GetOperand ||
+        (*definition)->Id() + 1 != consumer->Id() ||
+        consumer->GetOp() != OpCode::LoadMemory ||
+        input_count == use_counts.end() || input_count->second != 1 ||
+        (*definition)->GetUses(false) != 1 ||
+        TerminalUsesValue(terminal, input_id, *reg_alloc)) {
+        return false;
+    }
+    const size_t definition_pos = std::distance(instructions.begin(), definition);
+
+    const auto result = Value{consumer};
+    if (reg_alloc->ValueType(result) != backend::RegAlloc::MEM ||
+        IsFloatValueType(result.Type())) {
+        return false;
+    }
+    const u32 result_id = reg_alloc->AllocationId(result);
+    const auto result_positions = uses.find(result_id);
+    const auto result_count = use_counts.find(result_id);
+    const auto result_transferable = transferable_uses.find(result_id);
+    if (result_positions == uses.end() || result_positions->second.empty() ||
+        result_count == use_counts.end() ||
+        result_transferable == transferable_uses.end() ||
+        !result_transferable->second ||
+        consumer->GetUses(false) != result_count->second ||
+        TerminalUsesValue(terminal, result_id, *reg_alloc) ||
+        std::find(planned_values.begin(), planned_values.end(), result_id) !=
+                planned_values.end()) {
+        return false;
+    }
+
+    const auto result_reg = FindRegionRegister(
+            instructions, consumer_pos, result_positions->second.back(),
+            result_id, reg_alloc, features);
+    if (!result_reg) {
+        return false;
+    }
+    const auto input_reg = FindRegionRegister(
+            instructions, definition_pos, consumer_pos, input_id, reg_alloc,
+            features, 1u << *result_reg);
+    if (!input_reg) {
+        return false;
+    }
+
+    reg_alloc->MapSpillReload(input_id, (*definition)->Id(), consumer->Id(),
+                              HostGPR{*input_reg}, true, true);
+    reg_alloc->MapSpillReload(result_id, consumer->Id(),
+                              instructions[result_positions->second.back()]->Id(),
+                              HostGPR{*result_reg}, true);
+    planned_values.push_back(result_id);
+    return true;
 }
 
 void PlanSegment(const Vector<Inst*>& instructions,
@@ -235,7 +310,18 @@ void PlanSegment(const Vector<Inst*>& instructions,
         }
     }
 
+    Vector<u32> planned_values;
     for (auto& [value_id, positions] : uses) {
+        if (std::find(planned_values.begin(), planned_values.end(), value_id) !=
+            planned_values.end()) {
+            continue;
+        }
+        if (TryPlanLoadMemoryOwnershipPair(
+                    instructions, terminal, value_id, positions, uses,
+                    use_counts, transferable_uses, reg_alloc, features,
+                    planned_values)) {
+            continue;
+        }
         auto definition = std::find_if(instructions.begin(), instructions.end(),
                                        [value_id](const auto* inst) {
                                            return inst->Id() == value_id;

@@ -148,6 +148,26 @@ SpillForwardingBlock MakeSpillMemoryAddressNoRegionBlock() {
     return {std::move(block), arriving};
 }
 
+SpillForwardingBlock MakeSpillMemoryOwnedAddressBlock() {
+    IntrusivePtr<Block> block{new Block(0, Location{0x243f})};
+    const auto longest = block->LoadImm(Imm{swift::u64{1}});
+    const auto middle = block->LoadImm(Imm{swift::u64{2}});
+    const auto shortest = block->LoadImm(Imm{swift::u64{3}});
+    const auto base = block->LoadImm(Imm{swift::u64{4}});
+    const auto address = block->GetOperand(
+            Operand{base, Imm{swift::u64{16}}, OperandPlus})
+                                 .SetType(ValueType::U64);
+    const auto loaded = block->LoadMemory(Operand{address})
+                                .SetType(ValueType::U64);
+    block->StoreUniform(Uniform{8, ValueType::U64}, loaded);
+    const auto first = block->Add(shortest, Operand{middle});
+    const auto total = block->Add(first, Operand{longest});
+    block->StoreUniform(Uniform{0, ValueType::U64}, total);
+    block->SetTerminal(terminal::ReturnToDispatch{});
+    block->ReIdInstr();
+    return {std::move(block), address};
+}
+
 SpillForwardingBlock MakeSpillMemoryStoreAddressBlock() {
     IntrusivePtr<Block> block{new Block(0, Location{0x243d})};
     const auto longest = block->LoadImm(Imm{swift::u64{1}});
@@ -590,11 +610,34 @@ TEST_CASE("faulting memory retains backing for multi-use pending inputs") {
             true);
 }
 
-TEST_CASE("faulting region-owned load destinations retain address backing") {
-    RequireCanonicalSpillRoundTrip(
-            Emit(MakeSpillMemoryAddressBlock(false, true),
-                 GPRSMask{~((1u << 5) - 1u) & ~(1u << 18)}),
-            true);
+TEST_CASE("faulting region-owned loads retain backing without reloading addresses") {
+    const auto emitted = Emit(MakeSpillMemoryOwnedAddressBlock(),
+                              GPRSMask{~((1u << 5) - 1u) & ~(1u << 18)});
+    const auto definition = std::ranges::find_if(emitted, [](const auto& line) {
+        return line.find("add x") != std::string::npos &&
+               line.find("#0x10") != std::string::npos;
+    });
+    REQUIRE(definition != emitted.end());
+    const auto delimiter = definition->find(',');
+    REQUIRE(delimiter != std::string::npos);
+    const auto address = definition->substr(4, delimiter - 4);
+    const auto consumer = std::find_if(
+            std::next(definition), emitted.end(), [&](const auto& line) {
+                return line.find("ldr x") != std::string::npos &&
+                       line.find("[" + address) != std::string::npos;
+            });
+    REQUIRE(consumer != emitted.end());
+    REQUIRE(consumer->find("ldr " + address + ",") == std::string::npos);
+    REQUIRE(std::count_if(
+                    std::next(definition), consumer, [&](const auto& line) {
+                        return line.find("str " + address + ", [x28") !=
+                               std::string::npos;
+                    }) == 1);
+    REQUIRE(std::none_of(
+            std::next(definition), consumer, [&](const auto& line) {
+                return line.find("ldr " + address + ", [x28") !=
+                       std::string::npos;
+            }));
 }
 
 TEST_CASE("publication consumers retain final-use spilled inputs") {
