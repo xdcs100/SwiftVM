@@ -146,8 +146,10 @@ private:
                          const VRegister& packed);
     [[nodiscard]] bool CanUseZeroStoreRegister(ir::Value value);
     [[nodiscard]] bool CanConsumeForwardedWidthSpill(ir::Inst* inst);
+    [[nodiscard]] std::optional<u32> ForwardedMemorySpillInput(ir::Inst* inst);
     [[nodiscard]] bool CanFusePinnedZeroExtendPublication(ir::Inst* inst);
-    [[nodiscard]] bool CanAdoptPendingSpillWrite(ir::Inst* inst);
+    [[nodiscard]] bool CanAdoptPendingSpillWrite(
+            ir::Inst* inst, bool reads_forwarded_memory_input);
     [[nodiscard]] bool IsZeroStoreValue(ir::Value value);
     [[nodiscard]] bool HasOnlyZeroStoreUses(ir::Inst* definition);
     [[nodiscard]] bool ReproveCoalescedHostWrite(ir::Inst* inst) const;

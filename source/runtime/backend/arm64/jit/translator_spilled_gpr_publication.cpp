@@ -17,9 +17,19 @@ bool SupportsDirectPublication(ir::OpCode op) {
 
 }  // namespace
 
-bool JitTranslator::CanAdoptPendingSpillWrite(ir::Inst* inst) {
+bool JitTranslator::CanAdoptPendingSpillWrite(
+        ir::Inst* inst, bool reads_forwarded_memory_input) {
     if (!inst) {
         return false;
+    }
+    switch (inst->GetOp()) {
+        case ir::OpCode::LoadMemory:
+        case ir::OpCode::StoreMemory:
+        case ir::OpCode::LoadMemoryTSO:
+        case ir::OpCode::StoreMemoryTSO:
+            return reads_forwarded_memory_input;
+        default:
+            break;
     }
     if (inst->GetOp() != ir::OpCode::SetHostGPR) {
         return true;

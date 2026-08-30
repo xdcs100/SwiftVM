@@ -1441,11 +1441,17 @@ void JitTranslator::Translate(ir::Inst* inst) {
     const bool forward_spilled_width_input =
             context.HasPendingSpillWrites() &&
             CanConsumeForwardedWidthSpill(inst);
+    const auto forward_spilled_memory_input =
+            context.HasPendingSpillWrites()
+            ? ForwardedMemorySpillInput(inst)
+            : std::nullopt;
     const bool adopt_pending_spill_write =
             context.HasPendingSpillWrites() &&
-            CanAdoptPendingSpillWrite(inst);
+            CanAdoptPendingSpillWrite(
+                    inst, forward_spilled_memory_input.has_value());
     context.TickIR(inst, forward_spilled_width_input,
-                   adopt_pending_spill_write);
+                   adopt_pending_spill_write,
+                   forward_spilled_memory_input);
     if (inst->GetOp() != ir::OpCode::SetLocation &&
         inst->GetOp() != ir::OpCode::CallReturn) {
         static_next_loc.reset();

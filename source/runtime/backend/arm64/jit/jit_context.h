@@ -258,6 +258,7 @@ public:
     [[nodiscard]] bool HasPendingSpillWrites() const {
         return !pending_spill_writes.empty();
     }
+    [[nodiscard]] std::optional<u32> PendingScalarSpillValue() const;
     u8* Flush(const CodeBuffer& code_cache);
 
     [[nodiscard]] MacroAssembler& GetMasm();
@@ -330,7 +331,8 @@ public:
     void BeginBackedgeBody();
     void TickIR(ir::Inst* instr,
                 bool forward_spilled_width_input = false,
-                bool adopt_pending_spill_write = false);
+                bool adopt_pending_spill_write = false,
+                std::optional<u32> forward_spilled_memory_input = std::nullopt);
 
     [[nodiscard]] vixl::aarch64::Label *GetLabel(LocationDescriptor loc);
     [[nodiscard]] vixl::aarch64::Label *GetInternalLabel(LocationDescriptor loc);
@@ -402,7 +404,8 @@ private:
     [[nodiscard]] std::optional<u8> FlushSpillWrites(
             ir::Inst* consumer,
             bool forward_spilled_width_input = false,
-            bool adopt_pending_spill_write = false);
+            bool adopt_pending_spill_write = false,
+            std::optional<u32> forward_spilled_memory_input = std::nullopt);
     [[nodiscard]] bool AdoptPendingSpillWrite(
             const PendingSpillWrite& write, ir::Inst* consumer);
     [[nodiscard]] static bool IsFloatValue(const ir::Value& value);
