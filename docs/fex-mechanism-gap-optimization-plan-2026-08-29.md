@@ -1924,3 +1924,39 @@ smallpt 出现 68 个唯一结构候选、合计 727 条 IR；SQLite `--help` �
 该 census、日志和捕获已删除，没有保留代码或开关。含 SSA/PSTATE live-in 的 terminal entry 继续
 fail-closed 并独立 canonical re-decode；只有新的 branch-heavy/FEX join 证明这些地址实际形成重复热 root
 后，才值得引入 live-in serialization/veneer。不能为了补齐抽象状态格而发布当前内部 block。
+
+### 16.55 dual-source external root 与 layout 前置条件复核
+
+重新使用有效的 SQLite 参数 `--memdb --size 10 --testset main sqlite.db` 对 source fan-in 做单变量复核。
+此前使用 `main 10` 的运行不符合当前 speedtest1 参数合同，不再作为正确性依据。当前
+`balance_nonroot@0x44ef80..0x450dbb` 仍由 29 个 SwiftVM root、3,485 条 host 指令组成；历史同输入
+FEX 账为一个 multiblock unit、3,087 条，说明多 CFG root 仍是当前最大的单项静态机制差距。
+
+把 external-root 最小来源数从 3 降到 2 的短账为：
+
+- SQLite roots `2,079 -> 2,051`，host 指令 `253,398 -> 252,904`（`-494`）；28 个 root 被并入既有
+  code object，14 个公共 root 增长但 baseline top-20 无增长。`balance_nonroot` 收敛为 28 roots /
+  3,468 条。去除 timing 后 stdout 逐行一致。
+- smallpt roots `263 -> 261`，`36,827 -> 36,805`（`-22`），无公共增长，PPM SHA-256 保持
+  `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`。
+- CoreMark 2k roots `293 -> 288`，`36,660 -> 36,591`（`-69`），baseline top-20 无增长，两侧
+  `crcfinal=0x4983`。
+
+静态收益没有通过短 wall-time 门禁。三对 SQLite 中位数为 `2.155s -> 2.273s`（`+5.476%`）。进一步
+拆分后，只交换 level-2 的 R13/R14 host home、保持三来源门槛为 `2.218s`，相对同组 baseline
+`2.231s` 为 `-0.583%`；交换 home 并开放双来源为 `2.332s`（`+4.527%`）。保留原 level-2 map 的
+双来源版本能够完成有效 SQLite 输入，但另一组三向短配对仍为 `2.399s -> 2.440s`（`+1.709%`）。
+因此回退主体来自 disconnected component 合并后的动态 RA/布局，不把 pin home 交换当作 entry ABI
+修复；两项代码改动和双来源测试均已删除。
+
+同时验证了一个让 terminal external link 参与 RPO、但不加入数据流 predecessor 的 layout-only 原型。
+三来源生产门槛下静态总量不变，SQLite 三对中位数 `2.224s -> 2.244s`（`+0.899%`）；与双来源组合后
+static capture 以 `rc=135` 退出。该原型和结构测试已完整删除。后续若重启多 root 合并，必须先建立
+首类 CFG component boundary，统一 RPO、live interval、物理 fallthrough 和 emission order，不能在
+emitter 或 RPO 中单独插入布局边。
+
+提交 `56159f8` 修正两个测试的 GCC 可移植性：`Config` designated initializer 按声明顺序排列，64 位
+`Imm` 使用精确 `u64` 类型。Mac Debug/Release `swift_test` 构建通过；Orb GCC 13.2 首次完成完整
+`swift_test` 目标构建，function-entry、direct-link production 和 spilled pinned-EA 定向组分别通过
+87、544 和 5 条断言。没有运行完整测试集、长基准或压力测试；归因用二进制、日志、动态计数捕获和
+临时目录已删除，最终树没有新增 env 开关、probe、诊断路径或兼容兜底。
