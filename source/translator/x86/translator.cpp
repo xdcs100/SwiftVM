@@ -727,8 +727,7 @@ struct X86Instance::Impl final {
                 return stop;
             };
             auto decode = [&](LocationDescriptor addr, ir::HIRBlock* block,
-                              LocationDescriptor stop,
-                              DecodeStopKind stop_kind = DecodeStopKind::Internal) {
+                              LocationDescriptor stop) {
                 builder.SetCurBlock(block);
                 ir::Assembler assembler{&builder};
                 x86::X64Decoder decoder{
@@ -741,8 +740,7 @@ struct X86Instance::Impl final {
                         !address_space->GetConfig().memory_base &&
                         !address_space->GetConfig().page_table,
                         features,
-                        stop,
-                        stop_kind};
+                        stop};
                 decoder.Decode();
             };
             while (decoded_count < decode_cap) {
@@ -769,10 +767,7 @@ struct X86Instance::Impl final {
                         replayed_split = true;
                         break;
                     }
-                    decode(owner_start, owner, target,
-                           split->provenance->external_root
-                                   ? DecodeStopKind::External
-                                   : DecodeStopKind::Internal);
+                    decode(owner_start, owner, target);
                     if (FunctionDecodeFrontier::DecodedEnd(owner->GetBlock()) == target) {
                         decode_frontier.Accept(target);
                     } else {

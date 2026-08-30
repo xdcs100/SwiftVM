@@ -90,7 +90,7 @@ TEST_CASE("function decode frontier transfers call return ownership",
     REQUIRE_FALSE(frontier.FindSplit(kMissing));
 }
 
-TEST_CASE("function decode frontier registers canonical external roots",
+TEST_CASE("function decode frontier keeps an internal predecessor for external roots",
           "[function-entry][frontier]") {
     constexpr LocationDescriptor kStart = 0x3000;
     constexpr LocationDescriptor kTarget = kStart + 4;
@@ -110,10 +110,17 @@ TEST_CASE("function decode frontier registers canonical external roots",
 
     REQUIRE(builder.ResetDecodedBlock(owner));
     builder.AdvancePC(Imm{kTarget - kStart});
-    builder.ExternalLinkBlock(terminal::ExternalLinkBlock{Location{kTarget}});
+    builder.LinkBlock(terminal::LinkBlock{Location{kTarget}});
     frontier.Accept(kTarget);
     function->EndFunction();
     function->ComputeRPO();
+
+    REQUIRE(owner->GetSuccessors().size() == 1);
+    REQUIRE(owner->GetSuccessors().front() == root);
+    REQUIRE(root->GetPredecessors().size() == 1);
+    REQUIRE(root->GetPredecessors().front() == owner);
+    REQUIRE(function->GetExternalEntryRoots().size() == 1);
+    REQUIRE(function->GetExternalEntryRoots().front() == root);
 
     std::vector<Location> entries;
     for (auto& block : function->GetHIRBlocksRPO()) {
