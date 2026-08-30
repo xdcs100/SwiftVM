@@ -131,6 +131,23 @@ SpillForwardingBlock MakeSpillMemoryAddressBlock(bool multi_use,
     return {std::move(block), arriving};
 }
 
+SpillForwardingBlock MakeSpillMemoryAddressNoRegionBlock() {
+    IntrusivePtr<Block> block{new Block(0, Location{0x243e})};
+    const auto longest = block->LoadImm(Imm{swift::u64{1}});
+    const auto middle = block->LoadImm(Imm{swift::u64{2}});
+    const auto shortest = block->LoadImm(Imm{swift::u64{3}});
+    const auto arriving = block->LoadImm(Imm{swift::u64{4}});
+    const auto loaded = block->LoadMemory(Operand{arriving})
+                                .SetType(ValueType::U64);
+    block->AppendInst(OpCode::TestNotZero, loaded);
+    const auto first = block->Add(shortest, Operand{middle});
+    const auto total = block->Add(first, Operand{longest});
+    block->StoreUniform(Uniform{0, ValueType::U64}, total);
+    block->SetTerminal(terminal::ReturnToDispatch{});
+    block->ReIdInstr();
+    return {std::move(block), arriving};
+}
+
 SpillForwardingBlock MakeSpillMemoryStoreAddressBlock() {
     IntrusivePtr<Block> block{new Block(0, Location{0x243d})};
     const auto longest = block->LoadImm(Imm{swift::u64{1}});
@@ -487,6 +504,32 @@ TEST_CASE("faulting load with a direct result consumes a pending address") {
             }));
 }
 
+TEST_CASE("faulting load with a local spill result consumes a pending address") {
+    const auto emitted = Emit(MakeSpillMemoryAddressNoRegionBlock(),
+                              GPRSMask{~((1u << 5) - 1u) & ~(1u << 18)});
+    const auto definition = std::ranges::find_if(emitted, [](const auto& line) {
+        return line.find("mov x") != std::string::npos &&
+               line.find("#0x4") != std::string::npos;
+    });
+    REQUIRE(definition != emitted.end());
+    const auto delimiter = definition->find(',');
+    REQUIRE(delimiter != std::string::npos);
+    const auto scratch = definition->substr(4, delimiter - 4);
+    const auto consumer = std::find_if(
+            std::next(definition), emitted.end(), [&](const auto& line) {
+                return line.find("ldr x") != std::string::npos &&
+                       line.find("[" + scratch) != std::string::npos;
+            });
+    REQUIRE(consumer != emitted.end());
+    REQUIRE(std::none_of(
+            std::next(definition), consumer, [&](const auto& line) {
+                return line.find("str " + scratch + ", [x28") !=
+                               std::string::npos ||
+                       line.find("ldr " + scratch + ", [x28") !=
+                               std::string::npos;
+            }));
+}
+
 TEST_CASE("faulting store consumes a final-use pending address") {
     const auto emitted = Emit(MakeSpillMemoryStoreAddressBlock(),
                               GPRSMask{~((1u << 5) - 1u) & ~(1u << 18)});
@@ -547,7 +590,7 @@ TEST_CASE("faulting memory retains backing for multi-use pending inputs") {
             true);
 }
 
-TEST_CASE("faulting spilled load destinations retain address backing") {
+TEST_CASE("faulting region-owned load destinations retain address backing") {
     RequireCanonicalSpillRoundTrip(
             Emit(MakeSpillMemoryAddressBlock(false, true),
                  GPRSMask{~((1u << 5) - 1u) & ~(1u << 18)}),

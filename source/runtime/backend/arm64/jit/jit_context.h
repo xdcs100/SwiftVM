@@ -255,6 +255,9 @@ public:
     [[nodiscard]] bool IsSpilled(const ir::Value& value) {
         return reg_alloc.ValueType(value) == RegAlloc::MEM;
     }
+    [[nodiscard]] bool HasSpillReloadAtDefinition(ir::Inst* inst) const {
+        return inst && reg_alloc.SpillReloadAt(ir::Value{inst}, inst->Id());
+    }
     [[nodiscard]] bool HasPendingSpillWrites() const {
         return !pending_spill_writes.empty();
     }

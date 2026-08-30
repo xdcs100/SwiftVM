@@ -53,7 +53,8 @@ std::optional<u32> JitTranslator::ForwardedMemorySpillInput(ir::Inst* inst) {
         case ir::OpCode::LoadMemory: {
             const auto result = ir::Value{inst};
             if ((context.IsSpilled(result) &&
-                 !ResolvePinnedGPRValue(result)) ||
+                 !ResolvePinnedGPRValue(result) &&
+                 context.HasSpillReloadAtDefinition(inst)) ||
                 pinned_load_updates.contains(inst)) {
                 return std::nullopt;
             }
