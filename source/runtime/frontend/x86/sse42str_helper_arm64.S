@@ -54,24 +54,24 @@
     xtn v7.8b, v6.8h
     umov w15, v7.h[0]
 
-    rbit w17, w15
-    clz w17, w17
+    rbit w11, w15
+    clz w11, w11
     mov w16, #16
     cmp w15, #0
-    csel w17, w16, w17, eq
+    csel w11, w16, w11, eq
     mov w16, w15
-    bfi x16, x17, #16, #8
+    bfi x16, x11, #16, #8
     cmp w13, #16
-    cset w17, ne
-    bfi x16, x17, #24, #1
+    cset w11, ne
+    bfi x16, x11, #24, #1
     cmp w14, #16
-    cset w17, ne
-    bfi x16, x17, #25, #1
+    cset w11, ne
+    bfi x16, x11, #25, #1
     cmp w15, #0
-    cset w17, ne
-    bfi x16, x17, #26, #1
+    cset w11, ne
+    bfi x16, x11, #26, #1
     bfi x16, x15, #27, #1
-    ret
+    br x17
 
     .align 4
 1:

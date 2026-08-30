@@ -807,6 +807,7 @@ private:
     void PrepareHostCallThunks(const std::vector<ir::Block*>& blocks);
     void MaterializeHostCallTarget(u64 target);
     bool TryEmitSharedHostCall(const ir::Lambda& lambda);
+    bool TryEmitSharedHostBranch(const ir::Lambda& lambda);
     void EmitHostCallThunks();
     void EmitPreserveAllPairCall(ir::Inst* inst,
                                  VAddr target,

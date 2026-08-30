@@ -88,6 +88,20 @@ std::size_t Count(const std::vector<std::string>& instructions,
     });
 }
 
+std::size_t CountStackRegister(const std::vector<std::string>& instructions,
+                               bool store,
+                               std::string_view reg) {
+    const std::string single = store ? "str " : "ldr ";
+    const std::string pair = store ? "stp " : "ldp ";
+    return std::ranges::count_if(instructions, [&](const auto& instruction) {
+        const auto stack = instruction.find("[sp");
+        return stack != std::string::npos &&
+               (instruction.find(single) != std::string::npos ||
+                instruction.find(pair) != std::string::npos) &&
+               instruction.find(reg) < stack;
+    });
+}
+
 #if defined(__aarch64__)
 struct Sse42HelperEmission {
     std::vector<std::string> instructions;
@@ -99,16 +113,7 @@ struct Sse42HelperEmission {
 std::size_t CountStackFPR(const Sse42HelperEmission& emission,
                           bool store, swift::u16 code) {
     const std::string reg = "q" + std::to_string(code) + ",";
-    const std::string single = store ? "str " : "ldr ";
-    const std::string pair = store ? "stp " : "ldp ";
-    return std::ranges::count_if(
-            emission.instructions, [&](const auto& instruction) {
-                const auto stack = instruction.find("[sp");
-                return stack != std::string::npos &&
-                       (instruction.find(single) != std::string::npos ||
-                        instruction.find(pair) != std::string::npos) &&
-                       instruction.find(reg) < stack;
-            });
+    return CountStackRegister(emission.instructions, store, reg);
 }
 
 Sse42HelperEmission EmitSse42HelperBoundary(swift::u8 imm,
@@ -238,6 +243,13 @@ TEST_CASE("SSE4.2 helper preserves only live-through vector values",
         REQUIRE(Count(dead_arguments.instructions, "str w16, [sp") == 0);
         REQUIRE(Count(dead_arguments.instructions, "sub sp, sp") == 0);
         REQUIRE(Count(dead_arguments.instructions, "add sp, sp") == 0);
+        const size_t link_saves = imm == 0x02 ? 0 : 1;
+        REQUIRE(CountStackRegister(
+                        dead_arguments.instructions, true, "x30") ==
+                link_saves);
+        REQUIRE(CountStackRegister(
+                        dead_arguments.instructions, false, "x30") ==
+                link_saves);
 
         const auto live_left = EmitSse42HelperBoundary(imm, true);
         REQUIRE(CountStackFPR(live_left, true, live_left.left) == 1);

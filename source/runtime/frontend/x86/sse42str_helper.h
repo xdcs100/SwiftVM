@@ -10,7 +10,7 @@ struct Sse42StrVectorCallABI {
             (1u << 10) | (1u << 11) | (1u << 13) | (1u << 14) |
             (1u << 15) | (1u << 16) | (1u << 17);
     static constexpr u32 EqualAnyGPRClobbers =
-            (1u << 13) | (1u << 14) | (1u << 15) |
+            (1u << 11) | (1u << 13) | (1u << 14) | (1u << 15) |
             (1u << 16) | (1u << 17);
     static constexpr u32 GenericGPRClobbers = (1u << 19) - 1u;
     static constexpr u32 GPRClobbers(u8 imm) {

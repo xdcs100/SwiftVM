@@ -209,6 +209,18 @@ bool JitTranslator::TryEmitSharedHostCall(const ir::Lambda& lambda) {
     return true;
 }
 
+bool JitTranslator::TryEmitSharedHostBranch(const ir::Lambda& lambda) {
+    if (lambda.IsValue()) {
+        return false;
+    }
+    const auto it = host_call_thunks.find(lambda.GetImm().Get());
+    if (it == host_call_thunks.end()) {
+        return false;
+    }
+    __ B(it->second.entry.get());
+    return true;
+}
+
 void JitTranslator::EmitHostCallThunks() {
     for (auto& [target, thunk] : host_call_thunks) {
         __ Bind(thunk.entry.get());
