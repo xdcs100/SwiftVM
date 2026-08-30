@@ -1140,3 +1140,31 @@ stack 定向分组；包含真实 source allocation 退休与重用门禁的 pro
 没有明显回退；临时 worktree、构建和 capture 均已删除。本阶段没有新增 env 开关、probe、日志、
 临时运行路径或兼容兜底。第 8 节 generation/unlink/invalidation 与 code-cache reuse 的 correctness
 缺口至此闭合，后续不再给 16-byte continuation frame 增加热路径 generation 字段。
+
+### 16.28 exact-mask EdgeFlags shared tail
+
+提交 `ee04fb9` 去掉 mixed region join 只接受 full NZCV 的最后一道生产 gate。partial source 与一个
+compatible successor、一个 canonical successor 相遇时，也可以把 canonical merge 移到函数冷区；
+canonical tail 继续按 `{target, mask, polarity, version, token}` 合并相同入口。函数内 stub 只生成
+`ADR target` 和到 region trampoline 的分支，不在每个代码对象里复制 mask materialization 或 merge
+主体。
+
+每个 code-cache region 为 14 个非零非 full 的 NZCV mask 生成一次精确 merge 入口，并分别提供普通
+与 PF/AF token 版本。连续 mask 使用 `MRS/UBFX/BFI`，非连续 mask 使用寄存器 mask 的
+`MRS/BIC/AND/ORR`；两条路径都只替换 incoming mask，未请求的 NZCV、packed AF 和 parity 保持原值。
+full NZCV、return、cycle 和普通 direct-link trampoline 继续使用原入口与协议。最初的单个动态-mask
+入口要求每个函数 stub 额外物化 mask，使 SQLite 增长 14 条；该版本未保留，最终 per-mask region
+入口把函数 stub 收回两条，并在共享 region 中摊薄可变 merge 主体。
+
+Mac Debug 的 masked trampoline 用例覆盖连续 `N|Z`、非连续 `N|C` 以及带/不带 token 的四种组合，
+通过 25 条断言；region-flags production、全部 direct-link trampoline、production direct-link、
+direct-link flags 和非压力 SMC 分组均通过。Release 以 `dd4a51b` 为同源基线，smallpt 保持 275 roots
+和 100% root/top-20 覆盖，`49,065 -> 49,055`（`-10`，`-0.020381%`），6 个 root 缩小、无增长；
+SQLite 保持 2,114 roots 和 100% 覆盖，`354,519 -> 354,491`（`-28`，`-0.007898%`），19 个 root
+缩小、无增长。一次 SQLite 短配对为 `TOTAL 1.571s -> 1.573s`，只作为无明显回退检查。
+
+同时审核了 XMM scalar 的最窄 value-version 候选：允许同一 `GetHostFPR` 值跨同 slice 的自发布
+`SetHostFPR` 保持 fixed alias。smallpt 与 SQLite 均为零代码变化，候选已完整删除；后续 XMM 工作
+必须先证明更广的 producer/consumer lineage 命中真实热点，不再重试该同值自发布形态。本阶段没有
+保留 env 开关、probe、日志、临时路径或兼容兜底，也没有运行长基准或压力测试。EdgeFlags 剩余的
+`packed_flags_version` 目前没有非零生产者，下一步应删除这项推测性 ABI，而不是伪造第二种 layout。

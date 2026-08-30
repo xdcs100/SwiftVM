@@ -3643,6 +3643,19 @@ peepholes.
   reuse are now closed; next audit XMM scalar GuestStateMap reuse and the remaining exact-mask
   EdgeFlags tail before entering string/complex-EA work.
 
+- `ee04fb9` closes the real partial-mask region-flags tail. A function stub now carries only the
+  canonical target and branches to one of 14 per-region exact-mask merge entries; contiguous and
+  non-contiguous masks share the same contract, and separate token entries preserve packed PF/AF.
+  The first dynamic-mask design grew SQLite by 14 instructions and was removed. The retained
+  per-mask design keeps 100% root/top-20 coverage with no growing root: smallpt moves
+  `49,065 -> 49,055` (`-10`) and SQLite `354,519 -> 354,491` (`-28`, 19 shrinking roots). Masked
+  trampoline execution covers `N|Z`, `N|C`, token and non-token forms; region-flags production,
+  trampoline, production direct-link, direct-link flags and non-stress SMC groups pass. A single
+  SQLite consistency pair is `TOTAL 1.571s -> 1.573s`. The narrow XMM same-value self-publication
+  version candidate was byte-identical on both workloads and was deleted. No probe, env switch,
+  log, temporary path or fallback remains. Do not fake a nonzero `packed_flags_version`; remove that
+  unused speculative ABI next, then re-rank string/complex-EA roots.
+
 ## Orb loop
 
 ```
