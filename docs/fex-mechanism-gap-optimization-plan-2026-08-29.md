@@ -2434,3 +2434,16 @@ function-entry 和 continuation 均保持 103/117 条。Mac/Orb 的 production d
 `1,923 / 249,687`、CoreMark 2k `270 / 36,172`，smallpt oracle 不变。本阶段没有增加 env 开关、日志、
 probe、临时路径或兼容兜底。backend code-object ownership 事务至此闭合；下一步只在 frontend 提供经过
 canonical 64-block cut 的独立 HIRFunction regions 后启用多 region membership。
+
+### 16.73 frontend canonical region decoder 边界
+
+function-level 的 CFG 解码、split replay、late-entry 重解码、external-root provenance、已有 code-cache
+跳过和 block-cap 判定已从 `translator.cpp` 拆到 `FunctionRegionDecoder`。decoder 每次只拥有一个
+HIRFunction 和一个明确 block budget，返回 decoded-block、host-call 与 cap 状态；translator 只负责选择
+budget、处理 block-only 回退并调用 backend。该边界允许后续为每个 canonical 64-block cut 创建独立
+HIRFunction，而不复制 decoder 循环或让 region planner 进入 terminal emitter。
+
+Mac/Orb 的 function-entry、function-code-object 和 continuation 门禁保持通过。Orb 静态短门禁严格保持
+smallpt `249 / 36,448`、SQLite `1,923 / 249,687`、CoreMark 2k `270 / 36,172`，smallpt oracle 不变。
+本阶段没有新增运行时策略、env 开关、日志或 probe；下一步由独立 membership planner 只选择已经发生
+code miss 的 region roots，并复用该 decoder 形成 region 列表。

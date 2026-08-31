@@ -33,8 +33,9 @@
 #define HWCAP2_FRINT (1UL << 8)
 #endif
 #endif
-#include "fmt/format.h"
 #include "base/scope_exit.h"
+#include "fmt/format.h"
+#include "function_region_decoder.h"
 #include "runtime/backend/address_space.h"
 #include "runtime/backend/context.h"
 #include "runtime/backend/jit_code.h"
@@ -43,7 +44,6 @@
 #include "runtime/common/perf_stats.h"
 #include "runtime/frontend/x86/decoder.h"
 #include "runtime/include/sruntime.h"
-#include "function_decode_frontier.h"
 #include "translator.h"
 #include "translator/function_stats.h"
 
@@ -672,23 +672,7 @@ struct X86Instance::Impl final {
             FunctionDecodeFrontier decode_frontier{hir_func};
             perf_ir_setup.Stop();
 
-            // The current linear-scan allocator is intentionally conservative
-            // and does not yet qualify very large libc CFGs (for example
-            // _int_malloc at ~150 blocks). Keep those on the block compiler;
-            // ordinary multi-block functions still take the function path.
             constexpr size_t kMaxFuncBlocks = 128;
-            // JIT only.  The IR interpreter resolves the next guest location
-            // through ir::Function::FindBlock, and HIRFunction::EndFunction
-            // hands *every* HIR block to the ir::Function -- including the
-            // undecoded ones.  A partial unit therefore gives the interpreter
-            // an empty block for the successor, which executes nothing and
-            // spins forever (found by run_helper_fault_tests.sh's
-            // SVM_ENABLE_JIT=0 shapes, which hung).  The interpreter is a
-            // cross-check path where translation cost does not matter, so it
-            // keeps eager whole-function decoding.  The deeper fix -- not
-            // adding undecoded blocks to the ir::Function at all -- would also
-            // shrink SmcTracker::ClearDispatchSlots' walk, but it changes HIR
-            // ownership semantics and is left for a separate change.
             const size_t lazy_budget =
                     decode_budget_override != 0
                             ? decode_budget_override
@@ -698,202 +682,48 @@ struct X86Instance::Impl final {
                                                   : LazyFuncBudget())
                                        : kMaxFuncBlocks);
             const size_t decode_cap = std::min(lazy_budget, kMaxFuncBlocks);
-            // `<=` so SVM_FUNC_LAZY=128 (the cap) stays lazy and still skips
-            // already-published L2 blocks. `<` treated 128 as eager and
-            // re-decoded those blocks, exploding host_dynamic.
             const bool lazy = lazy_budget <= kMaxFuncBlocks;
-            size_t decoded_count = 0;
-            bool hit_block_cap = false;
-            PerfScope perf_decode{GetPerfStats().decode_ns};
-            auto local_target = [&](LocationDescriptor addr) {
-                return !lazy ||
-                       (IsLocalFunctionTarget(pc, addr) &&
-                        (addr == pc || !IsEndbr64Boundary(addr)));
-            };
-            auto nearest_entry = [&](LocationDescriptor addr, VAddr upper) {
-                LocationDescriptor stop{};
-                for (auto& candidate : hir_func->GetHIRBlockList()) {
-                    const auto location = candidate.GetBlock()
-                                                  ->GetStartLocation()
-                                                  .Value();
-                    if (location > addr && location < upper &&
-                        (stop == 0 || location < stop)) {
-                        stop = location;
-                    }
-                }
-                return stop;
-            };
-            auto decode = [&](LocationDescriptor addr, ir::HIRBlock* block,
-                              LocationDescriptor stop,
-                              DecodeStopKind stop_kind = DecodeStopKind::Internal) {
-                builder.SetCurBlock(block);
-                ir::Assembler assembler{&builder};
-                x86::X64Decoder decoder{
-                        addr,
-                        &memory_impl,
-                        &assembler,
-                        true,
-                        address_space->GetConfig().arm64_features,
-                        address_space->GetConfig().sse_afp_nan,
-                        !address_space->GetConfig().memory_base &&
-                        !address_space->GetConfig().page_table,
-                        features,
-                        stop,
-                        stop_kind};
-                decoder.Decode();
-            };
-            while (decoded_count < decode_cap) {
-                bool replayed_split = false;
-                for (auto& candidate : hir_func->GetHIRBlockList()) {
-                    auto* block = candidate.GetBlock();
-                    if (!block->GetInstList().empty() || block->HasTerminal()) {
-                        continue;
-                    }
-                    const auto target = block->GetStartLocation().Value();
-                    if (!local_target(target)) {
-                        continue;
-                    }
-                    auto split = decode_frontier.FindSplit(target);
-                    if (!split) {
-                        continue;
-                    }
-                    auto* owner = split->owner;
-                    const auto owner_start =
-                            owner->GetBlock()->GetStartLocation().Value();
-                    if (!builder.ResetDecodedBlock(owner)) {
-                        decode_frontier.Reject(target,
-                                               FunctionDecodeFrontier::Rejection::OwnerResetFailed);
-                        replayed_split = true;
-                        break;
-                    }
-                    decode(owner_start, owner, target,
-                           split->provenance->call_return_boundary
-                                   ? DecodeStopKind::CallReturn
-                                   : DecodeStopKind::Internal);
-                    if (FunctionDecodeFrontier::DecodedEnd(owner->GetBlock()) == target) {
-                        decode_frontier.Accept(target);
-                    } else {
-                        decode_frontier.Reject(target,
-                                               FunctionDecodeFrontier::Rejection::BoundaryMismatch);
-                    }
-                    replayed_split = true;
-                    break;
-                }
-                if (replayed_split) {
-                    continue;
-                }
-                std::vector<LocationDescriptor> to_decode;
-                for (auto& hb : hir_func->GetHIRBlockList()) {
-                    auto* blk = hb.GetBlock();
-                    // Undecoded block: no instructions AND no terminal. The
-                    // synthetic entry block already has a LinkBlock terminal
-                    // (and an INVALID start location) — never decode it.
-                    if (blk->GetInstList().empty() && !blk->HasTerminal()) {
-                        const auto addr = blk->GetStartLocation().Value();
-                        // Successor that already has published code (an earlier
-                        // region ended here, or it is another function entry).
-                        // Re-decoding would emit a second copy of the same guest
-                        // block; leaving it undecoded routes the edge through the
-                        // L2 slot, which is already filled and branches straight
-                        // to the existing code.  Without this, region growth
-                        // duplicates work: at budget 4 on func_tests it compiled
-                        // 1628 blocks where only 1147 are ever executed.
-                        if (lazy && !decode_frontier.IsAccepted(addr) &&
-                            address_space->GetCodeCache(addr)) {
-                            continue;
-                        }
-                        // Split cold sections stay external and compile through the lazy edge.
-                        if (!local_target(addr)) {
-                            continue;
-                        }
-                        to_decode.push_back(addr);
-                    }
-                }
-                if (to_decode.empty()) {
-                    auto external_roots =
-                            decode_frontier.DiscoverExternalRoots(3);
-                    for (const auto target :
-                         decode_frontier.DiscoverExternalRoots(
-                                 1, FunctionDecodeFrontier::OwnerPolicy::Interior)) {
-                        if (std::find(external_roots.begin(),
-                                      external_roots.end(), target) !=
-                            external_roots.end()) {
-                            continue;
-                        }
-                        external_roots.push_back(target);
-                    }
-                    for (const auto target : external_roots) {
-                        hir_func->CreateOrGetBlock(ir::Location{target});
-                    }
-                    if (!external_roots.empty()) {
-                        continue;
-                    }
-                    break;
-                }
-                for (auto addr : to_decode) {
-                    if (decoded_count == decode_cap) {
-                        hit_block_cap = true;
-                        break;
-                    }
-                    auto* decoded_block = hir_func->CreateOrGetBlock(addr);
-                    PerfScope2 perf_decode_detail{GetPerfStats2().decode_total};
-                    decode(addr, decoded_block, nearest_entry(addr, UINT64_MAX));
-                    const auto end =
-                            FunctionDecodeFrontier::DecodedEnd(decoded_block->GetBlock());
-                    if (const auto late_entry = nearest_entry(addr, end);
-                        late_entry != 0 &&
-                        builder.ResetDecodedBlock(decoded_block)) {
-                        decode(addr, decoded_block, late_entry);
-                    }
-                    ++decoded_count;
-                }
-            }
-            for (auto& hb : hir_func->GetHIRBlockList()) {
-                auto* block = hb.GetBlock();
-                if (block->GetInstList().empty() && !block->HasTerminal()) {
-                    hit_block_cap = true;
-                    break;
-                }
-            }
-            PerfScope2 perf_ir_finalize{GetPerfStats2().ir_finalize};
-            hir_func->SetFunctionEntryProvenance(decode_frontier.ExportProvenance());
-            hir_func->EndFunction();
-            perf_ir_finalize.Stop();
-            perf_decode.Stop();
+            FunctionRegionDecoder decoder{
+                    builder,
+                    *hir_func,
+                    {
+                            .entry = pc,
+                            .block_cap = decode_cap,
+                            .lazy = lazy,
+                            .memory = &memory_impl,
+                            .arm64_features = address_space->GetConfig().arm64_features,
+                            .sse_afp_nan = address_space->GetConfig().sse_afp_nan,
+                            .native_memory = !address_space->GetConfig().memory_base &&
+                                             !address_space->GetConfig().page_table,
+                            .features = features,
+                            .local_target =
+                                    [&](LocationDescriptor address) {
+                                        return !lazy ||
+                                               (IsLocalFunctionTarget(pc, address) &&
+                                                (address == pc || !IsEndbr64Boundary(address)));
+                                    },
+                            .has_code =
+                                    [&](LocationDescriptor address) {
+                                        return address_space->GetCodeCache(address) != nullptr;
+                                    },
+                    }};
+            const auto decode_result = decoder.Decode();
+            const auto decoded_count = decode_result.decoded_count;
+            const auto decoded_blocks = decode_result.decoded_blocks;
+            const bool hit_block_cap = decode_result.hit_block_cap;
+            const bool has_host_call = decode_result.has_host_call;
             PerfAdd(GetPerfStats().func_units, 1);
             PerfAdd(GetPerfStats().decoded_blocks, decoded_count);
 
             if (runtime::GetSvmConfig().dump_ir) {
-                // stderr: survives the crash that aborts the guest before
-                // buffered stdout would flush. EndFunction (ours or the
-                // assembler's) clears block_list and fills the blocks vector,
-                // so iterate GetHIRBlocks().
-                fmt::print(stderr, "--- function {:#x} (decoded {} blocks) ---\n", pc,
-                           decoded_count);
-                for (auto* hb : hir_func->GetHIRBlocks()) {
-                    if (hb) {
-                        fmt::print(stderr, "{}\n", hb->GetBlock()->ToString());
+                fmt::print(
+                        stderr, "--- function {:#x} (decoded {} blocks) ---\n", pc, decoded_count);
+                for (auto* block : hir_func->GetHIRBlocks()) {
+                    if (block) {
+                        fmt::print(stderr, "{}\n", block->GetBlock()->ToString());
                     }
                 }
                 fmt::print(stderr, "--- end function {:#x} ---\n", pc);
-            }
-
-            size_t decoded_blocks = 0;
-            bool has_host_call = false;
-            for (auto* hb : hir_func->GetHIRBlocks()) {
-                if (!hb) {
-                    continue;
-                }
-                auto* blk = hb->GetBlock();
-                if (blk->GetInstList().empty()) {
-                    continue;  // synthetic entry / undecoded successor
-                }
-                decoded_blocks++;
-                has_host_call |= std::any_of(blk->GetInstList().begin(),
-                                             blk->GetInstList().end(),
-                                             [](const ir::Inst& inst) {
-                                                 return inst.GetOp() == ir::OpCode::CallLambda;
-                                             });
             }
 
             const bool allow_func_lambda = runtime::GetSvmConfig().func_lambda;
