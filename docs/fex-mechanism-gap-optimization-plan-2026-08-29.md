@@ -2447,3 +2447,30 @@ Mac/Orb 的 function-entry、function-code-object 和 continuation 门禁保持�
 smallpt `249 / 36,448`、SQLite `1,923 / 249,687`、CoreMark 2k `270 / 36,172`，smallpt oracle 不变。
 本阶段没有新增运行时策略、env 开关、日志或 probe；下一步由独立 membership planner 只选择已经发生
 code miss 的 region roots，并复用该 decoder 形成 region 列表。
+
+### 16.74 miss 驱动的 canonical region membership
+
+提交 `3b42c72` 落地独立 `FunctionRegionMembership`。首次 64-block canonical region 发布后，planner 只记录
+仍未发布的 external roots、主 function 的强身份和实际 decoded-block 数；只有这些 root 后续真的发生 code
+miss 时才消费记录。重组上限固定为 128 blocks，不做预编译，也不把 planner 塞回 decoder 或 backend
+emitter。重组时先同步撤销旧 allocation 的全部已发布入口，再以旧 canonical region 为主 HIRFunction，
+新入口只解码尚未被主 region 认领的 blocks，最终仍由第 16.71/16.72 节的单 allocation emitter 和统一
+publication owner 发布。
+
+为使这次 owner 替换具备完整 invalidation 语义，`SmcTracker::RetireNode` 按精确 module/node/allocation
+身份清空共享 L2、call/pending-call 表和所有 runtime 私有 L1，恢复指向旧入口的 direct links，再 detach
+唯一 module node 并走既有 QSBR 回收。allocation 发布的额外 alias 由 `LinkManager` 反查，不再假定 function
+blocks 能枚举所有入口。私有 L1 的 invalid value 改为 4 MiB interrupt mapping 中与实际 slot 对应的地址；
+fault handler 从 fault slot 读取保留的 guest key 并进入统一 indirect miss，trampoline 同时重载 L1 base、重算
+slot 地址，避免旧 scratch 状态参与 L2 miss writeback。`Function::TakeBlocksFrom` 只合并空 external
+placeholder 与真实 block，两个真实定义仍拒绝重叠。
+
+一次被否决的原型先解码新入口、再整体重编旧 region，smallpt 虽从 `249 / 249` 变为 `248 / 248`
+roots/versions，却把静态指令从 `36,448` 增至 `41,221`（`+4,773`），属于 root 口径变好而总代码明显
+恶化。最终旧 region 优先方案连续两次 0.24/0.27 秒短跑均为 `243 roots / 249 versions / 36,427`
+instructions：相对 16.73 基线减少 6 个独立 roots，versions 不增，静态指令再少 21 条；smallpt PPM
+SHA-256 保持 `a70375e511474ad45215f93df3e2c3db44af41afe40bb1c76e0f14d5528ea7b1`。Mac 与 Orb 的
+membership、function-code-object、function-entry、continuation、indirect-L1、非压力 direct-link 和非压力
+SMC 定向门禁全部通过。本阶段没有长跑、stress、env 开关、probe、调试日志、临时源路径或兼容兜底；
+下一步应先用短版 FEX 对齐重新排序剩余 root 差距，再决定扩展到第三个 canonical region，还是转向更大的
+hot/cold layout 与跨 root 状态 ABI 缺口。

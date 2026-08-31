@@ -3674,17 +3674,38 @@ peepholes.
   `strcspn`/`strcmp` win or retry per-unit EqualAny outlining. No probe, log, env switch, temporary
   path or fallback remains.
 
+- `3b42c72` completes miss-driven canonical region membership. A first 64-block region records only
+  its still-unpublished external roots and strong owner identity; a later real code miss consumes the
+  record, retires the exact old allocation, recompiles the old canonical region first and appends only
+  blocks not already claimed by it. The 128-block ceiling remains explicit, and the planner, decoder,
+  SMC retirement and backend code-object emitter stay in separate modules. Retirement clears every
+  allocation-owned alias from shared and private dispatch tables, restores incoming direct links and
+  uses the existing QSBR path. Private-L1 invalidation now faults through the slot-corresponding 4 MiB
+  guard mapping, reconstructs the guest key and rebuilds the L1 slot address before L2 fallback.
+  Empty external placeholders can transfer to the primary function without accepting overlapping real
+  definitions. A rejected new-root-first ordering produced `248 roots / 248 versions / 41,221`
+  instructions (`+4,773` over the 16.73 static baseline). The retained old-root-first ordering is
+  stable across two short smallpt runs at `243 roots / 249 versions / 36,427` instructions versus
+  `249 / 249 / 36,448`, with the canonical PPM SHA unchanged. Mac and Orb membership,
+  function-code-object, function-entry, continuation, indirect-L1, non-stress direct-link and
+  non-stress SMC groups pass. No long benchmark, stress run, probe, env switch, debug log, temporary
+  source path or fallback remains. Next run the short FEX-aligned root comparison before deciding
+  between a third canonical region and the larger remaining hot/cold-layout or cross-root state-ABI
+  mechanism.
+
 ## Orb loop
 
 ```
 M=/mnt/mac/Users/swift/CLionProjects/SwiftVM
 P=/home/swift/svm-phasec/SwiftVM
 git ls-files -z | rsync -a --no-times --checksum --from0 --files-from=- ./ ubuntu@orb:$P/
-cmake --build /home/swift/svm-phasec/build --target svm_translator_linux -j$(nproc)
+cmake --build /home/swift/svm-phasec/build --target svm_translator_linux -j2
 ```
 
 Keep `--no-times --checksum` for A/B source switches. Preserved older source mtimes can otherwise
 leave a newer Ninja object in place even though the source contents changed.
+Keep the default build parallelism at two jobs; raise it only for an explicitly requested one-off
+build. Short benchmark gates must not be replaced with stress or long-run loops.
 
 Mac: `cmake --build build-master --target swift_runtime`.
 
