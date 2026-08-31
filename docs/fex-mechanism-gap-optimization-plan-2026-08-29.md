@@ -2414,3 +2414,23 @@ continuation、production direct-link 与非压力 SMC 定向门禁全部通过�
 发码。下一步把 frontend 形成的 canonical 64-block regions 作为列表交给该 emitter，并让
 FunctionEntryPublisher、SMC registration、fault metadata 和 disk-cache record 统一以主 function 和同一
 allocation 为 owner；在该事务闭合前不启用多 region membership。
+
+### 16.72 多 region 统一 publication 与 invalidation owner
+
+backend `TranslateIR` 现在接受 `HIRFunction` region 列表。每个 region 独立执行 RPO/ID、优化、loop-hoist
+裁定和 register allocation，再交给第 16.71 节的共享 emitter；单 region 继续使用栈上 emission descriptor，
+不因通用 vector 分配改变 code-miss 顺序。secondary region 的 persistent blocks 在发布前通过
+`Function::TakeBlocksFrom` 转移给主 function，随后只发布一个 module node 和一个 JIT allocation owner。
+
+FunctionEntryPublisher 逐 region 构造入口合同，但全部入口共享 allocation base；SMC guest ranges 和依赖页
+统一注册到主 function。backedge/fault metadata、indirect-L1 recovery 和 disk-cache fault records 汇总全部
+translator，direct-link sites 则由 emitter 合并后的主 context 一次写出。新的双 region publication 用例证明
+两个入口落在同一 allocation 的不同 offset，secondary function 不再持有 blocks；SMC 用例进一步证明任一
+region 页失效会同时撤销两个 L2 entry 并移除唯一主 node。
+
+Mac/Orb 的 function-code-object 用例分别通过 19 条断言，SMC code-object owner 用例分别通过 6 条；
+function-entry 和 continuation 均保持 103/117 条。Mac/Orb 的 production direct-link 分别通过 863/544 条，
+非压力 SMC 分别通过 724/406 条。Orb 静态短门禁保持 smallpt `249 / 36,448`、SQLite
+`1,923 / 249,687`、CoreMark 2k `270 / 36,172`，smallpt oracle 不变。本阶段没有增加 env 开关、日志、
+probe、临时路径或兼容兜底。backend code-object ownership 事务至此闭合；下一步只在 frontend 提供经过
+canonical 64-block cut 的独立 HIRFunction regions 后启用多 region membership。

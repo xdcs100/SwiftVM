@@ -968,23 +968,33 @@ static FeatureSet ResolveBackendFeatures(const std::shared_ptr<backend::Module>&
     return features;
 }
 
-void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunction* function) {
-    const auto features = ResolveBackendFeatures(module);
-    auto ir_function = function->GetFunction();
-    auto func_start = ir_function->GetStartLocation().Value();
-    PerfFixedSnapshot2 fixed_snapshot;
+struct PreparedFunctionRegion final {
+    ir::HIRFunction* function{};
+    ir::Function* ir_function{};
+    VAddr guest_start{};
+    size_t decoded_blocks{};
+    backend::RegAlloc* reg_alloc{};
+};
+
+struct FunctionRegionAllocation final {
+    std::optional<backend::RegAlloc> baseline;
+    std::unique_ptr<backend::RegAlloc> hoisted;
+};
+
+PreparedFunctionRegion PrepareFunctionRegion(const std::shared_ptr<backend::Module>& module,
+                                             ir::HIRFunction* function,
+                                             const FeatureSet& features,
+                                             PerfFixedSnapshot2& fixed_snapshot,
+                                             FunctionRegionAllocation& allocation) {
+    PreparedFunctionRegion prepared{
+            .function = function,
+            .ir_function = function->GetFunction(),
+            .guest_start = function->GetFunction()->GetStartLocation().Value(),
+    };
     PerfScope2 perf_prepare{GetPerfStats2().publish_prepare};
-    const auto decoded_blocks = PrepareFunctionGuestRanges(function);
+    prepared.decoded_blocks = PrepareFunctionGuestRanges(function);
     perf_prepare.Stop();
-    auto& jit_state = ir_function->GetJitCache();
-    // Establish a consistent RPO layout before allocation/emission: the
-    // function-level linear scan and the emitter (Translate(HIRFunction*) walks
-    // GetHIRBlocksRPO) both assume instruction ids are dense in emission order.
-    // ComputeRPO fills blocks_rpo; IdByRPO renumbers every instruction 0..N-1 in
-    // that order (and re-keys the HIRValue map), so a value's OrderId lines up
-    // with where it is actually emitted. Skipped for a single-block function
-    // beyond the (harmless) renumber. Must run after EndFunction (the driver
-    // calls it) since predecessors/successors are built there.
+
     PerfScope perf_rpo{GetPerfStats().rpo_ns};
     PerfScope2 perf_compute_rpo{GetPerfStats2().compute_rpo};
     function->ComputeRPO();
@@ -993,40 +1003,40 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
     function->IdByRPO();
     perf_id_pre.Stop();
     perf_rpo.Stop();
+
     const bool dump_ir = GetSvmConfig().dump_ir;
-    if (dump_ir) fmt::print(stderr, "[func-compile] {:#x} rpo-ready\n", func_start);
+    if (dump_ir) {
+        fmt::print(stderr, "[func-compile] {:#x} rpo-ready\n", prepared.guest_start);
+    }
     const auto& address_space = module->GetAddressSpace();
-    const ir::UniformInfo* uni_info = address_space.GetUniformInfo().uniform_size
-                                      ? &address_space.GetUniformInfo() : nullptr;
+    const ir::UniformInfo* uni_info =
+            address_space.GetUniformInfo().uniform_size ? &address_space.GetUniformInfo() : nullptr;
     PerfScope perf_opt{GetPerfStats().opt_ns};
     GetPassPipeline(uni_info).RunFunction(
             function, module->GetModuleConfig().optimizations, features);
     perf_opt.Stop();
-    // The function passes delete instructions (flag elimination, then dead-code
-    // elimination), which punches holes in the numbering established above.
-    // RegisterAllocPass indexes its interval table by instruction id and sizes
-    // it from MaxInstrCount(), so the ids must be dense in emission order
-    // again before allocation. This is the function-mode counterpart of
-    // PassPipeline::RunBlock's trailing Block::ReIdInstr().
+
     PerfScope perf_rpo2{GetPerfStats().rpo_ns};
     PerfScope2 perf_id_post{GetPerfStats2().id_rpo_post};
     function->IdByRPO();
     perf_id_post.Stop();
     perf_rpo2.Stop();
-    if (dump_ir) fmt::print(stderr, "[func-compile] {:#x} opts-ready\n", func_start);
+    if (dump_ir) {
+        fmt::print(stderr, "[func-compile] {:#x} opts-ready\n", prepared.guest_start);
+    }
+
     auto gprs{address_space.GetTrampolines().GetGPRRegs()};
     auto fprs{address_space.GetTrampolines().GetFPRRegs()};
     PerfScope perf_ra{GetPerfStats().regalloc_ns};
     PerfScope2 perf_ra_detail{GetPerfStats2().regalloc_total};
-    backend::RegAlloc baseline_reg_alloc{
-            static_cast<u32>(function->MaxInstrCount()), gprs, fprs, features,
-            address_space.GetConfig().sse_afp_nan};
+    allocation.baseline.emplace(static_cast<u32>(function->MaxInstrCount()),
+                                gprs,
+                                fprs,
+                                features,
+                                address_space.GetConfig().sse_afp_nan);
     ir::RegisterAllocPass::RunWithScalarInsert(
-            function, &baseline_reg_alloc,
-            module->GetAddressSpace().GetConfig().sse_scalar_insert,
-            features);
-    backend::RegAlloc* reg_alloc = &baseline_reg_alloc;
-    std::unique_ptr<backend::RegAlloc> hoisted_reg_alloc;
+            function, &*allocation.baseline, address_space.GetConfig().sse_scalar_insert, features);
+    prepared.reg_alloc = &*allocation.baseline;
     std::unique_ptr<ir::LoopInvariantHoistPlan> hoist_plan;
     if (uni_info && (features.loop_gpr_hoist || features.loop_const_hoist)) {
         hoist_plan = ir::LoopInvariantHoistPlan::Analyze(function, *uni_info, features);
@@ -1034,15 +1044,18 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
     if (hoist_plan && !hoist_plan->Empty()) {
         hoist_plan->Apply();
         function->IdByRPO();
-        hoisted_reg_alloc = std::make_unique<backend::RegAlloc>(
-                static_cast<u32>(function->MaxInstrCount()), gprs, fprs, features,
-                address_space.GetConfig().sse_afp_nan);
-        ir::RegisterAllocPass::RunWithScalarInsert(
-                function, hoisted_reg_alloc.get(),
-                module->GetAddressSpace().GetConfig().sse_scalar_insert,
-                features);
-        if (hoisted_reg_alloc->SpillCount() <= baseline_reg_alloc.SpillCount()) {
-            reg_alloc = hoisted_reg_alloc.get();
+        allocation.hoisted =
+                std::make_unique<backend::RegAlloc>(static_cast<u32>(function->MaxInstrCount()),
+                                                    gprs,
+                                                    fprs,
+                                                    features,
+                                                    address_space.GetConfig().sse_afp_nan);
+        ir::RegisterAllocPass::RunWithScalarInsert(function,
+                                                   allocation.hoisted.get(),
+                                                   address_space.GetConfig().sse_scalar_insert,
+                                                   features);
+        if (allocation.hoisted->SpillCount() <= allocation.baseline->SpillCount()) {
+            prepared.reg_alloc = allocation.hoisted.get();
         } else {
             hoist_plan->Revert();
             function->IdByRPO();
@@ -1050,16 +1063,49 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
     }
     perf_ra_detail.Stop();
     perf_ra.Stop();
-    fixed_snapshot.Record(static_cast<unsigned>(decoded_blocks));
-    if (dump_ir) fmt::print(stderr, "[func-compile] {:#x} regalloc-ready\n", func_start);
+    fixed_snapshot.Record(static_cast<unsigned>(prepared.decoded_blocks));
+    if (dump_ir) {
+        fmt::print(stderr, "[func-compile] {:#x} regalloc-ready\n", prepared.guest_start);
+    }
+    return prepared;
+}
+
+static void* TranslatePreparedFunctionRegions(const std::shared_ptr<backend::Module>& module,
+                                              std::span<PreparedFunctionRegion> prepared_regions) {
+    ASSERT(!prepared_regions.empty());
+    auto& prepared = prepared_regions.front();
+    auto* function = prepared.function;
+    auto* ir_function = prepared.ir_function;
+    const auto func_start = prepared.guest_start;
+    for (size_t i = 1; i < prepared_regions.size(); ++i) {
+        if (!ir_function->TakeBlocksFrom(*prepared_regions[i].ir_function)) {
+            return nullptr;
+        }
+    }
+    auto& jit_state = ir_function->GetJitCache();
+    const bool dump_ir = GetSvmConfig().dump_ir;
     PerfScope perf_cg{GetPerfStats().codegen_ns};
     PerfScope2 perf_cg_detail{GetPerfStats2().codegen_total};
-    const backend::arm64::FunctionRegionEmission region{
-            .function = function,
-            .reg_alloc = reg_alloc,
-    };
-    backend::arm64::FunctionCodeObjectEmitter emitter{
-            module, std::span{&region, 1}};
+    std::array<backend::arm64::FunctionRegionEmission, 1> single_region{};
+    std::vector<backend::arm64::FunctionRegionEmission> region_storage;
+    std::span<const backend::arm64::FunctionRegionEmission> regions;
+    if (prepared_regions.size() == 1) {
+        single_region.front() = {
+                .function = function,
+                .reg_alloc = prepared.reg_alloc,
+        };
+        regions = single_region;
+    } else {
+        region_storage.reserve(prepared_regions.size());
+        for (auto& item : prepared_regions) {
+            region_storage.push_back({
+                    .function = item.function,
+                    .reg_alloc = item.reg_alloc,
+            });
+        }
+        regions = region_storage;
+    }
+    backend::arm64::FunctionCodeObjectEmitter emitter{module, regions};
     emitter.Emit();
     perf_cg_detail.Stop();
     perf_cg.Stop();
@@ -1069,7 +1115,6 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
     PerfScope2 perf_pub_total{GetPerfStats2().publish_total};
     PerfScope2 perf_pub_alloc{GetPerfStats2().publish_alloc};
     auto* emitted_context = &emitter.Context();
-    auto* emitted_translator = &emitter.Translator(0);
     auto allocation = module->AllocCodeCache(
             buffer_size, emitter.RequiresRegionTrampoline());
     if (allocation.first == backend::INVALID_CACHE_ID &&
@@ -1080,7 +1125,6 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
         // under the existing unrestricted arena policy.
         emitter.Emit(false);
         emitted_context = &emitter.Context();
-        emitted_translator = &emitter.Translator(0);
         buffer_size = emitter.CurrentBufferSize();
         allocation = module->AllocCodeCache(buffer_size, false);
     }
@@ -1089,13 +1133,20 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
         idx != backend::INVALID_CACHE_ID) {
         PerfScope perf_pub{GetPerfStats().publish_ns};
         PerfAdd(GetPerfStats().host_bytes, buffer_size);
-        PerfAdd(GetPerfStats().ir_insts, function->MaxInstrCount());
+        size_t ir_insts{};
+        for (const auto& item : prepared_regions) {
+            ir_insts += item.function->MaxInstrCount();
+        }
+        PerfAdd(GetPerfStats().ir_insts, ir_insts);
         if (PerfPerUnit()) {
-            fmt::print(stderr, "[svm-unit] pc={:#x} ir={} host={}\n", func_start,
-                       function->MaxInstrCount(), buffer_size);
+            fmt::print(stderr,
+                       "[svm-unit] pc={:#x} ir={} host={}\n",
+                       func_start,
+                       ir_insts,
+                       buffer_size);
         }
         PerfScope2 perf_pub_flush{GetPerfStats2().publish_flush};
-        emitter.Flush(buffer);
+        (void)emitter.Flush(buffer);
         perf_pub_flush.Stop();
         if (dump_ir) fmt::print(stderr, "[func-compile] {:#x} flush-ready\n", func_start);
         jit_state.jit_state = backend::JitState::Cached;
@@ -1122,73 +1173,82 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
         const auto allocation_size = static_cast<u32>(buffer.size);
         backend::FunctionEntryPublisher entry_publisher{*module, buffer.exec_data, allocation_size};
         std::vector<backend::SerialBlock> cache_blocks;
-        const auto canonical_terminal_entries =
-                backend::FunctionEntryContract::AnalyzeCanonicalTerminalEntries(
-                        *function);
-        for (auto& hir_block : function->GetHIRBlocksRPO()) {
-            auto* block = hir_block.GetBlock();
-            const auto guest = block->GetStartLocation().Value();
-            const bool canonical_terminal =
-                    canonical_terminal_entries.contains(guest);
-            if (block->GetInstList().empty() && !canonical_terminal) {
-                continue;
-            }
-            const auto offset = emitted_context->GetCodeOffset(guest);
-            const auto direct_offset =
-                    emitted_context->GetDirectLinkCodeOffset(guest);
-            const auto pending_flags_offset =
-                    emitted_context->GetPendingFlagsCodeOffset(guest);
-            const auto pending_flags_contract =
-                    emitted_context->GetPendingFlagsTargetContract(guest);
-            const auto call_offset = emitted_context->GetCallCodeOffset(guest);
-            const auto call_pending_flags_offset =
-                    emitted_context->GetCallPendingFlagsCodeOffset(guest);
-            const auto to_offset = [](ptrdiff_t value) {
-                return value < 0 ? backend::kInvalidFunctionEntryOffset : static_cast<u32>(value);
-            };
-            const auto entry_contract = backend::FunctionEntryContract::Build(
-                    *function,
-                    *block,
-                    {
-                            .canonical = to_offset(offset),
-                            .direct_link = to_offset(direct_offset),
-                            .pending_flags = to_offset(pending_flags_offset),
-                            .continuation = to_offset(call_offset),
-                            .pending_flags_continuation = to_offset(call_pending_flags_offset),
-                    },
-                    pending_flags_contract,
-                    canonical_terminal);
-            ASSERT(entry_contract.IsWellFormed(allocation_size));
-            {
-                PerfScope2 perf_pub_l2{GetPerfStats2().publish_l2};
-                (void)entry_publisher.Publish(entry_contract);
-            }
-            cache_blocks.push_back({
-                    .guest_start = entry_contract.Guest().Value(),
-                    .guest_end = entry_contract.GuestEnd().Value(),
-                    .code_offset = entry_contract.Canonical().code_offset,
-                    .guest_bytes_hash = 0,
-                    .direct_code_offset = entry_contract.DirectLink().code_offset,
-                    .pending_flags_code_offset = entry_contract.PendingFlags().code_offset,
-                    .pending_flags_contract = pending_flags_contract,
-                    .entry_flags = static_cast<u8>(
-                            entry_contract.Linkable()
-                                    ? backend::SerialBlock::Linkable
-                                    : 0),
-            });
-            if (!module->GetModuleConfig().read_only) {
-                PerfScope2 perf_pub_smc{GetPerfStats2().publish_smc};
-                mutable_address_space.GetSmcTracker().RegisterNode(
-                        module,
-                        ir_function,
-                        entry_contract.Guest().Value(),
-                        entry_contract.GuestEnd().Value());
-                for (const auto& dependency : entry_contract.Dependencies()) {
+        for (auto& item : prepared_regions) {
+            auto* region_function = item.function;
+            const auto canonical_terminal_entries =
+                    backend::FunctionEntryContract::AnalyzeCanonicalTerminalEntries(
+                            *region_function);
+            for (auto& hir_block : region_function->GetHIRBlocksRPO()) {
+                auto* block = hir_block.GetBlock();
+                const auto guest = block->GetStartLocation().Value();
+                const bool canonical_terminal = canonical_terminal_entries.contains(guest);
+                if (block->GetInstList().empty() && !canonical_terminal) {
+                    continue;
+                }
+                const auto offset = emitted_context->GetCodeOffset(guest);
+                const auto direct_offset = emitted_context->GetDirectLinkCodeOffset(guest);
+                const auto pending_flags_offset = emitted_context->GetPendingFlagsCodeOffset(guest);
+                const auto pending_flags_contract =
+                        emitted_context->GetPendingFlagsTargetContract(guest);
+                const auto call_offset = emitted_context->GetCallCodeOffset(guest);
+                const auto call_pending_flags_offset =
+                        emitted_context->GetCallPendingFlagsCodeOffset(guest);
+                const auto to_offset = [](ptrdiff_t value) {
+                    return value < 0 ? backend::kInvalidFunctionEntryOffset
+                                     : static_cast<u32>(value);
+                };
+                const auto entry_contract = backend::FunctionEntryContract::Build(
+                        *region_function,
+                        *block,
+                        {
+                                .canonical = to_offset(offset),
+                                .direct_link = to_offset(direct_offset),
+                                .pending_flags = to_offset(pending_flags_offset),
+                                .continuation = to_offset(call_offset),
+                                .pending_flags_continuation = to_offset(call_pending_flags_offset),
+                        },
+                        pending_flags_contract,
+                        canonical_terminal);
+                ASSERT(entry_contract.IsWellFormed(allocation_size));
+                {
+                    PerfScope2 perf_pub_l2{GetPerfStats2().publish_l2};
+                    (void)entry_publisher.Publish(entry_contract);
+                }
+                cache_blocks.push_back({
+                        .guest_start = entry_contract.Guest().Value(),
+                        .guest_end = entry_contract.GuestEnd().Value(),
+                        .code_offset = entry_contract.Canonical().code_offset,
+                        .guest_bytes_hash = 0,
+                        .direct_code_offset = entry_contract.DirectLink().code_offset,
+                        .pending_flags_code_offset = entry_contract.PendingFlags().code_offset,
+                        .pending_flags_contract = pending_flags_contract,
+                        .entry_flags = static_cast<u8>(
+                                entry_contract.Linkable() ? backend::SerialBlock::Linkable : 0),
+                });
+                if (!module->GetModuleConfig().read_only) {
+                    PerfScope2 perf_pub_smc{GetPerfStats2().publish_smc};
                     mutable_address_space.GetSmcTracker().RegisterNode(
-                            module, ir_function, dependency.start.Value(),
-                            dependency.end.Value());
+                            module,
+                            ir_function,
+                            entry_contract.Guest().Value(),
+                            entry_contract.GuestEnd().Value());
+                    for (const auto& dependency : entry_contract.Dependencies()) {
+                        mutable_address_space.GetSmcTracker().RegisterNode(module,
+                                                                           ir_function,
+                                                                           dependency.start.Value(),
+                                                                           dependency.end.Value());
+                    }
                 }
             }
+        }
+        std::vector<const backend::arm64::JitTranslator*> emitted_translators;
+        std::vector<backend::arm64::JitTranslator::BackedgeBlockMetadata> backedges;
+        emitted_translators.reserve(prepared_regions.size());
+        for (size_t i = 0; i < prepared_regions.size(); ++i) {
+            const auto& translator = emitter.Translator(i);
+            emitted_translators.push_back(&translator);
+            const auto& region_backedges = translator.GetBackedgeBlockMetadata();
+            backedges.insert(backedges.end(), region_backedges.begin(), region_backedges.end());
         }
         {
             PerfScope2 perf_pub_fault{GetPerfStats2().publish_fault};
@@ -1200,7 +1260,6 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
                                       buffer.exec_data + buffer.size,
                                       func_start,
                                       buffer.exec_data);
-                const auto& backedges = emitted_translator->GetBackedgeBlockMetadata();
                 for (size_t i = 0; i < cache_blocks.size(); ++i) {
                     const auto recovery = std::find_if(
                             backedges.begin(), backedges.end(), [&](const auto& item) {
@@ -1230,19 +1289,20 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
                                       buffer.exec_data + buffer.size,
                                       func_start);
             }
-            PublishIndirectL1Faults(module, buffer, *emitted_translator);
+            for (const auto* translator : emitted_translators) {
+                PublishIndirectL1Faults(module, buffer, *translator);
+            }
         }
         if (dump_ir) fmt::print(stderr, "[func-compile] {:#x} entries-ready\n", func_start);
         {
             PerfScope2 perf_pub_disk{GetPerfStats2().publish_disk};
-            RecordJitCacheUnit(
-                    module,
-                    func_start,
-                    true,
-                    cache_blocks,
-                    buffer,
-                    *emitted_context,
-                    *emitted_translator);
+            RecordJitCacheUnit(module,
+                               func_start,
+                               true,
+                               cache_blocks,
+                               buffer,
+                               *emitted_context,
+                               emitted_translators);
         }
 
         // Release the function's IR. Block mode has always done this (the
@@ -1284,6 +1344,32 @@ void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunctio
         return buffer.exec_data;
     }
     return nullptr;
+}
+
+void* TranslateIR(const std::shared_ptr<backend::Module>& module,
+                  std::span<ir::HIRFunction* const> functions) {
+    ASSERT(!functions.empty());
+    const auto features = ResolveBackendFeatures(module);
+    PerfFixedSnapshot2 fixed_snapshot;
+    std::vector<std::unique_ptr<FunctionRegionAllocation>> allocations;
+    std::vector<PreparedFunctionRegion> prepared_regions;
+    allocations.reserve(functions.size());
+    prepared_regions.reserve(functions.size());
+    for (auto* function : functions) {
+        auto allocation = std::make_unique<FunctionRegionAllocation>();
+        prepared_regions.push_back(
+                PrepareFunctionRegion(module, function, features, fixed_snapshot, *allocation));
+        allocations.push_back(std::move(allocation));
+    }
+    return TranslatePreparedFunctionRegions(module, prepared_regions);
+}
+
+void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRFunction* function) {
+    const auto features = ResolveBackendFeatures(module);
+    PerfFixedSnapshot2 fixed_snapshot;
+    FunctionRegionAllocation allocation;
+    auto prepared = PrepareFunctionRegion(module, function, features, fixed_snapshot, allocation);
+    return TranslatePreparedFunctionRegions(module, std::span{&prepared, 1});
 }
 
 void* TranslateIR(const std::shared_ptr<backend::Module>& module, ir::HIRBlock* block) {

@@ -1,16 +1,19 @@
+#include <array>
 #include <atomic>
-#include <catch2/catch_test_macros.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
-#include <sys/mman.h>
 #include <thread>
+#include <catch2/catch_test_macros.hpp>
+#include <sys/mman.h>
 #include <unistd.h>
 #include "runtime/backend/address_space.h"
+#include "runtime/backend/runtime.h"
 #include "runtime/backend/smc_tracker.h"
 #include "runtime/backend/translate_table.h"
 #include "runtime/ir/block.h"
+#include "runtime/ir/hir_builder.h"
 
 namespace {
 
@@ -24,15 +27,10 @@ using swift::runtime::ir::Location;
 
 class SmcFixture {
 public:
-    explicit SmcFixture(std::size_t page_count)
+    explicit SmcFixture(std::size_t page_count, bool with_uniforms = false)
             : page_size_(static_cast<std::size_t>(getpagesize()))
             , size_(page_size_ * page_count)
-            , memory_(mmap(nullptr,
-                           size_,
-                           PROT_READ | PROT_WRITE,
-                           MAP_PRIVATE | MAP_ANON,
-                           -1,
-                           0)) {
+            , memory_(mmap(nullptr, size_, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0)) {
         if (memory_ == MAP_FAILED) {
             throw std::runtime_error("SMC test mmap failed");
         }
@@ -46,6 +44,9 @@ public:
                 .memory_base = memory_,
                 .guest_addr_mask = size_ - 1,
         };
+        if (with_uniforms) {
+            config.uniform_buffer_size = 256;
+        }
         space_ = std::make_unique<AddressSpace>(config);
         module_ = space_->GetDefaultModule();
     }
@@ -85,6 +86,7 @@ public:
 
     [[nodiscard]] std::size_t PageSize() const { return page_size_; }
     [[nodiscard]] AddressSpace& Space() const { return *space_; }
+    [[nodiscard]] const std::shared_ptr<Module>& ModulePtr() const { return module_; }
     [[nodiscard]] swift::runtime::backend::SmcTracker& Tracker() const {
         return space_->GetSmcTracker();
     }
@@ -98,6 +100,42 @@ private:
 };
 
 }  // namespace
+
+TEST_CASE("SMC invalidates every region in one function code object",
+          "[smc][function-code-object]") {
+    using namespace swift;
+    using namespace swift::runtime;
+    using namespace swift::runtime::backend;
+    using namespace swift::runtime::ir;
+
+    SmcFixture fixture{2, true};
+    const VAddr first_guest = 0x100;
+    const VAddr second_guest = fixture.PageSize() + 0x100;
+    const auto features = ResolveFeatureSet(ModuleConfig{});
+    HIRBuilder builder{2, true, features};
+    auto make_region = [&](VAddr guest) {
+        auto* function = builder.AppendFunction(Location{guest}, Location{guest + 1});
+        const auto value =
+                function->LoadUniform<TypedValue<ValueType::U64>>(Uniform{0, ValueType::U64});
+        function->StoreUniform(Uniform{8, ValueType::U64}, value);
+        function->EndBlock(terminal::ReturnToHost{});
+        function->EndFunction();
+        return function;
+    };
+    auto* first = make_region(first_guest);
+    auto* second = make_region(second_guest);
+    const std::array<HIRFunction*, 2> regions{first, second};
+
+    REQUIRE(TranslateIR(fixture.ModulePtr(), regions) != nullptr);
+    REQUIRE(fixture.Space().GetCodeCache(first_guest) != nullptr);
+    REQUIRE(fixture.Space().GetCodeCache(second_guest) != nullptr);
+
+    TranslateTable l1{8};
+    fixture.Tracker().InvalidateRange(fixture.Space(), &l1, first_guest, first_guest + 1);
+    REQUIRE(fixture.Space().GetCodeCache(first_guest) == nullptr);
+    REQUIRE(fixture.Space().GetCodeCache(second_guest) == nullptr);
+    REQUIRE_FALSE(fixture.HasNode(first_guest));
+}
 
 TEST_CASE("SMC dependent code range invalidates its owning translation",
           "[smc][dependency]") {

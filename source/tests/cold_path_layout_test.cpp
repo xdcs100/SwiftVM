@@ -8,6 +8,7 @@
 #include "runtime/backend/arm64/jit/function_code_object_emitter.h"
 #include "runtime/backend/arm64/jit/jit_context.h"
 #include "runtime/backend/arm64/jit/translator.h"
+#include "runtime/backend/runtime.h"
 #include "runtime/ir/hir_builder.h"
 #include "runtime/ir/opts/register_alloc_pass.h"
 
@@ -126,6 +127,9 @@ TEST_CASE("function code objects emit independently allocated regions",
     auto make_region = [&](VAddr guest) {
         auto* function = builder.AppendFunction(Location{guest},
                                                 Location{guest + 1});
+        const auto value =
+                function->LoadUniform<TypedValue<ValueType::U64>>(Uniform{0, ValueType::U64});
+        function->StoreUniform(Uniform{8, ValueType::U64}, value);
         function->EndBlock(terminal::ReturnToHost{});
         function->EndFunction();
         function->ComputeRPO();
@@ -159,6 +163,63 @@ TEST_CASE("function code objects emit independently allocated regions",
     REQUIRE(second_offset > first_offset);
     REQUIRE(static_cast<u32>(second_offset) < emitter.CurrentBufferSize());
     REQUIRE(first->GetFunction()->TakeBlocksFrom(*second->GetFunction()));
+    REQUIRE(first->GetFunction()->FindBlock(Location{second_guest}) != nullptr);
+    REQUIRE(second->GetFunction()->GetBlocks().empty());
+#else
+    SUCCEED();
+#endif
+}
+
+TEST_CASE("function code objects publish regions through one owner",
+          "[arm64][codegen][function-code-object][publication]") {
+#if defined(__aarch64__)
+    using namespace swift;
+    using namespace swift::runtime;
+    using namespace swift::runtime::backend;
+    using namespace swift::runtime::ir;
+
+    constexpr VAddr first_guest = 0x7600;
+    constexpr VAddr second_guest = 0x7700;
+    Config config{
+            .loc_start = 0,
+            .loc_end = 1ull << 48,
+            .enable_jit = true,
+            .has_local_operation = false,
+            .backend_isa = kArm64,
+            .global_opts = Optimizations::All,
+    };
+    config.uniform_buffer_size = 256;
+    AddressSpace address_space{config};
+    ModuleConfig module_config{
+            .read_only = true,
+            .optimizations = Optimizations::All,
+    };
+    auto module = address_space.MapModule(LocationDescriptor{first_guest},
+                                          LocationDescriptor{second_guest + 0x10},
+                                          module_config);
+    const auto features = ResolveFeatureSet(module_config);
+
+    HIRBuilder builder{2, true, features};
+    auto make_region = [&](VAddr guest) {
+        auto* function = builder.AppendFunction(Location{guest}, Location{guest + 1});
+        const auto value =
+                function->LoadUniform<TypedValue<ValueType::U64>>(Uniform{0, ValueType::U64});
+        function->StoreUniform(Uniform{8, ValueType::U64}, value);
+        function->EndBlock(terminal::ReturnToHost{});
+        function->EndFunction();
+        return function;
+    };
+    auto* first = make_region(first_guest);
+    auto* second = make_region(second_guest);
+    const std::array<HIRFunction*, 2> regions{first, second};
+
+    REQUIRE(TranslateIR(module, regions) != nullptr);
+    auto* first_code = address_space.GetCodeCache(first_guest);
+    auto* second_code = address_space.GetCodeCache(second_guest);
+    REQUIRE(first_code != nullptr);
+    REQUIRE(second_code != nullptr);
+    REQUIRE(second_code != first_code);
+    REQUIRE(first->GetFunction()->FindBlock(Location{first_guest}) != nullptr);
     REQUIRE(first->GetFunction()->FindBlock(Location{second_guest}) != nullptr);
     REQUIRE(second->GetFunction()->GetBlocks().empty());
 #else
