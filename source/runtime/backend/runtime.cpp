@@ -161,10 +161,12 @@ struct Runtime::Impl final {
         // Production inline probes turn an invalidated key hit into a branch
         // to the dispatcher's L2 continuation. The diagnostic form keeps zero
         // so it can distinguish this fallback as a miss.
-        l1_code_cache.SetInvalidValue(indirect_l1_prof_enabled
-                ? 0
-                : reinterpret_cast<size_t>(
-                          address_space->GetTrampolines().GetIndirectL1Miss()));
+        if (indirect_l1_prof_enabled) {
+            l1_code_cache.SetInvalidValue(0);
+        } else {
+            l1_code_cache.SetIndexedInvalidValue(
+                    GetInterruptL1Mapping().Data());
+        }
         // Inline indirect-L1 faults use this request word even when the
         // optional backedge/SMC latch is disabled.
         state->exit_request = 0;
@@ -356,15 +358,40 @@ struct Runtime::Impl final {
         if (GetInterruptL1Mapping().Contains(fault_addr)) {
             const auto request = std::atomic_ref<u64>(self->state->exit_request)
                                          .load(std::memory_order_acquire);
-            if ((request & kBackedgeSignalRequest) == 0) {
+            if ((request & kBackedgeSignalRequest) != 0) {
+                const bool has_entry =
+                        self->address_space->LookupFault(host_pc, entry);
+                const auto recovery_pc = has_entry && entry.recovery
+                        ? reinterpret_cast<std::uintptr_t>(entry.recovery)
+                        : reinterpret_cast<std::uintptr_t>(
+                                  self->address_space->GetTrampolines()
+                                          .GetReturnHost());
+                backend::SignalHandler::SetContextPC(uctx, recovery_pc);
+                return true;
+            }
+            if (self->state->indirect_l1_code_cache ==
+                        GetInterruptL1Mapping().Data()) {
                 return false;
             }
-            const bool has_entry = self->address_space->LookupFault(host_pc, entry);
-            const auto recovery_pc = has_entry && entry.recovery
-                    ? reinterpret_cast<std::uintptr_t>(entry.recovery)
-                    : reinterpret_cast<std::uintptr_t>(
-                              self->address_space->GetTrampolines().GetReturnHost());
-            backend::SignalHandler::SetContextPC(uctx, recovery_pc);
+            const auto offset = fault_addr - reinterpret_cast<std::uintptr_t>(
+                    GetInterruptL1Mapping().Data());
+            if (offset % sizeof(TranslateEntry) != 0) {
+                return false;
+            }
+            const auto index = offset / sizeof(TranslateEntry);
+            if (index >= (size_t{1} << l1_cache_bits)) {
+                return false;
+            }
+            auto* entries = static_cast<TranslateEntry*>(
+                    self->state->indirect_l1_code_cache);
+            const auto target = std::atomic_ref<size_t>(entries[index].key)
+                                        .load(std::memory_order_acquire);
+            self->state->current_loc = ir::Location(target);
+            backend::SignalHandler::SetContextPC(
+                    uctx,
+                    reinterpret_cast<std::uintptr_t>(
+                            self->address_space->GetTrampolines()
+                                    .GetIndirectL1Miss()));
             return true;
         }
         bool has_entry = host_pc &&

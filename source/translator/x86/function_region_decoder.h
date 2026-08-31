@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <vector>
 
 #include "function_decode_frontier.h"
 #include "runtime/frontend/x86/decoder.h"
@@ -30,6 +31,7 @@ struct FunctionRegionDecodeResult {
     size_t decoded_blocks{};
     bool hit_block_cap{};
     bool has_host_call{};
+    std::vector<runtime::LocationDescriptor> pending_roots;
 };
 
 class FunctionRegionDecoder final {

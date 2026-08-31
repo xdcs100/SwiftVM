@@ -11,6 +11,7 @@ add_executable(swift_test
         funnel_shift_codegen_test.cpp
         function_decode_frontier_test.cpp
         function_entry_contract_test.cpp
+        function_region_membership_test.cpp
         helper_call_contract_test.cpp
         helper_effect_codegen_test.cpp
         flags_merge_test.cpp

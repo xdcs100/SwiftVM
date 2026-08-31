@@ -36,6 +36,7 @@
 #include "base/scope_exit.h"
 #include "fmt/format.h"
 #include "function_region_decoder.h"
+#include "function_region_membership.h"
 #include "runtime/backend/address_space.h"
 #include "runtime/backend/context.h"
 #include "runtime/backend/jit_code.h"
@@ -619,6 +620,52 @@ struct X86Instance::Impl final {
         return std::make_unique<runtime::Runtime>(address_space.get());
     }
 
+    [[nodiscard]] FunctionRegionDecodeResult DecodeRegion(
+            ir::HIRBuilder& builder,
+            ir::HIRFunction& function,
+            LocationDescriptor root,
+            size_t block_cap,
+            bool lazy,
+            const runtime::FeatureSet& features,
+            const std::unordered_set<LocationDescriptor>* claimed_blocks =
+                    nullptr) const {
+        FunctionRegionDecoder decoder{
+                builder,
+                function,
+                {
+                        .entry = root,
+                        .block_cap = block_cap,
+                        .lazy = lazy,
+                        .memory = &memory_impl,
+                        .arm64_features = address_space->GetConfig().arm64_features,
+                        .sse_afp_nan = address_space->GetConfig().sse_afp_nan,
+                        .native_memory = !address_space->GetConfig().memory_base &&
+                                         !address_space->GetConfig().page_table,
+                        .features = features,
+                        .local_target =
+                                [root, lazy, claimed_blocks](
+                                        LocationDescriptor address) {
+                                    if (address != root && claimed_blocks &&
+                                        claimed_blocks->contains(address)) {
+                                        return false;
+                                    }
+                                    return !lazy ||
+                                           (IsLocalFunctionTarget(root, address) &&
+                                            (address == root ||
+                                             !IsEndbr64Boundary(address)));
+                                },
+                        .has_code =
+                                [this, claimed_blocks](
+                                        LocationDescriptor address) {
+                                    return (claimed_blocks &&
+                                            claimed_blocks->contains(address)) ||
+                                           address_space->GetCodeCache(address) !=
+                                                   nullptr;
+                                },
+                }};
+        return decoder.Decode();
+    }
+
     [[nodiscard]] void* Translate(LocationDescriptor pc) const {
         // Coarse first-cut MT policy: only one thread may inspect/mutate the
         // frontend's function fallback sets or decode/publish IR at a time.
@@ -657,129 +704,210 @@ struct X86Instance::Impl final {
         // and the HIRBuilder's internal Function object (TranslateIR pushes the
         // HIRBuilder's Function into the module).
         if (func_base) {
-            // Best-effort: the whole-function path is a strict subset of what
-            // block compilation handles. Any failure (an unsupported construct
-            // trips an IR assert during decode/compile) falls back to the
-            // known-good block path below instead of crashing the guest.
             void* func_code = nullptr;
             bool compiled = false;
             func_stats.Attempt();
             try {
-            auto jit_guard = module->ModuleLockRead();
-            PerfScope2 perf_ir_setup{GetPerfStats2().ir_setup};
-            ir::HIRBuilder builder{1, true, features};
-            auto* hir_func = builder.AppendFunction(pc);
-            FunctionDecodeFrontier decode_frontier{hir_func};
-            perf_ir_setup.Stop();
+                constexpr size_t kMaxFuncBlocks = 128;
+                constexpr size_t kRegionBlockCap = 64;
+                const size_t lazy_budget =
+                        decode_budget_override != 0
+                                ? decode_budget_override
+                                : (address_space->GetConfig().enable_jit
+                                           ? (address_space->GetConfig().region_edges
+                                                      ? RegionFuncBudget()
+                                                      : LazyFuncBudget())
+                                           : kMaxFuncBlocks);
+                const size_t decode_cap =
+                        std::min(lazy_budget, kMaxFuncBlocks);
+                const bool lazy = lazy_budget <= kMaxFuncBlocks;
+                const bool regroup_regions =
+                        address_space->GetConfig().enable_jit &&
+                        address_space->GetConfig().region_edges && lazy &&
+                        decode_cap == kRegionBlockCap;
 
-            constexpr size_t kMaxFuncBlocks = 128;
-            const size_t lazy_budget =
-                    decode_budget_override != 0
-                            ? decode_budget_override
-                            : (address_space->GetConfig().enable_jit
-                                       ? (address_space->GetConfig().region_edges
-                                                  ? RegionFuncBudget()
-                                                  : LazyFuncBudget())
-                                       : kMaxFuncBlocks);
-            const size_t decode_cap = std::min(lazy_budget, kMaxFuncBlocks);
-            const bool lazy = lazy_budget <= kMaxFuncBlocks;
-            FunctionRegionDecoder decoder{
-                    builder,
-                    *hir_func,
-                    {
-                            .entry = pc,
-                            .block_cap = decode_cap,
-                            .lazy = lazy,
-                            .memory = &memory_impl,
-                            .arm64_features = address_space->GetConfig().arm64_features,
-                            .sse_afp_nan = address_space->GetConfig().sse_afp_nan,
-                            .native_memory = !address_space->GetConfig().memory_base &&
-                                             !address_space->GetConfig().page_table,
-                            .features = features,
-                            .local_target =
-                                    [&](LocationDescriptor address) {
-                                        return !lazy ||
-                                               (IsLocalFunctionTarget(pc, address) &&
-                                                (address == pc || !IsEndbr64Boundary(address)));
-                                    },
-                            .has_code =
-                                    [&](LocationDescriptor address) {
-                                        return address_space->GetCodeCache(address) != nullptr;
-                                    },
-                    }};
-            const auto decode_result = decoder.Decode();
-            const auto decoded_count = decode_result.decoded_count;
-            const auto decoded_blocks = decode_result.decoded_blocks;
-            const bool hit_block_cap = decode_result.hit_block_cap;
-            const bool has_host_call = decode_result.has_host_call;
-            PerfAdd(GetPerfStats().func_units, 1);
-            PerfAdd(GetPerfStats().decoded_blocks, decoded_count);
-
-            if (runtime::GetSvmConfig().dump_ir) {
-                fmt::print(
-                        stderr, "--- function {:#x} (decoded {} blocks) ---\n", pc, decoded_count);
-                for (auto* block : hir_func->GetHIRBlocks()) {
-                    if (block) {
-                        fmt::print(stderr, "{}\n", block->GetBlock()->ToString());
+                std::vector<FunctionRegionMembership::Region> regions{{pc, 0}};
+                bool membership_recompile = false;
+                if (regroup_regions) {
+                    if (auto selection = region_membership.Select(pc)) {
+                        auto current_owner = module->GetNode(
+                                selection->retired_owner->GetStartLocation());
+                        if (backend::IsFunction(current_owner) &&
+                            backend::GetFunction(current_owner).get() ==
+                                    selection->retired_owner.get() &&
+                            address_space->GetSmcTracker().RetireNode(
+                                    *address_space,
+                                    nullptr,
+                                    module,
+                                    selection->retired_owner.get())) {
+                            regions.clear();
+                            regions.push_back(selection->retired_region);
+                            if (selection->retired_region.root != pc) {
+                                regions.push_back({pc, 0});
+                            }
+                            membership_recompile = true;
+                        }
                     }
                 }
-                fmt::print(stderr, "--- end function {:#x} ---\n", pc);
-            }
 
-            const bool allow_func_lambda = runtime::GetSvmConfig().func_lambda;
-            if (has_host_call && !allow_func_lambda) {
-                for (auto* hb : hir_func->GetHIRBlocks()) {
-                    if (hb && hb != hir_func->GetEntryBlock()) {
-                        block_only_locations.insert(hb->GetBlock()->GetStartLocation().Value());
+                auto jit_guard = module->ModuleLockRead();
+                PerfScope2 perf_ir_setup{GetPerfStats2().ir_setup};
+                ir::HIRBuilder builder{
+                        static_cast<u32>(regions.size()), true, features};
+                perf_ir_setup.Stop();
+
+                const size_t region_cap = regions.size() == 1
+                        ? decode_cap
+                        : kRegionBlockCap;
+                std::vector<ir::HIRFunction*> hir_functions;
+                std::vector<FunctionRegionDecodeResult> decode_results;
+                std::vector<FunctionRegionMembership::Region> decoded_regions;
+                std::unordered_set<LocationDescriptor> claimed_blocks;
+                hir_functions.reserve(regions.size());
+                decode_results.reserve(regions.size());
+                decoded_regions.reserve(regions.size());
+                for (auto region : regions) {
+                    if (claimed_blocks.contains(region.root)) {
+                        continue;
                     }
-                }
-                throw std::runtime_error(
-                        "function contains CallLambda; disabled by SVM_FUNC_LAMBDA=0");
-            } else if (hit_block_cap && !lazy) {
-                // Once a translation reaches the safety cap, entry at one of
-                // its not-yet-discovered interior blocks cannot be identified
-                // reliably as the same function. Keep the remainder of this
-                // process on block compilation instead of repeatedly decoding
-                // overlapping suffixes of the oversized CFG.
-                function_compilation_disabled = true;
-                for (auto* hb : hir_func->GetHIRBlocks()) {
-                    if (hb && hb != hir_func->GetEntryBlock()) {
-                        block_only_locations.insert(hb->GetBlock()->GetStartLocation().Value());
+                    auto* hir_function = builder.AppendFunction(region.root);
+                    hir_functions.push_back(hir_function);
+                    decode_results.push_back(DecodeRegion(
+                            builder,
+                            *hir_function,
+                            region.root,
+                            region_cap,
+                            lazy,
+                            features,
+                            &claimed_blocks));
+                    region.decoded_blocks =
+                            decode_results.back().decoded_blocks;
+                    decoded_regions.push_back(region);
+                    for (auto* block : hir_function->GetHIRBlocks()) {
+                        if (!block) {
+                            continue;
+                        }
+                        auto* lir_block = block->GetBlock();
+                        if (!lir_block->GetInstList().empty() ||
+                            lir_block->HasTerminal()) {
+                            claimed_blocks.insert(
+                                    lir_block->GetStartLocation().Value());
+                        }
                     }
-                }
-                func_stats.BlockCap(pc, decoded_count);
-            } else {
-                perf_detail.Classify(static_cast<unsigned>(decoded_blocks));
-                if (!module->GetAddressSpace().GetConfig().enable_jit) {
-                    if (!backend::PublishIRFunction(module, hir_func)) {
-                        throw std::runtime_error("failed to publish interpreted HIR function");
-                    }
+                    PerfAdd(GetPerfStats().func_units, 1);
+                    PerfAdd(GetPerfStats().decoded_blocks,
+                            decode_results.back().decoded_count);
                     if (runtime::GetSvmConfig().dump_ir) {
-                        fmt::print(stderr, "[func-compile] {:#x} interp-publish-ready\n", pc);
+                        fmt::print(stderr,
+                                   "--- function {:#x} (decoded {} blocks) ---\n",
+                                   region.root,
+                                   decode_results.back().decoded_count);
+                        for (auto* block : hir_function->GetHIRBlocks()) {
+                            if (block) {
+                                fmt::print(stderr,
+                                           "{}\n",
+                                           block->GetBlock()->ToString());
+                            }
+                        }
+                        fmt::print(stderr,
+                                   "--- end function {:#x} ---\n",
+                                   region.root);
                     }
-                    func_stats.Compiled(decoded_blocks);
-                    if (runtime::GetSvmConfig().dump_ir) {
-                        fmt::print(stderr, "[func-compile] {:#x} interp-return\n", pc);
+                }
+                regions = std::move(decoded_regions);
+
+                const bool has_host_call = std::any_of(
+                        decode_results.begin(),
+                        decode_results.end(),
+                        [](const FunctionRegionDecodeResult& result) {
+                            return result.has_host_call;
+                        });
+                const bool hit_block_cap = std::any_of(
+                        decode_results.begin(),
+                        decode_results.end(),
+                        [](const FunctionRegionDecodeResult& result) {
+                            return result.hit_block_cap;
+                        });
+                size_t decoded_blocks{};
+                size_t decoded_count{};
+                for (const auto& result : decode_results) {
+                    decoded_blocks += result.decoded_blocks;
+                    decoded_count += result.decoded_count;
+                }
+                const auto make_block_only = [&] {
+                    for (auto* hir_function : hir_functions) {
+                        for (auto* block : hir_function->GetHIRBlocks()) {
+                            if (block &&
+                                block != hir_function->GetEntryBlock()) {
+                                block_only_locations.insert(
+                                        block->GetBlock()
+                                                ->GetStartLocation()
+                                                .Value());
+                            }
+                        }
                     }
-                    compiled = true;
+                };
+
+                if (has_host_call &&
+                    !runtime::GetSvmConfig().func_lambda) {
+                    make_block_only();
+                    throw std::runtime_error(
+                            "function contains CallLambda; disabled by SVM_FUNC_LAMBDA=0");
+                }
+                if (hit_block_cap && !lazy) {
+                    function_compilation_disabled = true;
+                    make_block_only();
+                    func_stats.BlockCap(pc, decoded_count);
                 } else {
-                    func_code = backend::TranslateIR(module, hir_func);
-                    if (!func_code) {
-                        throw std::runtime_error("TranslateIR(HIRFunction) returned null");
+                    perf_detail.Classify(
+                            static_cast<unsigned>(decoded_blocks));
+                    if (!module->GetAddressSpace().GetConfig().enable_jit) {
+                        ASSERT(hir_functions.size() == 1);
+                        if (!backend::PublishIRFunction(
+                                    module, hir_functions.front())) {
+                            throw std::runtime_error(
+                                    "failed to publish interpreted HIR function");
+                        }
+                        func_stats.Compiled(decoded_blocks);
+                        compiled = true;
+                    } else {
+                        func_code = hir_functions.size() == 1
+                                ? backend::TranslateIR(
+                                          module, hir_functions.front())
+                                : backend::TranslateIR(module, hir_functions);
+                        if (!func_code) {
+                            throw std::runtime_error(
+                                    "TranslateIR(HIRFunction regions) returned null");
+                        }
+                        if (membership_recompile) {
+                            func_code = address_space->GetCodeCache(pc);
+                            if (!func_code) {
+                                throw std::runtime_error(
+                                        "published region does not contain requested entry");
+                            }
+                        }
+                        func_stats.Compiled(decoded_blocks);
+                        compiled = true;
+                        if (regroup_regions && !membership_recompile &&
+                            regions.size() == 1) {
+                            std::vector<LocationDescriptor> pending_roots;
+                            for (const auto& result : decode_results) {
+                                pending_roots.insert(
+                                        pending_roots.end(),
+                                        result.pending_roots.begin(),
+                                        result.pending_roots.end());
+                            }
+                            auto owner = module->GetNode(ir::Location{pc});
+                            if (backend::IsFunction(owner)) {
+                                region_membership.Record(
+                                        backend::GetFunction(owner),
+                                        regions.front(),
+                                        pending_roots);
+                            }
+                        }
                     }
-                    func_stats.Compiled(decoded_blocks);
-                    if (runtime::GetSvmConfig().dump_ir) {
-                        fmt::print(stderr, "[func-compile] {:#x} jit-return\n", pc);
-                    }
-                    compiled = true;
                 }
-            }
             } catch (const std::exception& error) {
-                // Unsupported construct in the whole-function path (e.g. a
-                // branch the function-mode decode can't lower yet) — fall back
-                // to block compilation. The builder is local and the module is
-                // untouched until TranslateIR, so nothing leaks; the read lock
-                // unwinds with the try scope.
                 func_stats.Exception(pc, error.what());
                 block_only_locations.insert(pc);
                 compiled = false;
@@ -864,6 +992,7 @@ struct X86Instance::Impl final {
     mutable std::mutex translate_mutex;
     mutable FunctionCompileStats func_stats{"x86_64"};
     mutable std::unordered_set<LocationDescriptor> block_only_locations{};
+    mutable FunctionRegionMembership region_membership{};
     mutable bool function_compilation_disabled{};
     // AOT: in-process override of the function-mode decode budget (see
     // X86Instance::SetFunctionDecodeBudget). 0 = follow SVM_FUNC_LAZY.

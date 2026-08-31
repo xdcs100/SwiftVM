@@ -9,6 +9,8 @@ add_library(swift_translator STATIC
         x86/function_decode_frontier.h
         x86/function_region_decoder.cpp
         x86/function_region_decoder.h
+        x86/function_region_membership.cpp
+        x86/function_region_membership.h
         x86/translator.cpp
         x86/translator.h
         )

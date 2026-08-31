@@ -306,6 +306,18 @@ std::optional<LinkTargetRecord> LinkManager::QueryTarget(u64 guest_target) const
     return std::nullopt;
 }
 
+std::vector<u64> LinkManager::QueryTargets(LinkSourceOwner target_owner) const {
+    std::lock_guard guard(mutex_);
+    std::vector<u64> result;
+    for (const auto& [guest_target, target] : targets_) {
+        if (target.target_owner == target_owner) {
+            result.push_back(guest_target);
+        }
+    }
+    std::sort(result.begin(), result.end());
+    return result;
+}
+
 std::optional<u64> LinkManager::QueryTargetGeneration(u64 guest_target) const {
     std::lock_guard guard(mutex_);
     if (const auto it = targets_.find(guest_target);

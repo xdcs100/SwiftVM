@@ -29,6 +29,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <vector>
 #include "runtime/backend/translate_table.h"
 #include "runtime/common/types.h"
@@ -141,6 +142,10 @@ public:
                          TranslateTable* current_l1,
                          VAddr guest_start,
                          VAddr guest_end);
+    bool RetireNode(AddressSpace& space,
+                    TranslateTable* current_l1,
+                    const std::shared_ptr<Module>& module,
+                    ir::AddressNode* node);
 
     [[nodiscard]] bool HasProtectedPages() const;
 
@@ -228,7 +233,9 @@ private:
     // The following metadata helpers require metadata_lock_.
     void ClearDispatchSlots(AddressSpace& space,
                             TranslateTable* extra_l1,
-                            const TrackedNode& tracked);
+                            const TrackedNode& tracked,
+                            std::span<const VAddr> aliases = {},
+                            bool publish_exit_request = true);
     void PublishExitRequest();
     [[nodiscard]] std::vector<TrackedNode> TakeDirtyNodes(AddressSpace& space,
                                                           TranslateTable* extra_l1);
@@ -240,7 +247,9 @@ private:
     // invalidation_mutex_ must be held. Every target generation is made
     // inactive and every incoming instruction is restored to BL before node
     // detach or the global reclaim epoch may advance.
-    void DelinkTargets(AddressSpace& space, const std::vector<TrackedNode>& nodes);
+    void DelinkTargets(AddressSpace& space,
+                       const std::vector<TrackedNode>& nodes,
+                       std::span<const VAddr> aliases = {});
     [[nodiscard]] bool CanReclaim(u64 retire_epoch) const;
 
     // invalidation_mutex_ must be held.

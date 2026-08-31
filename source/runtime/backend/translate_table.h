@@ -49,7 +49,17 @@ public:
     void SetInvalidValue(size_t value) {
         std::unique_lock<TableLock> guard(lock);
         invalid_value = value;
+        indexed_invalid_base = 0;
         entries[Hash(0)].value = value;
+    }
+
+    void SetIndexedInvalidValue(void* base) {
+        std::unique_lock<TableLock> guard(lock);
+        indexed_invalid_base = reinterpret_cast<size_t>(base);
+        invalid_value = 0;
+        const auto index = Hash(0);
+        entries[index].value =
+                indexed_invalid_base + index * sizeof(TranslateEntry);
     }
 
     bool Put(size_t key, size_t value) {
@@ -179,7 +189,9 @@ public:
         do {
             c_key = entries[index].key;
             if (c_key == key) {
-                entries[index].value = invalid_value;
+                entries[index].value = indexed_invalid_base
+                        ? indexed_invalid_base + index * sizeof(TranslateEntry)
+                        : invalid_value;
                 std::atomic_thread_fence(std::memory_order_release);
                 return true;
             }
@@ -267,6 +279,7 @@ private:
     size_t size;
     TranslateTableHash hash_mode;
     size_t invalid_value{};
+    size_t indexed_invalid_base{};
     size_t entry_count{};
     size_t storage_alignment{};
     EntryStorage entries{nullptr, EntryDeleter{}};

@@ -297,7 +297,9 @@ void SmcTracker::RegisterNode(const std::shared_ptr<Module>& module,
 
 void SmcTracker::ClearDispatchSlots(AddressSpace& space,
                                     TranslateTable* extra_l1,
-                                    const TrackedNode& tracked) {
+                                    const TrackedNode& tracked,
+                                    std::span<const VAddr> aliases,
+                                    bool publish_exit_request) {
     auto clear_location = [&](VAddr location) {
         space.GetCodeCacheTable().Zero(location);
         space.GetCallCodeCacheTable().Zero(location);
@@ -320,11 +322,16 @@ void SmcTracker::ClearDispatchSlots(AddressSpace& space,
             clear_location(block.GetStartLocation().Value());
         }
     }
+    for (const auto location : aliases) {
+        clear_location(location);
+    }
     // Publish only after every shared/L1 dispatch slot is clear. The release
     // operation below orders those clears before the poll page is protected;
     // publishing first would permit an executing loop to re-enter through a
     // stale slot.
-    PublishExitRequest();
+    if (publish_exit_request) {
+        PublishExitRequest();
+    }
 }
 
 void SmcTracker::PublishExitRequest() {
@@ -355,7 +362,8 @@ void SmcTracker::RemoveTrackedNode(ir::AddressNode* node) {
 }
 
 void SmcTracker::DelinkTargets(AddressSpace& space,
-                               const std::vector<TrackedNode>& nodes) {
+                               const std::vector<TrackedNode>& nodes,
+                               std::span<const VAddr> aliases) {
     std::unordered_set<VAddr> targets;
     for (const auto& tracked : nodes) {
         auto* node = tracked.node.Get();
@@ -366,6 +374,7 @@ void SmcTracker::DelinkTargets(AddressSpace& space,
             }
         }
     }
+    targets.insert(aliases.begin(), aliases.end());
 
     auto& manager = space.GetLinkManager();
     size_t restored_linked{};
@@ -761,6 +770,65 @@ void SmcTracker::InvalidateRange(AddressSpace& space,
 
     Retire(candidates);
     ReclaimRetiredLocked();
+}
+
+bool SmcTracker::RetireNode(AddressSpace& space,
+                            TranslateTable* current_l1,
+                            const std::shared_ptr<Module>& module,
+                            ir::AddressNode* node) {
+    if (!module || !node) {
+        return false;
+    }
+    std::lock_guard invalidation_guard(invalidation_mutex_);
+    const auto current = module->GetNode(node->GetStartLocation());
+    const bool current_owner =
+            (IsFunction(current) && GetFunction(current).get() == node) ||
+            (IsBlock(current) && GetBlock(current).get() == node);
+    if (!current_owner) {
+        return false;
+    }
+
+    u8* published{};
+    if (node->node_type == ir::AddressNode::Function) {
+        auto* function = static_cast<ir::Function*>(node);
+        auto guard = function->LockRead();
+        published = static_cast<u8*>(module->GetJitCache(function->GetJitCache()));
+    } else if (node->node_type == ir::AddressNode::Block) {
+        auto* block = static_cast<ir::Block*>(node);
+        auto guard = block->LockRead();
+        published = static_cast<u8*>(module->GetJitCache(block->GetJitCache()));
+    }
+    if (!published) {
+        return false;
+    }
+
+    auto& link_manager = space.GetLinkManager();
+    const LinkSourceOwner owner{module.get(), published};
+    const auto aliases = link_manager.QueryTargets(owner);
+    TrackedNode tracked{
+            .module = module,
+            .node = ir::NodeRef{node},
+            .guest_start = node->GetStartLocation().Value(),
+            .guest_end = node->GetStartLocation().Value() + 1,
+    };
+    {
+        MetadataGuard guard(*this);
+        ClearDispatchSlots(space, current_l1, tracked, aliases);
+        RemoveTrackedNode(node);
+    }
+    std::vector<TrackedNode> nodes{tracked};
+    DelinkTargets(space, nodes, aliases);
+    auto* exec_ptr = module->DetachNode(node);
+    ASSERT(exec_ptr == published);
+    if (!exec_ptr) {
+        return false;
+    }
+    (void)link_manager.DetachSource(owner);
+    std::vector<ReclaimCandidate> candidates{
+            ReclaimCandidate{module, exec_ptr}};
+    Retire(candidates);
+    ReclaimRetiredLocked();
+    return true;
 }
 
 void SmcTracker::DisableAndUnprotectAll() {

@@ -157,6 +157,7 @@ public:
                                     EdgeFlagsTargetContract
                                             pending_flags_contract = {});
     [[nodiscard]] std::optional<LinkTargetRecord> QueryTarget(u64 guest_target) const;
+    [[nodiscard]] std::vector<u64> QueryTargets(LinkSourceOwner target_owner) const;
     [[nodiscard]] std::optional<u64> QueryTargetGeneration(u64 guest_target) const;
     [[nodiscard]] bool ValidateTargetGeneration(u64 guest_target, u64 generation) const;
     using LinkCommit = std::function<bool(const LinkSiteRecord&)>;

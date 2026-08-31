@@ -170,6 +170,35 @@ TEST_CASE("function code objects emit independently allocated regions",
 #endif
 }
 
+TEST_CASE("function code object ownership keeps external placeholders separate",
+          "[function-code-object]") {
+    using namespace swift;
+    using namespace swift::runtime;
+    using namespace swift::runtime::ir;
+
+    constexpr VAddr first_guest = 0x7580;
+    constexpr VAddr second_guest = 0x7590;
+    HIRBuilder builder{2, true, {}};
+    auto* first = builder.AppendFunction(Location{first_guest},
+                                         Location{first_guest + 1});
+    first->EndBlock(terminal::ReturnToHost{});
+    first->EndFunction();
+
+    auto* second = builder.AppendFunction(Location{second_guest},
+                                          Location{second_guest + 1});
+    second->EndBlock(terminal::ReturnToHost{});
+    second->CreateOrGetBlock(Location{first_guest});
+    second->EndFunction();
+
+    REQUIRE(first->GetFunction()->TakeBlocksFrom(*second->GetFunction()));
+    REQUIRE(first->GetFunction()->FindBlock(Location{first_guest}) != nullptr);
+    REQUIRE(first->GetFunction()->FindBlock(Location{second_guest}) != nullptr);
+    auto* placeholder = second->GetFunction()->FindBlock(Location{first_guest});
+    REQUIRE(placeholder != nullptr);
+    REQUIRE(placeholder->GetInstList().empty());
+    REQUIRE_FALSE(placeholder->HasTerminal());
+}
+
 TEST_CASE("function code objects publish regions through one owner",
           "[arm64][codegen][function-code-object][publication]") {
 #if defined(__aarch64__)

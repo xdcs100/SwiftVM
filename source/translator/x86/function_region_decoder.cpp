@@ -146,9 +146,17 @@ FunctionRegionDecodeResult FunctionRegionDecoder::Decode() {
         auto* block = candidate.GetBlock();
         if (block->GetInstList().empty() && !block->HasTerminal()) {
             result.hit_block_cap = true;
-            break;
+            const auto root = block->GetStartLocation().Value();
+            if (config.local_target(root) && !config.has_code(root)) {
+                result.pending_roots.push_back(root);
+            }
         }
     }
+    std::sort(result.pending_roots.begin(), result.pending_roots.end());
+    result.pending_roots.erase(
+            std::unique(result.pending_roots.begin(),
+                        result.pending_roots.end()),
+            result.pending_roots.end());
     PerfScope2 perf_ir_finalize{GetPerfStats2().ir_finalize};
     function.SetFunctionEntryProvenance(frontier.ExportProvenance());
     function.EndFunction();

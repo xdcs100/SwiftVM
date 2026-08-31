@@ -137,6 +137,55 @@ TEST_CASE("SMC invalidates every region in one function code object",
     REQUIRE_FALSE(fixture.HasNode(first_guest));
 }
 
+TEST_CASE("SMC owner retirement clears every published alias",
+          "[smc][function-code-object][indirect-l1]") {
+    using namespace swift;
+    using namespace swift::runtime;
+    using namespace swift::runtime::backend;
+    using namespace swift::runtime::ir;
+
+    SmcFixture fixture{1, true};
+    constexpr VAddr guest = 0x200;
+    constexpr VAddr alias = 0x280;
+    const auto features = ResolveFeatureSet(ModuleConfig{});
+    HIRBuilder builder{1, true, features};
+    auto* function = builder.AppendFunction(Location{guest}, Location{guest + 1});
+    const auto value =
+            function->LoadUniform<TypedValue<ValueType::U64>>(
+                    Uniform{0, ValueType::U64});
+    function->StoreUniform(Uniform{8, ValueType::U64}, value);
+    function->EndBlock(terminal::ReturnToHost{});
+    function->EndFunction();
+
+    auto* code = TranslateIR(fixture.ModulePtr(), function);
+    REQUIRE(code != nullptr);
+    REQUIRE(fixture.Space().GetLinkManager().PublishTarget(
+                    alias,
+                    code,
+                    0,
+                    {fixture.ModulePtr().get(), code}) != 0);
+    fixture.Space().PushCodeCache(Location{alias}, code);
+
+    constexpr std::size_t kInvalidBase = 0x1000'0000;
+    TranslateTable l1{8, TranslateTableHash::Direct};
+    l1.SetIndexedInvalidValue(reinterpret_cast<void*>(kInvalidBase));
+    auto token = fixture.Tracker().RegisterRuntime(l1);
+    REQUIRE(l1.Put(guest, reinterpret_cast<std::size_t>(code)));
+    REQUIRE(l1.Put(alias, reinterpret_cast<std::size_t>(code)));
+
+    REQUIRE(fixture.Tracker().RetireNode(
+            fixture.Space(), nullptr, fixture.ModulePtr(),
+            function->GetFunction()));
+    REQUIRE(l1.Lookup(guest) ==
+            kInvalidBase + l1.Hash(guest) * sizeof(TranslateEntry));
+    REQUIRE(l1.Lookup(alias) ==
+            kInvalidBase + l1.Hash(alias) * sizeof(TranslateEntry));
+    REQUIRE(fixture.Space().GetCodeCache(guest) == nullptr);
+    REQUIRE(fixture.Space().GetCodeCache(alias) == nullptr);
+    REQUIRE_FALSE(fixture.HasNode(guest));
+    fixture.Tracker().UnregisterRuntime(token);
+}
+
 TEST_CASE("SMC dependent code range invalidates its owning translation",
           "[smc][dependency]") {
     SmcFixture fixture{2};

@@ -4,6 +4,8 @@
 
 #include "function.h"
 
+#include <vector>
+
 namespace swift::runtime::ir {
 
 ir::Block* Function::EntryBlock() { return FindBlock(GetStartLocation()); }
@@ -14,15 +16,30 @@ void Function::AddBlock(ir::Block* block) {
 }
 
 bool Function::TakeBlocksFrom(Function& region) {
-    for (const auto& node : region.blocks) {
-        if (FindBlock(node.GetStartLocation())) {
+    const auto placeholder = [](const ir::Block& block) {
+        return block.GetInstList().empty() && !block.HasTerminal();
+    };
+    std::vector<ir::Block*> region_blocks;
+    for (auto& node : region.blocks) {
+        auto* block = static_cast<ir::Block*>(&node);
+        region_blocks.push_back(block);
+        auto* existing = FindBlock(node.GetStartLocation());
+        if (existing && !placeholder(*existing) && !placeholder(*block)) {
             return false;
         }
     }
-    while (!region.blocks.empty()) {
-        auto* block = static_cast<ir::Block*>(&*region.blocks.begin());
-        region.blocks.erase(*block);
-        blocks.insert(*block);
+
+    for (auto* block : region_blocks) {
+        auto* existing = FindBlock(block->GetStartLocation());
+        if (existing && placeholder(*existing) && !placeholder(*block)) {
+            region.blocks.erase(*block);
+            blocks.erase(*existing);
+            region.blocks.insert(*existing);
+            blocks.insert(*block);
+        } else if (!existing) {
+            region.blocks.erase(*block);
+            blocks.insert(*block);
+        }
     }
     return true;
 }

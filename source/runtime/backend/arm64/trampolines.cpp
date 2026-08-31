@@ -361,11 +361,13 @@ void TrampolinesArm64::BuildRuntimeEntry(MacroAssembler& assembler) {
     __ B(&go_guest);
 
     // query l2 cache
-    // An invalidated inline-L1 value enters at this label. Reload loc_reg
-    // because guest code may use the dispatcher's scratch register, then skip
-    // the L1 probe that selected the safe continuation.
+    // An invalidated inline-L1 value enters at this label. Rebuild both the
+    // target and its private-L1 slot before the L2 lookup; generated exits do
+    // not preserve the dispatcher's scratch registers.
     __ Bind(&label_indirect_l1_miss);
     __ Ldr(loc_reg, MemOperand(state, state_offset_current_loc));
+    __ Ldr(l1_cache, MemOperand(state, state_offset_indirect_l1_code_cache));
+    __ Bfi(l1_start, loc_reg, 4, L1_CODE_CACHE_BITS);
     __ Bind(&query_step_2);
     __ Lsr(loc_index, loc_reg, 2);
     __ Eor(l2_index, loc_index, Operand(loc_index, LSR, L2_CODE_CACHE_BITS));
